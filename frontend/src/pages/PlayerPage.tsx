@@ -115,7 +115,7 @@ export default function PlayerPage() {
   type Pre20Step = 'roll' | 'allocate' | 'career' | 'done';
   const [pre20Step, setPre20Step] = useState<Pre20Step>('roll');
   const [growthAlloc, setGrowthAlloc] = useState({ academic: 0, health: 0, social: 0, resource: 0 });
-  const [availableProfessions, setAvailableProfessions] = useState<AvailableProfession[]>([]);
+  const [, setAvailableProfessions] = useState<AvailableProfession[]>([]);
   const [canEducation, setCanEducation] = useState(false);
 
   const addNotification = (msg: string) => {
