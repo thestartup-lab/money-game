@@ -130,13 +130,38 @@ export default function PlayerPage() {
     });
     socketRef.current = s;
 
-    s.on('connect', () => { setConnected(true); setMyId(s.id ?? ''); });
+    s.on('connect', () => {
+      setConnected(true);
+      setMyId(s.id ?? '');
+
+      // 嘗試從 localStorage 自動重連恢復資料
+      const saved = localStorage.getItem('baisuiGame');
+      if (saved) {
+        try {
+          const { playerName: savedName, roomCode: savedRoom } = JSON.parse(saved) as { playerName: string; roomCode: string };
+          if (savedName && savedRoom) {
+            s.emit('playerRejoin', { playerName: savedName, roomCode: savedRoom });
+          }
+        } catch { /* 忽略格式錯誤 */ }
+      }
+    });
     s.on('disconnect', () => setConnected(false));
     s.on('error', (p: { message: string }) => setError(p.message));
+
+    // 重連成功
+    s.on('rejoinSuccess', () => {
+      addNotification('✅ 重連成功，已恢復遊戲資料！');
+    });
+
+    // 重連失敗（資料已過期或房間不存在）
+    s.on('rejoinFailed', () => {
+      localStorage.removeItem('baisuiGame');
+    });
+
     s.on('gameStateUpdate', (gs: GameState) => {
       setGameState(gs);
       const amIInGame = gs.players.some((p) => p.id === s.id);
-      if (gs.gamePhase === 'GameOver') setView('gameover');
+      if (gs.gamePhase === 'GameOver') { setView('gameover'); localStorage.removeItem('baisuiGame'); }
       else if (amIInGame && gs.gamePhase === 'Pre20') setView((v) => v === 'join' ? 'pre20' : v);
       else if (amIInGame && ['RatRace', 'FastTrack'].includes(gs.gamePhase)) setView((v) => (v === 'pre20' || v === 'join') ? 'game' : v);
     });
@@ -283,6 +308,8 @@ export default function PlayerPage() {
             onClick={() => {
               setError('');
               emit('playerJoin', { playerName: playerName.trim(), roomCode });
+              // 儲存到 localStorage，供斷線後重連使用
+              localStorage.setItem('baisuiGame', JSON.stringify({ playerName: playerName.trim(), roomCode }));
             }}
           >
             加入遊戲
@@ -439,19 +466,33 @@ export default function PlayerPage() {
                 </div>
               </div>
               {hasContinuedEdu ? (
-                <div className="flex items-center gap-2 bg-emerald-900 border border-emerald-700 rounded-xl px-3 py-2">
-                  <span className="text-emerald-400 font-bold">✓</span>
-                  <span className="text-emerald-300 text-sm font-semibold">已進修，高階職業已解鎖</span>
+                <div className="bg-emerald-950 border border-emerald-700 rounded-xl p-3 space-y-2">
+                  <p className="text-emerald-300 font-bold text-sm">✓ 進修完成！你從 25 歲開始職涯</p>
+                  <p className="text-xs text-gray-400">進修期間 22–25 歲，跳過第一個發薪日作為代價</p>
+                  <div className="space-y-1 pt-2 border-t border-emerald-800/60">
+                    <p className="text-xs text-white font-semibold">已解鎖高階職業（保證分配，不會抽到初階）：</p>
+                    <div className="flex items-start gap-1.5">
+                      <span className="text-xs font-bold bg-blue-700 text-white px-1.5 py-0.5 rounded-full flex-shrink-0">E</span>
+                      <p className="text-xs text-blue-200">IT工程師、醫生、店長、公職人員</p>
+                    </div>
+                    <div className="flex items-start gap-1.5">
+                      <span className="text-xs font-bold bg-purple-700 text-white px-1.5 py-0.5 rounded-full flex-shrink-0">S</span>
+                      <p className="text-xs text-purple-200">顧問、財務顧問、心理諮商師、律師（獨立）</p>
+                    </div>
+                  </div>
                 </div>
               ) : canEducation ? (
-                <button
-                  className="w-full bg-blue-700 hover:bg-blue-600 text-white font-bold py-2 rounded-xl transition-colors"
-                  onClick={() => { setError(''); emit('continueEducation'); }}
-                >
-                  選擇進修（解鎖高階職業）
-                </button>
+                <>
+                  <button
+                    className="w-full bg-blue-700 hover:bg-blue-600 text-white font-bold py-2 rounded-xl transition-colors"
+                    onClick={() => { setError(''); emit('continueEducation'); }}
+                  >
+                    選擇進修（解鎖高階職業，25歲起）
+                  </button>
+                  <p className="text-xs text-gray-500 text-center">不進修則從 22 歲開始職涯（基礎職業）</p>
+                </>
               ) : (
-                <p className="text-gray-500 text-xs text-center">此角色資格不符，無法繼續進修</p>
+                <p className="text-gray-500 text-xs text-center">此角色資格不符，無法繼續進修，從 22 歲開始職涯</p>
               )}
             </div>
 

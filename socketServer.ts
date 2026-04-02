@@ -1087,11 +1087,11 @@ io.on('connection', (socket: Socket) => {
     let pool: string[];
     if (quadrant === 'E') {
       pool = hasEdu
-        ? [...E_PROFESSION_POOLS.basic, ...E_PROFESSION_POOLS.advanced]
+        ? [...E_PROFESSION_POOLS.advanced]
         : [...E_PROFESSION_POOLS.basic];
     } else {
       pool = hasEdu
-        ? [...S_PROFESSION_POOLS.basicLow, ...S_PROFESSION_POOLS.basicMid, ...S_PROFESSION_POOLS.advanced]
+        ? [...S_PROFESSION_POOLS.advanced]
         : [...S_PROFESSION_POOLS.basicLow, ...S_PROFESSION_POOLS.basicMid];
     }
 
@@ -1869,14 +1869,26 @@ io.on('connection', (socket: Socket) => {
       console.log(`[斷線] 房間 ${roomId} 管理員離線，等待重新登入`);
     }
 
-    const wasCurrentTurn = gs.currentPlayerTurnId === socket.id;
-    gs.removePlayer(socket.id);
+    const player = gs.players.get(socket.id);
+    if (player) {
+      // 標記為斷線狀態，30 秒內可重連恢復資料
+      player.isDisconnected = true;
+      console.log(`[斷線] 玩家 ${player.name} 斷線，保留資料 30 秒等待重連`);
+      emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
 
-    if (wasCurrentTurn && gs.playerOrder.length > 0) {
-      gs.advanceToNextTurn();
+      setTimeout(() => {
+        // 30 秒後若仍是斷線狀態（未重連），才真正移除
+        if (player.isDisconnected) {
+          const wasCurrentTurn = gs.currentPlayerTurnId === socket.id;
+          gs.removePlayer(socket.id);
+          if (wasCurrentTurn && gs.playerOrder.length > 0) {
+            gs.advanceToNextTurn();
+          }
+          console.log(`[斷線] 玩家 ${player.name} 重連逾時，已移除。房間 ${roomId} 剩 ${gs.players.size} 人`);
+          emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+        }
+      }, 30000);
     }
-
-    console.log(`[斷線] 房間 ${roomId} 目前玩家數：${gs.players.size}`);
 
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
 
@@ -1889,6 +1901,53 @@ io.on('connection', (socket: Socket) => {
         }
       }, 30 * 60 * 1000);
     }
+  });
+
+  // ----------------------------------------------------------
+  // 玩家重連恢復 (playerRejoin)
+  // ----------------------------------------------------------
+  socket.on('playerRejoin', (payload: { playerName: string; roomCode: string }) => {
+    const { playerName, roomCode } = payload;
+
+    const gs = rooms.get(roomCode);
+    if (!gs) {
+      socket.emit('rejoinFailed', { message: `房間 ${roomCode} 不存在或已結束。` });
+      return;
+    }
+
+    // 在房間內尋找同名且處於斷線狀態的玩家
+    let foundPlayer: Player | undefined;
+    let oldSocketId: string | undefined;
+    for (const [sid, p] of gs.players.entries()) {
+      if (p.name === playerName && p.isDisconnected) {
+        foundPlayer = p;
+        oldSocketId = sid;
+        break;
+      }
+    }
+
+    if (!foundPlayer || !oldSocketId) {
+      socket.emit('rejoinFailed', { message: '找不到可重連的資料，請重新加入遊戲。' });
+      return;
+    }
+
+    // 將舊 socket id 的玩家資料移轉到新 socket id
+    foundPlayer.id = socket.id;
+    foundPlayer.isDisconnected = false;
+    gs.players.delete(oldSocketId);
+    gs.players.set(socket.id, foundPlayer);
+
+    // 更新回合順序中的 id
+    const orderIdx = gs.playerOrder.indexOf(oldSocketId);
+    if (orderIdx !== -1) gs.playerOrder[orderIdx] = socket.id;
+    if (gs.currentPlayerTurnId === oldSocketId) gs.currentPlayerTurnId = socket.id;
+
+    socket.join(roomCode);
+    socketRoomMap.set(socket.id, roomCode);
+
+    console.log(`[重連] 玩家 ${playerName} 重連成功，恢復至房間 ${roomCode}`);
+    socket.emit('rejoinSuccess', { playerId: socket.id });
+    emitToRoom(roomCode, 'gameStateUpdate', serializeGameState(gs));
   });
 });
 

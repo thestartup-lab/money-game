@@ -410,6 +410,8 @@ export class Player {
   actionTokensThisPayday: number;
   /** 進修代價：true 時下一個發薪日自動跳過（少一回合）。 */
   skipFirstPayday: boolean;
+  /** 玩家是否處於斷線等待重連狀態（30 秒內可重新加入恢復資料）。 */
+  isDisconnected: boolean;
   /**
    * 玩家人生事件日誌。
    * 用於遊戲結束後的決策反思分析，記錄每個關鍵決策點的前後財務狀況。
@@ -472,6 +474,7 @@ export class Player {
     this.pre20Done = false;
     this.actionTokensThisPayday = profession.hasFlexibleSchedule ? Infinity : 1;
     this.skipFirstPayday = false;
+    this.isDisconnected = false;
     this.eventLog = [];
   }
 
