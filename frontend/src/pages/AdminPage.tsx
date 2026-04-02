@@ -202,7 +202,7 @@ export default function AdminPage() {
 
       {/* QR Code 加入卡片 */}
       {(() => {
-        const playerUrl = `${window.location.protocol}//${window.location.hostname}:${window.location.port || 5173}/?room=${roomId}`;
+        const playerUrl = `${window.location.protocol}//${window.location.host}/?room=${roomId}`;
         return (
           <div className="card flex flex-col sm:flex-row items-center gap-4">
             <div className="bg-white rounded-xl p-2 flex-shrink-0">
