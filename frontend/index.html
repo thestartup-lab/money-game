@@ -1,13 +1,47 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-TW">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <title>百歲人生</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { background: #030712; color: #f3f4f6; font-family: system-ui, sans-serif; }
+      #splash {
+        position: fixed; inset: 0;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        gap: 16px; background: #030712;
+        transition: opacity 0.4s ease;
+      }
+      #splash h1 { font-size: 1.5rem; font-weight: 700; color: #34d399; letter-spacing: 0.1em; }
+      #splash p  { font-size: 0.85rem; color: #6b7280; }
+      .spinner {
+        width: 36px; height: 36px;
+        border: 3px solid #1f2937;
+        border-top-color: #34d399;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
   </head>
   <body>
+    <!-- 載入中畫面：React 接管後會自動消失 -->
+    <div id="splash">
+      <h1>百歲人生</h1>
+      <div class="spinner"></div>
+      <p>載入中…</p>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // React 渲染完成後淡出 splash
+      window.__hideSplash = function() {
+        var s = document.getElementById('splash');
+        if (s) { s.style.opacity = '0'; setTimeout(function(){ s.remove(); }, 400); }
+      };
+    </script>
   </body>
 </html>

@@ -39,7 +39,7 @@ export default function DisplayScreen() {
   const addTicker = (msg: string) => setTicker((prev) => [msg, ...prev].slice(0, 6));
 
   useEffect(() => {
-    const s = io(SERVER_URL, { transports: ['websocket'] });
+    const s = io(SERVER_URL, { transports: ['websocket', 'polling'], reconnectionAttempts: 5, reconnectionDelay: 2000 });
     socketRef.current = s;
     s.on('connect', () => setConnected(true));
     s.on('disconnect', () => setConnected(false));

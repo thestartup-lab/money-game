@@ -19,7 +19,7 @@ export function useSocket(): UseSocketReturn {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    const s = io(SERVER_URL, { transports: ['websocket'] });
+    const s = io(SERVER_URL, { transports: ['websocket', 'polling'], reconnectionAttempts: 5, reconnectionDelay: 2000 });
     socketRef.current = s;
 
     s.on('connect', () => setConnected(true));
