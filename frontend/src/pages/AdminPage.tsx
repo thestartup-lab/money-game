@@ -77,6 +77,7 @@ export default function AdminPage() {
     });
 
     s.on('roomCreated', (p: { roomId: string; message: string }) => {
+      setRoomId(p.roomId);
       addLog(`房間已建立：${p.roomId}`);
       s.emit('listRooms');
     });
