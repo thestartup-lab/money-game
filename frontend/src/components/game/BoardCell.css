@@ -1,0 +1,292 @@
+/* ============================================================
+   BoardCell.css — 蠟筆手繪風格棋盤格子
+   核心技術：
+   1. SVG feTurbulence 濾鏡模擬真實粗糙邊框
+   2. 多層 box-shadow 模擬蠟筆塗抹陰影
+   3. 內嵌 SVG noise 紙張紋理
+   4. Caveat 手寫字體
+   5. ::before 偽元素米黃色紙張薄膜
+   ============================================================ */
+
+/* ── Google Fonts：Caveat（手寫） + Noto Sans TC（中文）──── */
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Noto+Sans+TC:wght@400;700&display=swap');
+
+/* ============================================================
+   SVG 濾鏡：模擬蠟筆粗糙邊框
+   套用到 .board-cell 的 filter 屬性，讓所有直線邊框
+   都變成像蠟筆畫出的不規則波浪狀
+   ============================================================ */
+.board-cell-filter-def {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* ── 基礎格子 ─────────────────────────────────────────────── */
+.board-cell {
+  background-color: var(--cell-color, #2d1f0e);
+  border: 2.5px solid var(--cell-border, #a0856a);
+
+  /* 大幅不規則邊框：真正的「手畫」感 */
+  border-radius: 255px 8px 225px 4px / 4px 225px 8px 255px;
+
+  /* 紙張/水彩紋理：多層疊加 */
+  background-image:
+    /* 細顆粒噪點（紙張纖維感） */
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='grain'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 1  0 0 0 0 0.9  0 0 0 0 0.7  0 0 0 0.07 0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23grain)'/%3E%3C/svg%3E"),
+    /* 水彩暈染效果 */
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Cfilter id='w'%3E%3CfeTurbulence type='turbulence' baseFrequency='0.02' numOctaves='2'/%3E%3CfeDisplacementMap in='SourceGraphic' scale='3'/%3E%3C/filter%3E%3Crect width='60' height='60' filter='url(%23w)' opacity='0.05' fill='white'/%3E%3C/svg%3E");
+  background-blend-mode: overlay, soft-light;
+  background-size: 180px 180px, 60px 60px;
+
+  /* 蠟筆塗抹陰影：多層偏移模擬手塗筆跡 */
+  box-shadow:
+    3px 4px 0 -1px rgba(0, 0, 0, 0.55),   /* 主體偏移陰影 */
+    5px 6px 0 -2px rgba(0, 0, 0, 0.25),   /* 較深層偏移 */
+    1px 1px 0  0    rgba(0, 0, 0, 0.4),   /* 近距筆跡 */
+    inset 1px 1px 0 rgba(255,255,255,0.08), /* 左上亮邊 */
+    inset 0 0 16px rgba(0, 0, 0, 0.25);   /* 內部暗角（水彩乾燥感）*/
+
+  /* SVG 粗糙濾鏡：讓直線邊框扭曲成手繪波浪 */
+  filter: url(#rough-border);
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  overflow: visible; /* 讓粗糙邊框效果不被裁切 */
+  padding: 3px 2px 2px;
+  cursor: default;
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1),
+              box-shadow 0.18s ease;
+
+  font-family: 'Caveat', 'Noto Sans TC', cursive, sans-serif;
+}
+
+/* ── 紙張薄膜（米白色泛黃感）────────────────────────────── */
+.board-cell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  /* 米黃色漸層薄膜，模擬紙張微微泛黃 */
+  background: linear-gradient(
+    135deg,
+    rgba(255, 248, 220, 0.09) 0%,
+    rgba(255, 240, 180, 0.05) 50%,
+    rgba(200, 170, 100, 0.04) 100%
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── 蠟筆邊框高光（內邊緣亮線，模擬蠟筆下壓痕跡）────────── */
+.board-cell::after {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── 子元素高於偽元素 ────────────────────────────────────── */
+.board-cell > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── 格號（左上角，Caveat 手寫體）──────────────────────────── */
+.cell-index {
+  font-family: 'Caveat', cursive;
+  font-size: 7px;
+  font-weight: 500;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.25);
+  align-self: flex-start;
+  /* 手寫感：微傾斜 */
+  transform: rotate(-2deg) translateX(-1px);
+}
+
+/* ── 格子主體（emoji + 名稱）────────────────────────────────── */
+.cell-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  flex: 1;
+  justify-content: center;
+}
+
+.cell-icon {
+  font-size: 15px;
+  line-height: 1;
+  /* 手繪感：投影讓 emoji 像貼紙一樣立體 */
+  filter: drop-shadow(1px 2px 0 rgba(0, 0, 0, 0.45));
+}
+
+.cell-name {
+  font-family: 'Caveat', cursive;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1.15;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.92);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  /* 手寫感：交替微傾斜 */
+  transform: rotate(-1deg);
+  text-shadow:
+    1px 1px 0 rgba(0, 0, 0, 0.6),
+    0 0 4px rgba(0, 0, 0, 0.3);
+}
+
+/* ── 玩家代幣區 ──────────────────────────────────────────────── */
+.cell-players {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1px;
+  width: 100%;
+  min-height: 14px;
+}
+
+.player-token {
+  width: 14px;
+  height: 14px;
+  /* 蠟筆圓點感：不完整圓形 */
+  border-radius: 50% 45% 50% 48% / 48% 50% 45% 50%;
+  font-family: 'Caveat', cursive;
+  font-size: 7px;
+  font-weight: 700;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  /* 蠟筆塗抹感陰影 */
+  box-shadow:
+    1px 2px 0 rgba(0, 0, 0, 0.5),
+    2px 3px 4px rgba(0, 0, 0, 0.3);
+  transition: transform 0.12s ease;
+}
+
+.player-token.is-me {
+  /* 鉛筆圈選效果 */
+  outline: 2px dashed rgba(255, 255, 255, 0.85);
+  outline-offset: 1px;
+  transform: scale(1.15) rotate(3deg);
+}
+
+.player-token.bedridden {
+  opacity: 0.4;
+  filter: grayscale(0.7);
+  transform: rotate(90deg); /* 臥倒感 */
+}
+
+.player-overflow {
+  font-family: 'Caveat', cursive;
+  font-size: 7px;
+  color: rgba(255, 255, 255, 0.5);
+  align-self: center;
+}
+
+/* ── active 狀態：鉛筆虛線圈選 + 微翹起 ────────────────────── */
+.board-cell.active {
+  /* 點線框模擬鉛筆快速圈選筆觸 */
+  outline: 2.5px dashed rgba(255, 255, 255, 0.88);
+  outline-offset: 3px;
+  box-shadow:
+    3px 4px 0 -1px rgba(0, 0, 0, 0.55),
+    5px 6px 0 -2px rgba(0, 0, 0, 0.25),
+    0 0 0 3px rgba(255, 255, 255, 0.08),
+    0 0 18px rgba(255, 255, 255, 0.12),
+    inset 0 0 16px rgba(0, 0, 0, 0.25);
+  transform: scale(1.05) rotate(0.5deg);
+  z-index: 5;
+}
+
+/* ── 外圈格子（FastTrack，金色調蠟筆） ──────────────────── */
+.board-cell.outer {
+  /* 外圈更誇張的不規則邊框 */
+  border-radius: 8px 200px 5px 220px / 220px 5px 200px 8px;
+  border-width: 3px;
+
+  /* 金色蠟筆陰影 */
+  box-shadow:
+    3px 4px 0 -1px rgba(0, 0, 0, 0.65),
+    5px 7px 0 -2px rgba(0, 0, 0, 0.3),
+    1px 1px 0  0    rgba(0, 0, 0, 0.5),
+    0 0 10px rgba(251, 191, 36, 0.18),
+    inset 0 0 14px rgba(0, 0, 0, 0.3);
+
+  /* 外圈整體金色調 */
+  filter: url(#rough-border) sepia(0.12) brightness(1.1);
+}
+
+.board-cell.outer .cell-icon { font-size: 17px; }
+.board-cell.outer .cell-name { font-size: 8.5px; }
+
+/* ── 特定格型 ─────────────────────────────────────────────── */
+
+/* 發薪日：翠綠水彩暈染 */
+.board-cell.payday,
+.board-cell.ftPayday {
+  box-shadow:
+    3px 4px 0 -1px rgba(0, 0, 0, 0.55),
+    5px 6px 0 -2px rgba(0, 0, 0, 0.25),
+    1px 1px 0  0    rgba(0, 0, 0, 0.4),
+    0 0 14px rgba(16, 185, 129, 0.3),
+    inset 0 0 16px rgba(0, 0, 0, 0.2);
+}
+
+/* 危機：脈動紅色蠟筆塗抹 */
+.board-cell.crisis,
+.board-cell.ftCrisis {
+  animation: crayon-pulse 2.8s ease-in-out infinite;
+}
+
+@keyframes crayon-pulse {
+  0%, 100% {
+    box-shadow:
+      3px 4px 0 -1px rgba(0,0,0,0.55),
+      5px 6px 0 -2px rgba(0,0,0,0.25),
+      0 0 5px rgba(239,68,68,0.2),
+      inset 0 0 16px rgba(0,0,0,0.25);
+  }
+  50% {
+    box-shadow:
+      3px 4px 0 -1px rgba(0,0,0,0.55),
+      5px 6px 0 -2px rgba(0,0,0,0.25),
+      0 0 16px rgba(239,68,68,0.5),
+      inset 0 0 16px rgba(0,0,0,0.25);
+  }
+}
+
+/* 傳承決策：暖金色蠟筆光暈 */
+.board-cell.ftInherit {
+  box-shadow:
+    3px 4px 0 -1px rgba(0, 0, 0, 0.55),
+    5px 6px 0 -2px rgba(0, 0, 0, 0.25),
+    0 0 18px rgba(251, 191, 36, 0.45),
+    inset 0 0 14px rgba(0, 0, 0, 0.25);
+}
+
+/* ── hover：格子稍微翹起 ────────────────────────────────────── */
+.board-cell:hover {
+  transform: translateY(-2px) rotate(0.3deg);
+  box-shadow:
+    4px 6px 0 -1px rgba(0, 0, 0, 0.5),
+    6px 8px 8px rgba(0, 0, 0, 0.3),
+    inset 0 0 16px rgba(0, 0, 0, 0.2);
+}
+
+.board-cell.active:hover {
+  transform: scale(1.05) translateY(-2px) rotate(0.5deg);
+}

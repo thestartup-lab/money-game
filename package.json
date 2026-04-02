@@ -1,0 +1,22 @@
+{
+  "name": "money-game-server",
+  "version": "1.0.0",
+  "description": "財富流多人線下工作坊遊戲 - 後端伺服器",
+  "main": "dist/socketServer.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/socketServer.js",
+    "dev": "ts-node --watch socketServer.ts"
+  },
+  "dependencies": {
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}

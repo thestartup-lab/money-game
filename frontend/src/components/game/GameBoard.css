@@ -1,0 +1,285 @@
+/* ============================================================
+   GameBoard.css — 手繪蠟筆風格棋盤佈局
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Noto+Sans+TC:wght@400;700&display=swap');
+
+/* ============================================================
+   全局 SVG 濾鏡定義
+   rough-border: 讓所有格子邊框扭曲成蠟筆手畫感
+   將此隱藏元素插入 body，CSS filter: url(#rough-border) 即可引用
+   ============================================================ */
+
+/* ── 捲動容器 ─────────────────────────────────────────────── */
+.gameboard-scroll {
+  width: 100%;
+  overflow: auto;
+  padding: 12px 4px;
+  -webkit-overflow-scrolling: touch;
+  font-family: 'Caveat', 'Noto Sans TC', cursive, sans-serif;
+}
+
+/* ── 主包裝 ─────────────────────────────────────────────── */
+.gameboard-wrapper {
+  position: relative;
+  width: calc(var(--inner-board, 308px) + var(--outer-cell, 52px) * 2 + 16px);
+  height: calc(var(--inner-board, 308px) + var(--outer-cell, 52px) * 2 + 16px);
+  margin: 0 auto;
+
+  /* 手繪地圖背景：溫暖羊皮紙色 + 水彩暈染 */
+  background-color: #1a1208;
+  background-image:
+    /* 中央暈染（燈光感） */
+    radial-gradient(ellipse at 50% 50%, rgba(180, 130, 40, 0.07) 0%, transparent 65%),
+    /* 左上角水彩暈 */
+    radial-gradient(ellipse at 10% 10%, rgba(100, 60, 10, 0.12) 0%, transparent 50%),
+    /* 右下角水彩暈 */
+    radial-gradient(ellipse at 90% 90%, rgba(20, 50, 80, 0.1) 0%, transparent 50%),
+    /* 紙張顆粒紋理 */
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0.7  0 0 0 0 0.55  0 0 0 0 0.3  0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23p)'/%3E%3C/svg%3E");
+  background-size: cover, cover, cover, 200px 200px;
+  background-blend-mode: normal, normal, normal, overlay;
+
+  /* 手繪不規則外框 */
+  border-radius: 12px 4px 14px 3px / 3px 14px 4px 12px;
+  border: 3px solid rgba(150, 100, 30, 0.45);
+
+  /* 蠟筆書本翻開的陰影 */
+  box-shadow:
+    6px 8px 0 -2px rgba(0, 0, 0, 0.55),
+    10px 12px 0 -4px rgba(0, 0, 0, 0.25),
+    0 0 0 1px rgba(255, 220, 100, 0.06),
+    0 12px 40px rgba(0, 0, 0, 0.7);
+}
+
+/* 棋盤背景：手繪筆記本格線 */
+.gameboard-wrapper::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  /* 淡淡的格線，像方格紙底紋 */
+  background-image:
+    linear-gradient(rgba(255, 220, 100, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 220, 100, 0.025) 1px, transparent 1px);
+  background-size: 24px 24px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 棋盤角落裝飾：蠟筆塗抹感暗角 */
+.gameboard-wrapper::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(ellipse at 0% 0%,   rgba(0,0,0,0.35) 0%, transparent 35%),
+    radial-gradient(ellipse at 100% 0%,  rgba(0,0,0,0.28) 0%, transparent 35%),
+    radial-gradient(ellipse at 0% 100%,  rgba(0,0,0,0.28) 0%, transparent 35%),
+    radial-gradient(ellipse at 100% 100%,rgba(0,0,0,0.35) 0%, transparent 35%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── 外圈格子定位容器 ─────────────────────────────────────── */
+.outer-cell-wrapper {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+}
+
+/* ── FastTrack 標籤 ──────────────────────────────────────── */
+.ft-label {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-family: 'Caveat', cursive;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(251, 191, 36, 0.75);
+  /* 手寫感：微傾斜 */
+  transform: rotate(-2deg);
+  text-shadow:
+    1px 1px 0 rgba(0, 0, 0, 0.6),
+    0 0 8px rgba(251, 191, 36, 0.3);
+  pointer-events: none;
+  z-index: 10;
+  letter-spacing: 0.08em;
+}
+
+/* ── 內圈：置中於 wrapper ─────────────────────────────────── */
+.inner-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+}
+
+/* ── 中央資訊面板：泛黃筆記紙質感 ─────────────────────────── */
+.board-center {
+  /* 舊筆記紙底色 */
+  background-color: #2a1e0c;
+  background-image:
+    /* 格線紙底紋 */
+    repeating-linear-gradient(
+      transparent,
+      transparent 11px,
+      rgba(180, 140, 60, 0.12) 11px,
+      rgba(180, 140, 60, 0.12) 12px
+    ),
+    /* 紙張顆粒 */
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='note'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 1  0 0 0 0 0.85  0 0 0 0 0.5  0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23note)'/%3E%3C/svg%3E");
+  background-size: auto, 120px 120px;
+
+  /* 手繪筆記紙邊框 */
+  border: 2px solid rgba(180, 140, 60, 0.35);
+  border-radius: 6px 2px 8px 3px / 3px 8px 2px 6px;
+
+  /* 泛黃紙張陰影 */
+  box-shadow:
+    inset 2px 2px 8px rgba(0, 0, 0, 0.4),
+    inset -1px -1px 4px rgba(0, 0, 0, 0.2),
+    1px 2px 0 rgba(0, 0, 0, 0.3);
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 7px 5px 5px;
+  gap: 3px;
+  overflow: hidden;
+}
+
+/* 筆記紙左側紅邊線（像活頁紙）*/
+.board-center::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(200, 80, 80, 0.25);
+  pointer-events: none;
+}
+
+/* ── 遊戲標題 ─────────────────────────────────────────────── */
+.center-title {
+  font-family: 'Caveat', cursive;
+  font-size: 13px;
+  font-weight: 700;
+  color: #a8d89a;
+  letter-spacing: 0.15em;
+  margin: 0 0 2px 0;
+  /* 手寫感：微傾斜 + 下壓感陰影 */
+  transform: rotate(-1.5deg);
+  text-shadow:
+    1px 2px 0 rgba(0, 0, 0, 0.6),
+    0 0 10px rgba(120, 200, 100, 0.3);
+}
+
+/* ── 圖例 ─────────────────────────────────────────────────── */
+.center-legend {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px 8px;
+  width: 100%;
+  padding: 0 2px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.legend-icon {
+  font-size: 9px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.legend-text {
+  font-family: 'Caveat', cursive;
+  font-size: 8.5px;
+  font-weight: 500;
+  color: rgba(200, 175, 120, 0.85);
+  white-space: nowrap;
+  /* 手寫感微傾斜 */
+  transform: rotate(-0.5deg);
+}
+
+/* ── 玩家清單 ─────────────────────────────────────────────── */
+.center-players {
+  width: 100%;
+  /* 活頁紙分隔線 */
+  border-top: 1px dashed rgba(180, 140, 60, 0.3);
+  padding-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.center-player {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  /* 每行像寫在格線紙上，微傾斜交替 */
+  transform: rotate(-0.3deg);
+}
+
+.center-player:nth-child(even) {
+  transform: rotate(0.3deg);
+}
+
+.center-dot {
+  width: 9px;
+  height: 9px;
+  /* 蠟筆圓點：不完整圓形 */
+  border-radius: 50% 45% 52% 48% / 48% 52% 45% 50%;
+  flex-shrink: 0;
+  box-shadow:
+    1px 1px 0 rgba(0, 0, 0, 0.5),
+    2px 2px 3px rgba(0, 0, 0, 0.3);
+}
+
+.center-dot.is-me {
+  /* 鉛筆虛線圈選 */
+  outline: 1.5px dashed rgba(255, 255, 255, 0.8);
+  outline-offset: 1px;
+}
+
+.center-name {
+  font-family: 'Caveat', cursive;
+  font-size: 8.5px;
+  font-weight: 500;
+  color: rgba(200, 175, 120, 0.8);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* 鋼筆書寫陰影 */
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.5);
+}
+
+.center-player.is-me .center-name {
+  color: #e8d5a0;
+  font-weight: 700;
+  font-size: 9px;
+}
+
+.center-pos {
+  font-family: 'Caveat', cursive;
+  font-size: 7px;
+  font-weight: 500;
+  color: rgba(140, 110, 60, 0.8);
+  flex-shrink: 0;
+  transform: rotate(1deg);
+}
+
+/* ── 響應式 ──────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .gameboard-scroll {
+    padding: 8px 0;
+  }
+}

@@ -1,0 +1,12 @@
+# 編譯產物（Railway 自行編譯，不需提交）
+dist/
+
+# 依賴套件
+node_modules/
+
+# 環境變數
+.env
+.env.local
+
+# 系統檔
+.DS_Store
