@@ -32,6 +32,7 @@ interface StatsEdit {
 
 export default function AdminPage() {
   const socketRef = useRef<Socket | null>(null);
+  const pendingLoginPasswordRef = useRef<string>(''); // 建立房間後自動登入用
   const [connected, setConnected] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
   const [roomId, setRoomId] = useState('');
@@ -80,6 +81,11 @@ export default function AdminPage() {
       setRoomId(p.roomId);
       addLog(`房間已建立：${p.roomId}`);
       s.emit('listRooms');
+      // 建立房間後自動用正確的 roomId 登入
+      if (pendingLoginPasswordRef.current) {
+        s.emit('adminLogin', { password: pendingLoginPasswordRef.current, roomId: p.roomId });
+        pendingLoginPasswordRef.current = '';
+      }
     });
     s.on('roomsList', (p: { rooms: AdminRoom[] }) => setRoomList(p.rooms));
 
@@ -134,13 +140,9 @@ export default function AdminPage() {
               if (loginRoomId) {
                 emit('adminLogin', { password, roomId: loginRoomId });
               } else {
-                // Create new room, then login
+                // 先儲存密碼，roomCreated 回來後自動帶 roomId 登入
+                pendingLoginPasswordRef.current = password;
                 emit('createRoom', { password });
-                // Will receive roomCreated → listRooms; then login after delay
-                const tryLogin = setTimeout(() => {
-                  emit('adminLogin', { password });
-                }, 600);
-                return () => clearTimeout(tryLogin);
               }
             }}
           >
