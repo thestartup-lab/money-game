@@ -400,6 +400,7 @@ io.on('connection', (socket: Socket) => {
    *
    * 玩家透過主持人分享的 roomCode 加入對應房間。
    * roomCode 是建立房間時回傳的 6 字元代碼。
+   * 若房間內已有同名玩家且處於斷線等待狀態，自動恢復該玩家資料。
    */
   socket.on(
     'playerJoin',
@@ -417,6 +418,46 @@ io.on('connection', (socket: Socket) => {
         return;
       }
 
+      // ── 同名玩家重連恢復 ──────────────────────────────────────
+      // 找房間內同名且斷線等待中的玩家
+      let existingPlayer: Player | undefined;
+      let existingSocketId: string | undefined;
+      for (const [sid, p] of gs.players.entries()) {
+        if (p.name === playerName) {
+          if (p.isDisconnected) {
+            // 斷線等待中 → 恢復資料
+            existingPlayer = p;
+            existingSocketId = sid;
+          } else {
+            // 同名玩家仍在線 → 拒絕加入
+            socket.emit('error', { message: `「${playerName}」已在此房間中，請換個名字。` });
+            return;
+          }
+          break;
+        }
+      }
+
+      if (existingPlayer && existingSocketId) {
+        // 將舊 socket id 的玩家資料移轉到新 socket id
+        existingPlayer.id = socket.id;
+        existingPlayer.isDisconnected = false;
+        gs.players.delete(existingSocketId);
+        gs.players.set(socket.id, existingPlayer);
+
+        const orderIdx = gs.playerOrder.indexOf(existingSocketId);
+        if (orderIdx !== -1) gs.playerOrder[orderIdx] = socket.id;
+        if (gs.currentPlayerTurnId === existingSocketId) gs.currentPlayerTurnId = socket.id;
+
+        socket.join(roomCode);
+        socketRoomMap.set(socket.id, roomCode);
+
+        console.log(`[playerJoin] ${playerName} 同名重連，恢復至房間 ${roomCode}`);
+        socket.emit('rejoinSuccess', { playerId: socket.id });
+        emitToRoom(roomCode, 'gameStateUpdate', serializeGameState(gs));
+        return;
+      }
+
+      // ── 全新玩家加入 ──────────────────────────────────────────
       // 加入 Socket.io 房間與映射表
       socket.join(roomCode);
       socketRoomMap.set(socket.id, roomCode);
@@ -1871,13 +1912,13 @@ io.on('connection', (socket: Socket) => {
 
     const player = gs.players.get(socket.id);
     if (player) {
-      // 標記為斷線狀態，30 秒內可重連恢復資料
+      // 標記為斷線狀態，10 分鐘內可重連恢復資料
       player.isDisconnected = true;
-      console.log(`[斷線] 玩家 ${player.name} 斷線，保留資料 30 秒等待重連`);
+      console.log(`[斷線] 玩家 ${player.name} 斷線，保留資料 10 分鐘等待重連`);
       emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
 
       setTimeout(() => {
-        // 30 秒後若仍是斷線狀態（未重連），才真正移除
+        // 10 分鐘後若仍是斷線狀態（未重連），才真正移除
         if (player.isDisconnected) {
           const wasCurrentTurn = gs.currentPlayerTurnId === socket.id;
           gs.removePlayer(socket.id);
@@ -1887,7 +1928,7 @@ io.on('connection', (socket: Socket) => {
           console.log(`[斷線] 玩家 ${player.name} 重連逾時，已移除。房間 ${roomId} 剩 ${gs.players.size} 人`);
           emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
         }
-      }, 30000);
+      }, 10 * 60 * 1000);
     }
 
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
