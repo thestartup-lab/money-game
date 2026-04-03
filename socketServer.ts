@@ -401,7 +401,7 @@ io.on('connection', (socket: Socket) => {
     socket.join(targetRoomId);
     socketRoomMap.set(socket.id, targetRoomId);
     socket.emit('joinDisplaySuccess', { roomId: targetRoomId });
-    socket.emit('gameStateUpdate', gs.toJSON());
+    socket.emit('gameStateUpdate', serializeGameState(gs));
     console.log(`[joinDisplay] 展示頁加入房間 ${targetRoomId}：${socket.id}`);
   });
 
