@@ -385,6 +385,27 @@ io.on('connection', (socket: Socket) => {
   });
 
   // ----------------------------------------------------------
+  // 展示頁加入觀看 (joinDisplay) — 不需密碼，只讀取遊戲狀態
+  // ----------------------------------------------------------
+  socket.on('joinDisplay', (payload: { roomId: string }) => {
+    const targetRoomId = payload?.roomId?.trim().toUpperCase();
+    if (!targetRoomId) {
+      socket.emit('joinDisplayFail', { message: '請輸入房間代碼。' });
+      return;
+    }
+    const gs = rooms.get(targetRoomId);
+    if (!gs) {
+      socket.emit('joinDisplayFail', { message: `房間「${targetRoomId}」不存在，請確認代碼。` });
+      return;
+    }
+    socket.join(targetRoomId);
+    socketRoomMap.set(socket.id, targetRoomId);
+    socket.emit('joinDisplaySuccess', { roomId: targetRoomId });
+    socket.emit('gameStateUpdate', gs.toJSON());
+    console.log(`[joinDisplay] 展示頁加入房間 ${targetRoomId}：${socket.id}`);
+  });
+
+  // ----------------------------------------------------------
   // 查詢可加入的房間列表 (listRooms)
   // ----------------------------------------------------------
   /**
