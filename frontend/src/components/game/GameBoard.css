@@ -15,7 +15,7 @@
 /* ── 主棋盤容器（底圖）─────────────────────────────────────── */
 .gameboard-wrapper {
   position: relative;
-  width: 100%;
+  width: min(100%, 75vh);
   aspect-ratio: 1 / 1;
   margin: 0 auto;
 
