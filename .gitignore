@@ -10,3 +10,5 @@ node_modules/
 
 # 系統檔
 .DS_Store
+.vercel
+.env*.local
