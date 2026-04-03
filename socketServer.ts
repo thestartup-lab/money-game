@@ -276,13 +276,24 @@ io.on('connection', (socket: Socket) => {
    * 建立新的獨立遊戲房間，回傳給主持人的 joinCode 供玩家加入使用。
    * 同一主持人可建立多個房間（多開場次）。
    */
-  socket.on('createRoom', (payload: { password: string }) => {
+  socket.on('createRoom', (payload: { password: string; roomId?: string }) => {
     if (payload?.password !== ADMIN_PASSWORD) {
       socket.emit('error', { message: '密碼錯誤，無法建立房間。' });
       return;
     }
 
-    const roomCode = generateRoomCode();
+    const customCode = payload.roomId?.trim().toUpperCase();
+    if (customCode) {
+      if (rooms.has(customCode)) {
+        socket.emit('error', { message: `房間代碼「${customCode}」已存在，請換一個。` });
+        return;
+      }
+      if (!/^[A-Z0-9]{4,6}$/.test(customCode)) {
+        socket.emit('error', { message: '房間代碼只能包含英文字母與數字，長度 4–6 碼。' });
+        return;
+      }
+    }
+    const roomCode = customCode || generateRoomCode();
     const gs = new GameState(roomCode);
     gs.adminSocketId = socket.id;
     rooms.set(roomCode, gs);
