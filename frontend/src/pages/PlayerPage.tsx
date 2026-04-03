@@ -656,6 +656,41 @@ export default function PlayerPage() {
           </div>
         )}
 
+        {/* 幸福指數即時目標提示 */}
+        {!isGameOver && (() => {
+          const cf = myPlayer.monthlyCashflow;
+          const exp = myPlayer.totalExpenses;
+          const hp = myPlayer.stats.health;
+          const nt = myPlayer.stats.network;
+          const travels = myPlayer.visitedDestinations?.length ?? 0;
+          let hint = '';
+          let hintColor = 'text-emerald-300';
+          if (hp < 40) {
+            hint = '❤️ 健康警告！少旅遊多休養，維護生命體驗指數';
+            hintColor = 'text-red-400';
+          } else if (cf < 0) {
+            hint = '📉 現金流為負，賣掉負現金流資產讓錢幫你工作';
+            hintColor = 'text-red-400';
+          } else if (!myPlayer.isMarried && nt < 3) {
+            hint = '🤝 NT 人脈偏低，多社交事件可提升人際關係指數';
+            hintColor = 'text-pink-400';
+          } else if (cf < 500) {
+            hint = '💡 持續投資小交易，增加被動收入提升人生成就指數';
+            hintColor = 'text-yellow-400';
+          } else if (travels < 3) {
+            hint = '✈️ 多出去走走！旅遊可提升生命體驗指數';
+            hintColor = 'text-teal-400';
+          } else if (cf >= exp && !myPlayer.isInFastTrack) {
+            hint = '🚀 被動收入已超越支出，快準備脫出老鼠賽跑！';
+            hintColor = 'text-emerald-400';
+          }
+          return hint ? (
+            <div className={`text-xs px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 ${hintColor}`}>
+              {hint}
+            </div>
+          ) : null;
+        })()}
+
         {/* 遊戲結束橫幅 */}
         {isGameOver && (
           <div className="card bg-purple-900 border-purple-700 text-center">

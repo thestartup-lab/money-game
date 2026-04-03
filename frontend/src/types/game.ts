@@ -143,14 +143,22 @@ export interface GameState {
 }
 
 export interface LifeScoreBreakdown {
-  netWorth: number;
-  passiveIncome: number;
-  financialHealth: number;
-  family: number;
-  lifeExperience: number;
-  hp: number;
-  legacyScore: number;
-  total: number;
+  // 7 維度原始分（0–100，供雷達圖）
+  netWorth:            number;
+  passiveIncome:       number;
+  lifeExperience:      number;
+  hp:                  number;
+  financialHealth:     number;
+  family:              number;
+  legacyScore:         number;
+  // 3 大幸福指數（0–100）
+  lifeExperienceIndex: number;
+  achievementIndex:    number;
+  relationshipIndex:   number;
+  // 總分與評等
+  total:               number;
+  grade:               string;
+  achievements:        string[];
 }
 
 export interface PlayerAnalysis {

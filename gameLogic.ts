@@ -12,7 +12,7 @@ import {
   LIFE_STAGE_AGE_RANGES, SALARY_MULT_BY_STAGE,
   FAST_TRACK_ASSET_APPRECIATION_RATE,
   FAST_TRACK_TRACK_SIZE, FAST_TRACK_PAYDAY_BONUS_RATE,
-  LIFE_SCORE_WEIGHTS, GAME_END_AGE, GAME_START_AGE,
+  GAME_END_AGE, GAME_START_AGE,
   BEDRIDDEN_DEATH_PROBABILITY,
   TRAVEL_COST, TRAVEL_SALARY_PENALTY,
   HP_ACTIVITY_THRESHOLDS,
@@ -787,14 +787,22 @@ export function applyFastTrackPaydayBonus(player: Player): number {
 // ============================================================
 
 export interface LifeScoreBreakdown {
-  netWorthScore:       number;
-  passiveIncomeScore:  number;
-  lifeExperienceScore: number;
-  healthScore:         number;
-  familyScore:         number;
-  ageScore:            number;
+  // 7 維度原始分（0–100，供雷達圖使用）
+  netWorth:            number;
+  passiveIncome:       number;
+  lifeExperience:      number;
+  hp:                  number;
+  financialHealth:     number;  // 壽命（ageScore）
+  family:              number;
   legacyScore:         number;
+  // 3 大幸福指數（0–100）
+  lifeExperienceIndex: number;  // 生命體驗指數（體驗+健康+壽命）
+  achievementIndex:    number;  // 人生成就指數（資產+被動收入+傳承）
+  relationshipIndex:   number;  // 人際關係指數（家庭+人脈NT）
+  // 幸福總分與等級
   total:               number;
+  grade:               string;
+  achievements:        string[];
 }
 
 /**
@@ -815,8 +823,6 @@ export interface LifeScoreBreakdown {
  * @param deathAge 玩家死亡或遊戲結束時的年齡
  */
 export function calculateLifeScore(player: Player, deathAge: number): LifeScoreBreakdown {
-  const w = LIFE_SCORE_WEIGHTS;
-
   const totalDebt = player.liabilities.reduce((s, l) => s + l.totalDebt, 0);
   const totalAssetValue = player.assets.reduce((s, a) => s + a.currentValue, 0);
   const netWorth = totalAssetValue - totalDebt;
@@ -824,7 +830,6 @@ export function calculateLifeScore(player: Player, deathAge: number): LifeScoreB
   // 傳承分：死後淨遺產（壽險可抵消負債）
   let netEstate: number;
   if (player.insurance.hasLifeInsurance) {
-    // 壽險理賠：負債視為清償，遺產 = 資產市值 + 現金
     netEstate = totalAssetValue + player.cash;
   } else {
     netEstate = totalAssetValue + player.cash - totalDebt;
@@ -832,40 +837,78 @@ export function calculateLifeScore(player: Player, deathAge: number): LifeScoreB
 
   let legacyRaw: number;
   if (player.numberOfChildren === 0) {
-    legacyRaw = 50;   // 無後代：中性分
+    legacyRaw = 50;
   } else {
     legacyRaw = Math.min(100, Math.max(0, (netEstate / LEGACY_FULL_SCORE_AMOUNT) * 100));
   }
 
-  // 各維度標準化（0–100 尺度）
-  const netWorthScore       = Math.min(100, Math.max(0, netWorth / 1000));          // 每 $1,000 = 1 分，上限 100
-  const passiveIncomeScore  = Math.min(100, (player.totalPassiveIncome * 12) / 500); // 年化 $50,000 = 100 分
-  const lifeExperienceScore = Math.min(100, player.lifeExperience / 2);              // 200 體驗值 = 100 分
-  const healthScore         = player.stats.health;                                   // 直接用 0–100
-  const familyScore         = Math.min(100,
-    (player.isMarried ? 25 : 0) + player.numberOfChildren * 15
-  );
-  const ageScore            = Math.min(100, ((deathAge - GAME_START_AGE) / (GAME_END_AGE - GAME_START_AGE)) * 100);
-  const legacyScore         = legacyRaw;
+  // ── 7 維度原始分（0–100）──
+  const netWorth_raw        = Math.min(100, Math.max(0, netWorth / 1000));
+  const passiveIncome_raw   = Math.min(100, (player.totalPassiveIncome * 12) / 500);
+  const lifeExperience_raw  = Math.min(100, player.lifeExperience / 2);
+  const hp_raw              = player.stats.health;
+  const ageScore_raw        = Math.min(100, ((deathAge - GAME_START_AGE) / (GAME_END_AGE - GAME_START_AGE)) * 100);
+  const family_raw          = Math.min(100, (player.isMarried ? 25 : 0) + player.numberOfChildren * 15);
+  const nt_raw              = Math.min(100, player.stats.network * 10);
 
-  const total =
-    netWorthScore       * w.netWorth       +
-    passiveIncomeScore  * w.passiveIncome  +
-    lifeExperienceScore * w.lifeExperience +
-    healthScore         * w.health         +
-    familyScore         * w.familyBonus    +
-    ageScore            * w.ageBonus       +
-    legacyScore         * w.legacyScore;
+  // ── 3 大幸福指數（0–100）──
+  const lifeExperienceIndex = Math.round(
+    lifeExperience_raw * 0.4 +
+    hp_raw             * 0.4 +
+    ageScore_raw       * 0.2
+  );
+  const achievementIndex = Math.round(
+    netWorth_raw      * 0.35 +
+    passiveIncome_raw * 0.35 +
+    legacyRaw         * 0.30
+  );
+  const relationshipIndex = Math.round(
+    family_raw * 0.5 +
+    nt_raw     * 0.5
+  );
+
+  // ── 幸福總分（加權合算）──
+  const total = Math.round(
+    lifeExperienceIndex * 0.40 +
+    achievementIndex    * 0.30 +
+    relationshipIndex   * 0.30
+  );
+
+  // ── 等級評定 ──
+  let grade: string;
+  if (total >= 85)      grade = 'S';
+  else if (total >= 70) grade = 'A';
+  else if (total >= 55) grade = 'B';
+  else if (total >= 40) grade = 'C';
+  else                  grade = 'D';
+
+  // ── 10 個人生成就徽章 ──
+  const achievements: string[] = [];
+  if (player.isInFastTrack)                          achievements.push('財務自由');
+  if (deathAge >= 99)                                achievements.push('百歲人瑞');
+  if ((player.visitedDestinations?.length ?? 0) >= 5) achievements.push('世界旅人');
+  if (player.isMarried && player.numberOfChildren >= 2) achievements.push('家庭至上');
+  if (player.stats.health >= 80)                     achievements.push('鐵打身體');
+  if (netWorth >= 50000)                             achievements.push('智慧投資');
+  if (player.totalPassiveIncome >= 3000)             achievements.push('被動收入王');
+  if (totalDebt === 0)                               achievements.push('無債一身輕');
+  if (netEstate >= 100000)                           achievements.push('傳承者');
+  if (player.stats.network >= 8)                     achievements.push('人脈大師');
 
   return {
-    netWorthScore:       Math.round(netWorthScore * w.netWorth),
-    passiveIncomeScore:  Math.round(passiveIncomeScore * w.passiveIncome),
-    lifeExperienceScore: Math.round(lifeExperienceScore * w.lifeExperience),
-    healthScore:         Math.round(healthScore * w.health),
-    familyScore:         Math.round(familyScore * w.familyBonus),
-    ageScore:            Math.round(ageScore * w.ageBonus),
-    legacyScore:         Math.round(legacyScore * w.legacyScore),
-    total:               Math.round(total),
+    netWorth:            Math.round(netWorth_raw),
+    passiveIncome:       Math.round(passiveIncome_raw),
+    lifeExperience:      Math.round(lifeExperience_raw),
+    hp:                  Math.round(hp_raw),
+    financialHealth:     Math.round(ageScore_raw),
+    family:              Math.round(family_raw),
+    legacyScore:         Math.round(legacyRaw),
+    lifeExperienceIndex,
+    achievementIndex,
+    relationshipIndex,
+    total,
+    grade,
+    achievements,
   };
 }
 
