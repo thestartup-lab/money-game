@@ -34,7 +34,11 @@ export default function DisplayScreen() {
   const [connected, setConnected] = useState(false);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [roomAnalysis, setRoomAnalysis] = useState<{ roomId: string; players: RoomPlayerSummary[]; currentAge: number } | null>(null);
-  const [roomCode, setRoomCode] = useState('');
+  const [roomCode, setRoomCode] = useState(() => {
+    // 支援從 URL ?display&room=ROOMID 直接帶入
+    const params = new URLSearchParams(window.location.search);
+    return (params.get('room') ?? '').toUpperCase();
+  });
   const [joined, setJoined] = useState(false);
   const [joinError, setJoinError] = useState('');
   const [joining, setJoining] = useState(false);
@@ -46,7 +50,16 @@ export default function DisplayScreen() {
   useEffect(() => {
     const s = io(SERVER_URL, { transports: ['websocket', 'polling'], reconnectionAttempts: 5, reconnectionDelay: 2000 });
     socketRef.current = s;
-    s.on('connect', () => setConnected(true));
+    s.on('connect', () => {
+      setConnected(true);
+      // 若 URL 已帶入房間代碼（從後台直接跳轉），自動加入展示
+      const params = new URLSearchParams(window.location.search);
+      const urlRoom = params.get('room')?.toUpperCase();
+      if (urlRoom && urlRoom.length >= 4) {
+        setJoining(true);
+        s.emit('joinDisplay', { roomId: urlRoom });
+      }
+    });
     s.on('disconnect', () => setConnected(false));
     s.on('joinDisplaySuccess', () => { setJoined(true); setJoining(false); });
     s.on('joinDisplayFail', (p: { message: string }) => { setJoinError(p.message); setJoining(false); });

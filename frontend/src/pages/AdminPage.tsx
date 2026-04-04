@@ -2,8 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import type { GameState, Player } from '../types/game';
 import { QRCodeSVG } from 'qrcode.react';
-import { GameBoard } from '../components/game/GameBoard';
-import type { BoardPlayer } from '../components/game/GameBoard';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
@@ -195,196 +193,50 @@ export default function AdminPage() {
   const isRunning = phase === 'RatRace' || phase === 'FastTrack';
   const isStartable = phase === 'Pre20' || phase === 'WaitingForPlayers';
 
-  // ── DASHBOARD VIEW ──
-
-  // 把玩家資料轉成 GameBoard 需要的格式
-  const boardPlayers: BoardPlayer[] = players.map((p: Player, idx: number) => ({
-    id: p.id,
-    name: p.name,
-    position: p.currentPosition,
-    fastTrackPosition: p.fastTrackPosition ?? 0,
-    isInFastTrack: p.isInFastTrack ?? false,
-    isMe: false,
-    colorIndex: idx % 6,
-    isBedridden: p.isBedridden,
-  }));
-
-  const currentTurnPlayerId = gameState?.currentPlayerTurnId;
-
+  // 展示頁 URL（讓展示頁自動帶房間代碼）
+  const displayUrl = `${window.location.protocol}//${window.location.host}/?display&room=${roomId}`;
   const playerUrl = `${window.location.protocol}//${window.location.host}/?room=${roomId}`;
 
+  const phaseLabel: Record<string, string> = {
+    WaitingForPlayers: '等待玩家', Pre20: '設定中',
+    RatRace: '老鼠賽跑', FastTrack: 'FastTrack', GameOver: '遊戲結束',
+  };
+  const phaseBadge = (p: string) => {
+    const classes: Record<string, string> = {
+      WaitingForPlayers: 'bg-yellow-900 text-yellow-300',
+      Pre20: 'bg-blue-900 text-blue-300',
+      RatRace: 'bg-indigo-800 text-indigo-200',
+      FastTrack: 'bg-emerald-800 text-emerald-200',
+      GameOver: 'bg-gray-700 text-gray-400',
+    };
+    return classes[p] ?? 'bg-gray-700 text-gray-300';
+  };
+
   return (
-    <div className="min-h-screen bg-gray-950 text-white flex flex-col lg:flex-row lg:items-start gap-0">
+    <div className="min-h-screen bg-gray-950 text-white">
 
-      {/* ══════════ 左欄：QR + 名單 ══════════ */}
-      <div className="lg:w-72 xl:w-80 flex-shrink-0 p-3 space-y-3 lg:h-screen lg:overflow-y-auto lg:sticky lg:top-0">
-
-        {/* 頂部狀態列 */}
-        <div className="card flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <span className="text-indigo-400 font-bold text-base">主持人後台</span>
-            <span className="ml-2 font-mono text-yellow-300 text-sm">{roomId}</span>
-          </div>
-          <div className="flex items-center gap-2 text-sm flex-wrap">
-            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-              phase === 'RatRace' ? 'bg-blue-800 text-blue-200' :
-              phase === 'FastTrack' ? 'bg-emerald-800 text-emerald-200' :
-              phase === 'GameOver' ? 'bg-gray-700 text-gray-300' :
-              'bg-yellow-900 text-yellow-300'
-            }`}>{phase}</span>
-            {isRunning && <span className="text-yellow-300 font-bold">{currentAge.toFixed(1)} 歲</span>}
-            {isPaused && <span className="text-orange-400">⏸</span>}
-            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
-          </div>
-        </div>
-
-        {/* QR Code */}
-        <div className="card flex flex-col items-center gap-3 text-center">
-          <div className="bg-white rounded-xl p-3">
-            <QRCodeSVG value={playerUrl} size={140} />
-          </div>
-          <div className="space-y-1">
-            <p className="text-xs text-indigo-300 font-semibold">掃碼加入遊戲</p>
-            <p className="font-mono text-3xl font-bold text-yellow-300 tracking-[0.3em]">{roomId}</p>
-            <p className="text-xs text-gray-500 break-all leading-tight">{playerUrl}</p>
-          </div>
-        </div>
-
-        {/* 玩家名單 */}
-        <div className="card space-y-2">
-          <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">
-            參與者 <span className="text-white ml-1">{players.length}</span> 人
-          </p>
-          {players.length === 0 && <p className="text-gray-500 text-sm">尚無玩家加入</p>}
-          {players.map((p: Player, idx: number) => {
-            const hpColor = p.stats.health >= 60 ? 'text-green-400' : p.stats.health >= 30 ? 'text-yellow-400' : 'text-red-400';
-            const cfColor = p.monthlyCashflow >= 0 ? 'text-emerald-400' : 'text-red-400';
-            const dotColors = ['bg-amber-400','bg-blue-400','bg-pink-400','bg-emerald-400','bg-purple-400','bg-orange-400'];
-            return (
-              <div key={p.id} className={`flex items-center gap-2 text-sm ${p.isAlive ? '' : 'opacity-40'}`}>
-                <span className={`w-3 h-3 rounded-full flex-shrink-0 ${dotColors[idx % 6]}`} />
-                <span className={`font-semibold ${p.isAlive ? 'text-white' : 'line-through text-gray-500'}`}>{p.name}</span>
-                <span className="text-gray-400 text-xs truncate">{p.profession?.name}</span>
-                <span className={`ml-auto text-xs font-mono ${hpColor}`}>{p.stats.health}hp</span>
-                <span className={`text-xs font-mono ${cfColor}`}>${(p.monthlyCashflow/1000).toFixed(1)}k</span>
-                {p.isInFastTrack && <span className="text-xs text-emerald-400 flex-shrink-0">外圈</span>}
-                {p.isBedridden && <span className="text-xs text-orange-400 flex-shrink-0">臥床</span>}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* 遊戲控制 */}
-        <div className="card space-y-3">
-          <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">遊戲控制</p>
-          {isStartable && (
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-300 whitespace-nowrap">時長（分）</label>
-              <input
-                type="number"
-                className="w-20 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-white text-sm focus:outline-none focus:border-indigo-500"
-                value={durationMinutes}
-                min={20}
-                max={180}
-                onChange={(e) => setDurationMinutes(Number(e.target.value))}
-              />
-              <button className="btn-primary flex-1 text-sm" onClick={() => emit('startGame', { durationMinutes })}>
-                開始
-              </button>
-              <button
-                className="bg-gray-600 hover:bg-gray-500 text-white text-sm py-2 px-2 rounded-xl transition-colors"
-                title="強制開始"
-                onClick={() => emit('startGame', { durationMinutes, force: true })}
-              >
-                強制
-              </button>
-            </div>
-          )}
-          {isRunning && (
-            <div className="flex gap-2">
-              {isPaused ? (
-                <button className="btn-primary flex-1" onClick={() => emit('resumeGame')}>▶ 繼續</button>
-              ) : (
-                <button
-                  className="bg-orange-700 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-xl flex-1 transition-colors"
-                  onClick={() => emit('pauseGame', { reason: '主持人手動暫停' })}
-                >
-                  ⏸ 暫停
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* 玩家詳細管理（可展開） */}
-        <div className="card space-y-2">
-          <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">玩家管理</p>
-          {players.length === 0 && <p className="text-gray-500 text-sm">尚無玩家</p>}
-          {players.map((p: Player) => (
-            <PlayerRow
-              key={p.id}
-              player={p}
-              currentAge={currentAge}
-              expanded={expandedPlayer === p.id}
-              statsEdit={statsEdit[p.id] ?? { fq: p.stats.financialIQ, hp: p.stats.health, sk: p.stats.careerSkill, nt: p.stats.network }}
-              onToggleExpand={() => setExpandedPlayer((prev) => prev === p.id ? null : p.id)}
-              onStatsChange={(field, val) =>
-                setStatsEdit((prev) => ({
-                  ...prev,
-                  [p.id]: { ...(prev[p.id] ?? { fq: p.stats.financialIQ, hp: p.stats.health, sk: p.stats.careerSkill, nt: p.stats.network }), [field]: val },
-                }))
-              }
-              onApplyStats={() => {
-                const se = statsEdit[p.id];
-                if (!se) return;
-                emit('setPlayerStats', { targetPlayerId: p.id, stats: { fq: se.fq, hp: se.hp, sk: se.sk, nt: se.nt } });
-                addLog(`調整 ${p.name} 數值`);
-              }}
-              onTriggerRelationship={() => {
-                emit('triggerRelationship', { targetPlayerId: p.id });
-                addLog(`觸發 ${p.name} 的邂逅機緣`);
-              }}
-            />
-          ))}
-        </div>
-
-        {/* 全局事件 */}
-        <div className="card space-y-2">
-          <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">觸發全局事件</p>
-          <div className="grid grid-cols-2 gap-2">
-            {GLOBAL_EVENTS.map((ev) => (
-              <button
-                key={ev.id}
-                className={`${ev.color} text-white text-xs font-semibold py-2 px-2 rounded-xl transition-colors`}
-                onClick={() => {
-                  if (window.confirm(`確定要觸發「${ev.label}」嗎？`)) {
-                    emit('triggerGlobalEvent', { eventId: ev.id });
-                    addLog(`觸發全局事件：${ev.label}`);
-                  }
-                }}
-              >
-                {ev.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* 活動日誌 */}
-        <div className="card space-y-1">
-          <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">活動日誌</p>
-          {log.length === 0 && <p className="text-gray-600 text-xs">尚無紀錄</p>}
-          {log.map((l, i) => (
-            <p key={i} className="text-xs text-gray-300 font-mono">{l}</p>
-          ))}
-        </div>
-
-        {/* 房間管理 */}
-        <div className="card flex items-center justify-between">
-          <p className="text-sm text-gray-400">房間管理</p>
+      {/* ══ 頂部導覽列 ══ */}
+      <div className="sticky top-0 z-20 bg-gray-900 border-b border-gray-800 px-4 py-2 flex items-center gap-3 flex-wrap">
+        <span className="text-indigo-400 font-bold text-sm">主持人後台</span>
+        <span className="font-mono text-yellow-300 font-bold tracking-widest">{roomId}</span>
+        <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${phaseBadge(phase)}`}>{phaseLabel[phase] ?? phase}</span>
+        {isRunning && <span className="text-yellow-300 text-sm font-bold">{currentAge.toFixed(1)} 歲</span>}
+        {isPaused && <span className="text-orange-400 text-sm">⏸ 暫停</span>}
+        <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
+        <div className="ml-auto flex gap-2">
+          {/* 直接開啟展示頁按鈕 */}
+          <a
+            href={displayUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-bold py-1.5 px-4 rounded-xl transition-colors flex items-center gap-1.5"
+          >
+            📺 展示頁
+          </a>
           <button
-            className="bg-red-800 hover:bg-red-700 text-white text-sm py-1.5 px-4 rounded-xl transition-colors"
+            className="bg-red-900 hover:bg-red-800 text-red-300 text-xs py-1.5 px-3 rounded-xl transition-colors"
             onClick={() => {
-              if (window.confirm('確定要刪除目前房間？所有玩家將被踢出。')) {
+              if (window.confirm('確定要刪除目前房間？')) {
                 emit('deleteRoom');
                 setLoggedIn(false);
                 setGameState(null);
@@ -397,18 +249,229 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* ══════════ 右欄：棋盤 ══════════ */}
-      <div
-        className="flex-1 flex items-center justify-center lg:min-h-screen overflow-hidden"
-        style={{
-            backgroundImage: "url('/1.png')",
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-        }}
-      >
-        <GameBoard players={boardPlayers} currentTurnPlayerId={currentTurnPlayerId} />
-      </div>
+      {/* ══ 主內容：三欄 ══ */}
+      <div className="flex flex-col lg:flex-row gap-0 items-start">
 
+        {/* ── 左欄：QR + 玩家名單 + 遊戲控制 ── */}
+        <div className="lg:w-72 xl:w-80 flex-shrink-0 p-3 space-y-3 lg:h-[calc(100vh-45px)] lg:overflow-y-auto lg:sticky lg:top-[45px]">
+
+          {/* QR Code */}
+          <div className="card flex flex-col items-center gap-2 text-center">
+            <div className="bg-white rounded-xl p-3">
+              <QRCodeSVG value={playerUrl} size={130} />
+            </div>
+            <p className="text-xs text-indigo-300 font-semibold">掃碼加入遊戲</p>
+            <p className="font-mono text-3xl font-bold text-yellow-300 tracking-[0.3em]">{roomId}</p>
+            <p className="text-xs text-gray-500 break-all leading-tight">{playerUrl}</p>
+          </div>
+
+          {/* 玩家名單 */}
+          <div className="card space-y-2">
+            <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">
+              參與者 <span className="text-white ml-1">{players.length}</span> 人
+            </p>
+            {players.length === 0 && <p className="text-gray-500 text-sm">尚無玩家加入</p>}
+            {players.map((p: Player, idx: number) => {
+              const hpColor = p.stats.health >= 60 ? 'text-green-400' : p.stats.health >= 30 ? 'text-yellow-400' : 'text-red-400';
+              const cfColor = p.monthlyCashflow >= 0 ? 'text-emerald-400' : 'text-red-400';
+              const dotColors = ['bg-amber-400','bg-blue-400','bg-pink-400','bg-emerald-400','bg-purple-400','bg-orange-400'];
+              return (
+                <div key={p.id} className={`flex items-center gap-2 text-sm ${p.isAlive ? '' : 'opacity-40'}`}>
+                  <span className={`w-3 h-3 rounded-full flex-shrink-0 ${dotColors[idx % 6]}`} />
+                  <span className={`font-semibold truncate ${p.isAlive ? 'text-white' : 'line-through text-gray-500'}`}>{p.name}</span>
+                  <span className="text-gray-400 text-xs truncate hidden sm:block">{p.profession?.name}</span>
+                  <span className={`ml-auto text-xs font-mono ${hpColor}`}>{p.stats.health}hp</span>
+                  <span className={`text-xs font-mono ${cfColor}`}>${(p.monthlyCashflow/1000).toFixed(1)}k</span>
+                  {p.isInFastTrack && <span className="text-xs text-emerald-400">外圈</span>}
+                  {p.isBedridden && <span className="text-xs text-orange-400">臥床</span>}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* 遊戲控制 */}
+          <div className="card space-y-3">
+            <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">遊戲控制</p>
+            {isStartable && (
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-gray-300 whitespace-nowrap">時長（分）</label>
+                <input
+                  type="number"
+                  className="w-20 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-white text-sm focus:outline-none focus:border-indigo-500"
+                  value={durationMinutes}
+                  min={20} max={180}
+                  onChange={(e) => setDurationMinutes(Number(e.target.value))}
+                />
+                <button className="btn-primary flex-1 text-sm" onClick={() => emit('startGame', { durationMinutes })}>
+                  開始
+                </button>
+                <button
+                  className="bg-gray-600 hover:bg-gray-500 text-white text-sm py-2 px-2 rounded-xl transition-colors"
+                  title="強制開始（無視玩家準備狀態）"
+                  onClick={() => emit('startGame', { durationMinutes, force: true })}
+                >強制</button>
+              </div>
+            )}
+            {isRunning && (
+              <div className="flex gap-2">
+                {isPaused
+                  ? <button className="btn-primary flex-1" onClick={() => emit('resumeGame')}>▶ 繼續</button>
+                  : <button className="bg-orange-700 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-xl flex-1 transition-colors" onClick={() => emit('pauseGame', { reason: '主持人手動暫停' })}>⏸ 暫停</button>
+                }
+              </div>
+            )}
+          </div>
+
+          {/* 全局事件 */}
+          <div className="card space-y-2">
+            <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">觸發全局事件</p>
+            <div className="grid grid-cols-2 gap-2">
+              {GLOBAL_EVENTS.map((ev) => (
+                <button
+                  key={ev.id}
+                  className={`${ev.color} text-white text-xs font-semibold py-2 px-2 rounded-xl transition-colors`}
+                  onClick={() => {
+                    if (window.confirm(`確定要觸發「${ev.label}」嗎？`)) {
+                      emit('triggerGlobalEvent', { eventId: ev.id });
+                      addLog(`觸發全局事件：${ev.label}`);
+                    }
+                  }}
+                >{ev.label}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* 活動日誌 */}
+          <div className="card space-y-1 max-h-40 overflow-y-auto">
+            <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">活動日誌</p>
+            {log.length === 0 && <p className="text-gray-600 text-xs">尚無紀錄</p>}
+            {log.map((l, i) => (
+              <p key={i} className="text-xs text-gray-300 font-mono">{l}</p>
+            ))}
+          </div>
+        </div>
+
+        {/* ── 右欄：玩家管理 + 多房間儀表板 ── */}
+        <div className="flex-1 p-3 space-y-4 min-h-0">
+
+          {/* 玩家詳細管理 */}
+          <div className="card space-y-2">
+            <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">玩家管理</p>
+            {players.length === 0 && <p className="text-gray-500 text-sm">尚無玩家</p>}
+            {players.map((p: Player) => (
+              <PlayerRow
+                key={p.id}
+                player={p}
+                currentAge={currentAge}
+                expanded={expandedPlayer === p.id}
+                statsEdit={statsEdit[p.id] ?? { fq: p.stats.financialIQ, hp: p.stats.health, sk: p.stats.careerSkill, nt: p.stats.network }}
+                onToggleExpand={() => setExpandedPlayer((prev) => prev === p.id ? null : p.id)}
+                onStatsChange={(field, val) =>
+                  setStatsEdit((prev) => ({
+                    ...prev,
+                    [p.id]: { ...(prev[p.id] ?? { fq: p.stats.financialIQ, hp: p.stats.health, sk: p.stats.careerSkill, nt: p.stats.network }), [field]: val },
+                  }))
+                }
+                onApplyStats={() => {
+                  const se = statsEdit[p.id];
+                  if (!se) return;
+                  emit('setPlayerStats', { targetPlayerId: p.id, stats: { fq: se.fq, hp: se.hp, sk: se.sk, nt: se.nt } });
+                  addLog(`調整 ${p.name} 數值`);
+                }}
+                onTriggerRelationship={() => {
+                  emit('triggerRelationship', { targetPlayerId: p.id });
+                  addLog(`觸發 ${p.name} 的邂逅機緣`);
+                }}
+              />
+            ))}
+          </div>
+
+          {/* 多房間儀表板 */}
+          {roomList.length > 0 && (
+            <div className="card space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">所有房間總覽</p>
+                <button
+                  className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                  onClick={() => emit('listRooms')}
+                >重新整理</button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                {roomList.map((r) => {
+                  const isCurrent = r.roomId === roomId;
+                  const rDisplayUrl = `${window.location.protocol}//${window.location.host}/?display&room=${r.roomId}`;
+                  const rPlayerUrl  = `${window.location.protocol}//${window.location.host}/?room=${r.roomId}`;
+                  return (
+                    <div
+                      key={r.roomId}
+                      className={`rounded-2xl border p-4 space-y-3 transition-colors ${
+                        isCurrent
+                          ? 'border-indigo-500 bg-indigo-950/40'
+                          : 'border-gray-700 bg-gray-800'
+                      }`}
+                    >
+                      {/* 房間頭部 */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-mono font-bold text-lg text-yellow-300">{r.roomId}</span>
+                          {isCurrent && <span className="ml-2 text-xs bg-indigo-700 text-indigo-200 px-1.5 py-0.5 rounded-full">目前</span>}
+                        </div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${phaseBadge(r.phase)}`}>
+                          {phaseLabel[r.phase] ?? r.phase}
+                        </span>
+                      </div>
+
+                      {/* 統計 */}
+                      <div className="flex gap-4 text-sm">
+                        <div className="text-center">
+                          <div className="text-white font-bold text-xl">{r.playerCount}</div>
+                          <div className="text-gray-400 text-xs">玩家</div>
+                        </div>
+                        {isCurrent && isRunning && (
+                          <div className="text-center">
+                            <div className="text-yellow-300 font-bold text-xl">{currentAge.toFixed(1)}</div>
+                            <div className="text-gray-400 text-xs">歲</div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 操作按鈕 */}
+                      <div className="flex gap-2">
+                        <a
+                          href={rDisplayUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 text-center bg-emerald-800 hover:bg-emerald-700 text-emerald-200 text-xs font-bold py-2 px-2 rounded-xl transition-colors"
+                        >
+                          📺 展示頁
+                        </a>
+                        <a
+                          href={rPlayerUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 text-center bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-bold py-2 px-2 rounded-xl transition-colors"
+                        >
+                          📱 玩家頁
+                        </a>
+                        {!isCurrent && (
+                          <button
+                            className="bg-indigo-900 hover:bg-indigo-800 text-indigo-200 text-xs font-bold py-2 px-2 rounded-xl transition-colors"
+                            onClick={() => {
+                              emit('adminLogin', { password: '123', roomId: r.roomId });
+                            }}
+                          >
+                            切換
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
