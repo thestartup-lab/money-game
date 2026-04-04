@@ -138,6 +138,58 @@
   .gameboard-scroll { padding: 2px 0; }
 }
 
+/* ── 校準模式 ────────────────────────────────────────────── */
+.board-calibrate-toggle {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 30;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(100, 200, 255, 0.5);
+  border-radius: 20px;
+  color: rgba(100, 220, 255, 0.95);
+  font-size: clamp(9px, 1vh, 12px);
+  font-weight: 700;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.board-calibrate-dot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+}
+
+.board-calibrate-num {
+  width: clamp(20px, 2.5vw, 32px);
+  height: clamp(20px, 2.5vw, 32px);
+  border-radius: 50%;
+  background: rgba(220, 50, 50, 0.85);
+  border: 2px solid #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(9px, 1.2vw, 14px);
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+}
+
+.board-calibrate-coord {
+  font-size: clamp(7px, 0.9vw, 10px);
+  color: #fff;
+  background: rgba(0,0,0,0.7);
+  padding: 1px 3px;
+  border-radius: 3px;
+  margin-top: 1px;
+  white-space: nowrap;
+}
+
 /* ── 視圖切換按鈕 ────────────────────────────────────────── */
 .board-view-toggle {
   position: absolute;
