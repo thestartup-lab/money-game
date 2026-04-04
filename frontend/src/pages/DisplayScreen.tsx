@@ -267,15 +267,10 @@ export default function DisplayScreen() {
             )}
           </div>
 
-          {/* ══ 右欄：棋盤（底圖背景填滿）══ */}
+          {/* ══ 右欄：棋盤 ══ */}
           <div
             className="flex-1 flex items-center justify-center overflow-hidden"
-            style={{
-              backgroundImage: "url('/1.png')",
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-              maxHeight: 'calc(100vh - 90px)',
-            }}
+            style={{ maxHeight: 'calc(100vh - 90px)' }}
           >
             <GameBoard players={boardPlayers} currentTurnPlayerId={gameState.currentPlayerTurnId} />
           </div>
