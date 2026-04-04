@@ -262,6 +262,14 @@ export default function PlayerPage() {
       setActiveEvent({ kind: 'disease_crisis', title: p.crisis.title, description: p.crisis.description, effectiveCost: p.result.effectiveCost, turnsLost: p.result.turnsLost, hpBefore: p.hpBefore, hpAfter: p.hpAfter, wasInsured: p.result.wasInsured });
     });
 
+    // 發薪日規劃完成廣播：非當前玩家自動回報 planningDone，避免遊戲卡住等待 30 秒
+    s.on('paydayPlanResult', (p: { playerId: string }) => {
+      if (p.playerId !== s.id) {
+        s.emit('planningDone');
+      }
+      setPaydayForm(null);
+    });
+
     s.on('gameClock', (p: { currentAge: number }) => {
       setGameState((gs) => gs ? { ...gs, currentAge: p.currentAge } : gs);
     });

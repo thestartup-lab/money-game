@@ -78,9 +78,6 @@ export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
         {/* ══ 內圈視圖 ══ */}
         {boardView === 'inner' && (
           <>
-            {/* 頂部標題 */}
-            <div className="board-center-title">百歲人生</div>
-
             {/* 格子標籤由圖片本身提供，此處不再渲染 */}
 
             {/* 代幣 */}
@@ -102,6 +99,7 @@ export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
                       key={p.id}
                       className={`player-token${p.isMe ? ' is-me' : ''}${p.isBedridden ? ' bedridden' : ''}`}
                       style={{ backgroundColor: PLAYER_COLORS[p.colorIndex % 6] }}
+                      data-name={p.name.slice(0, 4)}
                       title={p.name}
                     >
                       {p.name[0]}
@@ -116,9 +114,6 @@ export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
         {/* ══ 外圈視圖（FastTrack）══ */}
         {boardView === 'outer' && (
           <>
-            {/* 中心「百歲人生」標題（放在 board2.jpg 中央卷軸位置）*/}
-            <div className="board-ft-title">百歲人生</div>
-
             {/* 格子標籤由圖片本身提供，此處不再渲染 */}
 
             {/* 代幣 */}
@@ -140,6 +135,7 @@ export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
                       key={p.id}
                       className={`player-token${p.isMe ? ' is-me' : ''}${p.isBedridden ? ' bedridden' : ''}`}
                       style={{ backgroundColor: PLAYER_COLORS[p.colorIndex % 6] }}
+                      data-name={p.name.slice(0, 4)}
                       title={p.name}
                     >
                       {p.name[0]}

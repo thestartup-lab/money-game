@@ -37,54 +37,74 @@
   align-items: center;
   gap: 2px;
   z-index: 3;
-  /* 代幣群組最大寬度（超出時換行）*/
-  max-width: 44px;
+  max-width: 60px;
+  padding-bottom: 18px; /* 為姓名標籤留空間 */
 }
 
 /* ── 當前回合高亮環 ────────────────────────────────────────── */
 .active-ring {
   position: absolute;
-  inset: -6px;
+  inset: -8px;
   border-radius: 50%;
-  border: 2px dashed rgba(255, 255, 255, 0.9);
+  border: 2px dashed rgba(255, 255, 255, 0.95);
   animation: ring-pulse 1.4s ease-in-out infinite;
   pointer-events: none;
   z-index: 0;
 }
 
 @keyframes ring-pulse {
-  0%, 100% { opacity: 0.9; transform: scale(1); }
-  50%       { opacity: 0.4; transform: scale(1.15); }
+  0%, 100% { opacity: 0.95; transform: scale(1); }
+  50%       { opacity: 0.4; transform: scale(1.2); }
 }
 
 /* ── 玩家代幣 ──────────────────────────────────────────────── */
 .player-token {
   position: relative;
   z-index: 1;
-  width: 18px;
-  height: 18px;
-  border-radius: 50% 45% 50% 48% / 48% 50% 45% 50%;
-  font-family: 'Caveat', cursive;
-  font-size: 9px;
-  font-weight: 700;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-family: 'Noto Sans TC', sans-serif;
+  font-size: 11px;
+  font-weight: 900;
   color: #fff;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  border: 2px solid rgba(255, 255, 255, 0.8);
   box-shadow:
-    1px 2px 0 rgba(0, 0, 0, 0.6),
-    0 2px 6px rgba(0, 0, 0, 0.4);
+    0 2px 6px rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(0, 0, 0, 0.4);
   transition: transform 0.15s ease;
+  overflow: hidden;
+  line-height: 1;
+}
+
+/* 代幣底部姓名小標籤 */
+.player-token::after {
+  content: attr(data-name);
+  position: absolute;
+  bottom: -16px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Noto Sans TC', sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.8);
+  pointer-events: none;
 }
 
 .player-token.is-me {
-  outline: 2px dashed rgba(255, 255, 255, 0.9);
+  outline: 2.5px solid #ffffff;
   outline-offset: 2px;
-  transform: scale(1.2);
+  transform: scale(1.25);
   box-shadow:
-    1px 2px 0 rgba(0, 0, 0, 0.6),
-    0 0 8px rgba(255, 255, 255, 0.5);
+    0 2px 8px rgba(0, 0, 0, 0.8),
+    0 0 10px rgba(255, 255, 255, 0.4);
 }
 
 .player-token.bedridden {
@@ -93,11 +113,11 @@
   transform: rotate(90deg);
 }
 
-/* 外圈代幣略大 */
+/* 外圈代幣更大 */
 .token-cluster.outer .player-token {
-  width: 20px;
-  height: 20px;
-  font-size: 10px;
+  width: 32px;
+  height: 32px;
+  font-size: 12px;
 }
 
 /* ── 玩家清單浮層（底部半透明）──────────────────────────── */
