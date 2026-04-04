@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>棋盤座標校準工具</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #111;
+    color: #fff;
+    font-family: monospace;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 10px;
+    gap: 10px;
+  }
+  h2 { font-size: 14px; color: #aaa; }
+
+  #board-wrap {
+    position: relative;
+    width: min(100vw, 177.8vh);
+    aspect-ratio: 16 / 9;
+    cursor: crosshair;
+    user-select: none;
+  }
+  #board-wrap img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    pointer-events: none;
+  }
+
+  /* 網格線 */
+  .grid-line {
+    position: absolute;
+    pointer-events: none;
+  }
+  .grid-line.h { left: 0; right: 0; height: 0;
+    border-top: 1px solid rgba(255,255,0,0.3); }
+  .grid-line.v { top: 0; bottom: 0; width: 0;
+    border-left: 1px solid rgba(255,255,0,0.3); }
+  .grid-label {
+    position: absolute;
+    font-size: 9px;
+    color: rgba(255,255,0,0.7);
+    pointer-events: none;
+    white-space: nowrap;
+  }
+
+  /* 即時座標 */
+  #live {
+    position: absolute;
+    top: 6px; left: 6px;
+    background: rgba(0,0,0,0.75);
+    border: 1px solid #ff0;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 13px;
+    color: #ff0;
+    pointer-events: none;
+    z-index: 20;
+  }
+
+  /* 已點擊的標記 */
+  .dot {
+    position: absolute;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: rgba(255, 80, 80, 0.85);
+    border: 2px solid #fff;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 15;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 8px; color: #fff; font-weight: bold;
+  }
+
+  /* 控制列 */
+  #controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  #controls button {
+    padding: 6px 16px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: bold;
+  }
+  #btn-copy { background: #22c55e; color: #fff; }
+  #btn-undo { background: #f59e0b; color: #fff; }
+  #btn-clear { background: #ef4444; color: #fff; }
+
+  #log {
+    width: min(100vw - 20px, 900px);
+    height: 160px;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 8px;
+    color: #6ee7b7;
+    font-family: monospace;
+    font-size: 12px;
+    padding: 8px;
+    resize: vertical;
+  }
+  #hint {
+    font-size: 12px;
+    color: #888;
+    text-align: center;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<h2>棋盤座標校準工具 — 點擊格子中心 → 記錄座標</h2>
+
+<div id="board-wrap">
+  <img src="/1.png" alt="board">
+  <div id="live">left: --, top: --</div>
+</div>
+
+<div id="controls">
+  <span id="count" style="color:#aaa; font-size:13px;">已記錄：0 格</span>
+  <button id="btn-undo" onclick="undo()">↩ 撤銷最後一格</button>
+  <button id="btn-clear" onclick="clearAll()">🗑 清除全部</button>
+  <button id="btn-copy" onclick="copyLog()">📋 複製座標</button>
+</div>
+
+<textarea id="log" placeholder="點擊棋盤後，座標會出現在這裡..."></textarea>
+
+<div id="hint">
+  使用方式：滑鼠移到每個格子<b>中心點</b>後點擊，依序點完 25 格（0–24）。<br>
+  格式：<code>[left%, top%],  // N 格名稱</code> — 完成後點「複製座標」貼給 AI。
+</div>
+
+<script>
+const wrap = document.getElementById('board-wrap');
+const live = document.getElementById('live');
+const logEl = document.getElementById('log');
+const countEl = document.getElementById('count');
+
+const CELL_NAMES = [
+  '發薪日','小交易','意外支出','小交易','大交易','危機事件',
+  '發薪日','小交易','意外支出','添丁','人際關係','慈善捐款',
+  '發薪日','意外支出','大交易','小交易','市場行情','危機事件',
+  '發薪日','小交易','人際關係','大交易','裁員','危機事件','第二人生'
+];
+
+let recorded = [];  // [{left, top, idx}]
+
+// 建立網格線（每 5%）
+function buildGrid() {
+  for (let i = 5; i < 100; i += 5) {
+    // 橫線
+    const h = document.createElement('div');
+    h.className = 'grid-line h';
+    h.style.top = i + '%';
+    wrap.appendChild(h);
+    const lh = document.createElement('div');
+    lh.className = 'grid-label';
+    lh.style.top = (i - 0.5) + '%';
+    lh.style.left = '0.3%';
+    lh.textContent = i + '%';
+    wrap.appendChild(lh);
+
+    // 縱線
+    const v = document.createElement('div');
+    v.className = 'grid-line v';
+    v.style.left = i + '%';
+    wrap.appendChild(v);
+    const lv = document.createElement('div');
+    lv.className = 'grid-label';
+    lv.style.left = (i + 0.3) + '%';
+    lv.style.top = '0.5%';
+    lv.textContent = i + '%';
+    wrap.appendChild(lv);
+  }
+}
+
+// 即時座標顯示
+wrap.addEventListener('mousemove', (e) => {
+  const r = wrap.getBoundingClientRect();
+  const lf = ((e.clientX - r.left) / r.width * 100).toFixed(1);
+  const tp = ((e.clientY - r.top)  / r.height * 100).toFixed(1);
+  live.textContent = `left: ${lf}%,  top: ${tp}%`;
+});
+wrap.addEventListener('mouseleave', () => {
+  live.textContent = 'left: --,  top: --';
+});
+
+// 點擊記錄
+wrap.addEventListener('click', (e) => {
+  // 避免點到已有的 dot
+  if (e.target.classList.contains('dot')) return;
+
+  const r = wrap.getBoundingClientRect();
+  const lf = parseFloat(((e.clientX - r.left) / r.width * 100).toFixed(1));
+  const tp = parseFloat(((e.clientY - r.top)  / r.height * 100).toFixed(1));
+  const idx = recorded.length;
+  const name = CELL_NAMES[idx] ?? '?';
+
+  recorded.push({ left: lf, top: tp, idx, name });
+  addDot(lf, tp, idx);
+  refreshLog();
+});
+
+function addDot(lf, tp, idx) {
+  const d = document.createElement('div');
+  d.className = 'dot';
+  d.style.left = lf + '%';
+  d.style.top  = tp + '%';
+  d.textContent = idx;
+  d.id = 'dot-' + idx;
+  wrap.appendChild(d);
+}
+
+function refreshLog() {
+  const lines = recorded.map(r =>
+    `  [${r.left}, ${r.tp || r.top}],  // ${r.idx} ${r.name}`
+  );
+  logEl.value = lines.join('\n');
+  countEl.textContent = `已記錄：${recorded.length} / 25 格`;
+}
+
+function undo() {
+  if (!recorded.length) return;
+  const last = recorded.pop();
+  const d = document.getElementById('dot-' + last.idx);
+  if (d) d.remove();
+  refreshLog();
+}
+
+function clearAll() {
+  if (!confirm('確定清除全部記錄？')) return;
+  recorded = [];
+  document.querySelectorAll('.dot').forEach(d => d.remove());
+  logEl.value = '';
+  countEl.textContent = '已記錄：0 格';
+}
+
+function copyLog() {
+  const text = logEl.value;
+  if (!text) { alert('還沒有記錄任何座標！'); return; }
+  navigator.clipboard.writeText(text).then(() => {
+    alert(`已複製 ${recorded.length} 格座標！貼到 AI 聊天框即可。`);
+  }).catch(() => {
+    logEl.select();
+    document.execCommand('copy');
+    alert('已複製！');
+  });
+}
+
+buildGrid();
+</script>
+</body>
+</html>
