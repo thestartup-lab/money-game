@@ -118,9 +118,10 @@ export default function EventCard({ event, onDecision, onDismiss }: EventCardPro
                 onClick={() => setSelectedCardId(card.id)}
               >
                 <div className="font-semibold text-white">{card.name}</div>
-                <div className="text-gray-300">頭期款：${card.downPayment.toLocaleString()} ｜ 月現金流：
+                {card.description && <div className="text-gray-400 text-xs mb-1">{card.description}</div>}
+                <div className="text-gray-300">頭期款：${(card.downPayment ?? 0).toLocaleString()} ｜ 月現金流：
                   <span className={card.monthlyCashflow >= 0 ? 'text-green-400' : 'text-red-400'}>
-                    {card.monthlyCashflow >= 0 ? '+' : ''}${card.monthlyCashflow.toLocaleString()}
+                    {card.monthlyCashflow >= 0 ? '+' : ''}${(card.monthlyCashflow ?? 0).toLocaleString()}
                   </span>
                 </div>
               </button>

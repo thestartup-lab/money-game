@@ -49,6 +49,7 @@ export default function PlayerPage() {
   const [analysis, setAnalysis] = useState<PlayerAnalysis | null>(null);
   const [notifications, setNotifications] = useState<string[]>([]);
   const [lastRoll, setLastRoll] = useState<{ rolled: number; newPosition: number } | undefined>();
+  const [rollingLocked, setRollingLocked] = useState(false);
 
   // 互動機制 state
   type CongratulatableEvent = { targetId: string; targetName: string; event: string };
@@ -131,6 +132,8 @@ export default function PlayerPage() {
       if (gs.gamePhase === 'GameOver') { setView('gameover'); localStorage.removeItem('baisuiGame'); }
       else if (amIInGame && gs.gamePhase === 'Pre20') setView((v) => v === 'join' ? 'pre20' : v);
       else if (amIInGame && ['RatRace', 'FastTrack'].includes(gs.gamePhase)) setView((v) => (v === 'pre20' || v === 'join') ? 'game' : v);
+      // 輪到自己時解除擲骰鎖定（以防 rollResult 沒有正確觸發）
+      if (gs.currentPlayerTurnId === s.id) setRollingLocked(false);
     });
 
     s.on('socialClassRolled', (p: { socialClass: string; label: string; growthPoints: number; startingCashBonus: number }) => {
@@ -156,7 +159,10 @@ export default function PlayerPage() {
       setPre20Step('done');
     });
 
-    s.on('rollResult', (p: { rolled: number; newPosition: number }) => setLastRoll(p));
+    s.on('rollResult', (p: { rolled: number; newPosition: number }) => {
+      setLastRoll(p);
+      setRollingLocked(false);
+    });
     s.on('paydayPlanningRequired', (p: PaydayFormData) => {
       setPaydayForm(p);
       addNotification('💰 發薪日到了！請規劃你的投資');
@@ -743,8 +749,9 @@ export default function PlayerPage() {
               <DiceRoller
                 isMyTurn={isMyTurn}
                 isBedridden={myPlayer.isBedridden}
-                onRoll={(count) => emit('playerRoll', { diceCount: count })}
+                onRoll={(count) => { setRollingLocked(true); emit('playerRoll', { diceCount: count }); }}
                 lastRoll={lastRoll}
+                disabled={rollingLocked}
               />
             </div>
           )}

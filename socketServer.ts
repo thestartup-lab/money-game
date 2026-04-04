@@ -2494,10 +2494,18 @@ async function handleLandingSquare(
         }, 20000);
       }
 
-      socket.emit('dealCardsDrawn', { cards: drawnCards, canPickTwo: drawCount > 1 });
+      // 將 DealCard 結構轉換成前端 EventCard 預期的扁平格式
+      const cardsForClient = drawnCards.map((c) => ({
+        id: c.id,
+        name: c.title,
+        description: c.description,
+        downPayment: c.asset.downPayment ?? c.asset.cost,
+        monthlyCashflow: c.asset.monthlyCashflow,
+      }));
+      socket.emit('dealCardsDrawn', { cards: cardsForClient, canPickTwo: drawCount > 1 });
       const decision = await waitForCardDecision(socket);
 
-      if (decision && decision.accept) {
+      if (decision && decision.accepted) {
         const selectedId = decision.selectedCardId as string | undefined;
         const chosen = selectedId
           ? drawnCards.find((c) => c.id === selectedId) ?? drawnCards[0]
