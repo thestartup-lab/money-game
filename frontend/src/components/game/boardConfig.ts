@@ -53,6 +53,7 @@ const G = {
   travel:    { color: '#2e1065', borderColor: '#a78bfa' },
   relation:  { color: '#831843', borderColor: '#f472b6' },
   startup:   { color: '#1e3a5f', borderColor: '#60a5fa' },
+  leverage:  { color: '#064e3b', borderColor: '#6ee7b7' },
   disease:   { color: '#4a044e', borderColor: '#e879f9' },
 } as const;
 
