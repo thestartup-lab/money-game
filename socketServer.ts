@@ -45,6 +45,8 @@ import {
   HOST_ACTIVATION_DRS_BONUS,
   CRISIS_FREQ_BY_STAGE,
   E_PROFESSION_POOLS, S_PROFESSION_POOLS, FRANCHISE_CASH_THRESHOLD, PROFESSIONS,
+  SECOND_LIFE_CELL,
+  STOCK_DCA_MONTHLY_RETURN_RATE,
 } from './gameConfig';
 import { ADMIN_GLOBAL_EVENT_MAP } from './adminEvents';
 import {
@@ -224,6 +226,7 @@ function serializePlayer(p: Player): object {
     isBedridden: p.isBedridden,
     travelPenaltyRemaining: p.travelPenaltyRemaining,
     isInFastTrack: p.isInFastTrack,
+    hasPassedSecondLife: p.hasPassedSecondLife,
     pre20Done: p.pre20Done,
     actionTokensThisPayday: p.actionTokensThisPayday,
     hasFlexibleSchedule: p.profession.hasFlexibleSchedule,
@@ -309,6 +312,8 @@ io.on('connection', (socket: Socket) => {
       joinCode: roomCode,
       adminSocketId: socket.id,
     });
+    // 立即推送初始遊戲狀態（WaitingForPlayers），讓後台能正確顯示開始按鈕
+    socket.emit('gameStateUpdate', serializeGameState(gs));
   });
 
   // ----------------------------------------------------------
@@ -382,6 +387,8 @@ io.on('connection', (socket: Socket) => {
 
     console.log(`[adminLogin] 主持人重新登入房間 ${targetRoomId}：${socket.id}`);
     socket.emit('adminLoginSuccess', { adminSocketId: socket.id, roomId: targetRoomId });
+    // 登入後立即推送當前遊戲狀態，讓後台能正確顯示開始按鈕
+    socket.emit('gameStateUpdate', serializeGameState(gs));
   });
 
   // ----------------------------------------------------------
@@ -608,6 +615,7 @@ io.on('connection', (socket: Socket) => {
       player.bonusDice = 0;
 
       const rolled = rollDice(diceCount > 2 ? 2 : diceCount);
+      const oldPos = player.currentPosition;
       const { passedPaydays, requiresPaydayPlanning } = movePlayer(player, rolled);
 
       console.log(
@@ -646,6 +654,8 @@ io.on('connection', (socket: Socket) => {
             currentStats: player.stats,
             currentCash: player.cash,
             affordableOptions,
+            currentInsurance: player.insurance,
+            stockDCAPortfolioValue: player.assets.find((a) => a.id === 'stock-dca')?.currentValue ?? 0,
             timeoutMs: PAYDAY_PLANNING_TIMEOUT_MS,
           });
 
@@ -696,6 +706,12 @@ io.on('connection', (socket: Socket) => {
           triggerPayday(player, gs, maintenanceDone);
           logPlayerEvent(player, gs, 'payday', `發薪日（第 ${player.paydayCount} 次）`, _pdCashBefore, _pdFlowBefore, _pdNWBefore);
 
+          // 股票定期定額：每次發薪日 stock-dca 資產複利增長
+          const dcaAsset = player.assets.find((a) => a.id === 'stock-dca');
+          if (dcaAsset) {
+            dcaAsset.currentValue = Math.round((dcaAsset.currentValue ?? dcaAsset.cost) * (1 + STOCK_DCA_MONTHLY_RETURN_RATE));
+          }
+
           // 固定行程職業：每次發薪日重置活動次數為 1
           if (!player.profession.hasFlexibleSchedule) {
             player.actionTokensThisPayday = 1;
@@ -734,7 +750,21 @@ io.on('connection', (socket: Socket) => {
       await handleLandingSquare(socket, player, gs);
 
       // --- 5b. 老鼠賽跑脫出檢查 ---
-      if (checkRatRaceEscape(player)) {
+      // 偵測本次移動是否路過「第二人生」格（cell 24）
+      if (!player.isInFastTrack && !player.hasPassedSecondLife) {
+        const newPos = player.currentPosition;
+        const c = SECOND_LIFE_CELL;
+        const crossedCell24 = newPos < oldPos
+          ? c > oldPos || c <= newPos   // 繞圈
+          : c > oldPos && c <= newPos;  // 直線
+        if (crossedCell24) {
+          player.hasPassedSecondLife = true;
+          emitToRoom(roomId, 'secondLifeReached', { playerId: player.id, playerName: player.name });
+          console.log(`[secondLife] ${player.name}（${roomId}）首次路過第二人生格，解鎖 FastTrack 進入資格`);
+        }
+      }
+
+      if (!player.isInFastTrack && player.hasPassedSecondLife && checkRatRaceEscape(player)) {
         console.log(`[ratRace] ${player.name}（${roomId}）脫出老鼠賽跑！`);
         const _rrCB = player.cash; const _rrFB = player.monthlyCashflow; const _rrNWB = calcNetWorth(player);
         player.isInFastTrack = true;
@@ -2036,6 +2066,8 @@ function waitForPaydayPlan(socket: Socket, player: Player): Promise<PaydayPlanPa
       investInHealthBoost: false,
       investInSkillTraining: false,
       investInNetwork: false,
+      stockDCAAmount: 0,
+      buyInsuranceTypes: [],
     };
 
     const timer = setTimeout(() => {
@@ -2176,13 +2208,66 @@ async function handleLandingSquare(
         });
         break;
       }
-      case FastTrackSquareType.LegacyPlanning: {
-        socket.emit('fastTrackLegacyPlanning', { playerId: player.id });
+      case FastTrackSquareType.TechStartup: {
+        // 科技新創：隨機投資金額，擲骰決定成敗
+        const amounts = [20000, 50000, 100000];
+        const investmentAmount = amounts[Math.floor(Math.random() * amounts.length)];
+        pauseGameClock(gs);
+        emitToRoom(roomId, 'gamePaused', { reason: '科技新創投資機會', currentAge: Math.round(getCurrentAge(gs) * 10) / 10 });
+        socket.emit('techStartupOffer', {
+          playerId: player.id,
+          playerName: player.name,
+          investmentAmount,
+          playerCash: player.cash,
+        });
+        const startupDecision = await waitForCardDecision(socket, 20000);
+        if (startupDecision?.invest === true && player.cash >= investmentAmount) {
+          player.cash -= investmentAmount;
+          const diceRoll = rollDice(1);
+          const networkBonus = player.stats.network >= 5 ? 1 : 0;
+          const success = (diceRoll + networkBonus) >= 4;
+          if (success) {
+            const monthlyCashflow = Math.round(investmentAmount * 0.1);
+            player.assets.push({
+              id: `startup-${player.id}-${Date.now()}`,
+              name: '科技新創股份',
+              type: 'Business' as import('./gameConstants').AssetType,
+              cost: investmentAmount,
+              currentValue: investmentAmount,
+              monthlyCashflow,
+            });
+            socket.emit('techStartupResult', {
+              playerId: player.id,
+              invested: true,
+              success: true,
+              diceRoll,
+              investmentAmount,
+              monthlyCashflow,
+              cashAfter: player.cash,
+            });
+          } else {
+            socket.emit('techStartupResult', {
+              playerId: player.id,
+              invested: true,
+              success: false,
+              diceRoll,
+              investmentAmount,
+              cashAfter: player.cash,
+            });
+          }
+        } else {
+          socket.emit('techStartupResult', { playerId: player.id, invested: false, investmentAmount });
+        }
+        resumeGameClock(gs);
+        emitToRoom(roomId, 'gameResumed', { currentAge: Math.round(getCurrentAge(gs) * 10) / 10 });
         break;
       }
       case FastTrackSquareType.GlobalWave: {
-        const { MARKET_EVENTS } = require('./gameCards');
-        const evt = MARKET_EVENTS[Math.floor(Math.random() * MARKET_EVENTS.length)];
+        const { MARKET_CARDS } = require('./gameCards');
+        const evt = MARKET_CARDS[Math.floor(Math.random() * MARKET_CARDS.length)];
+        for (const p of gs.players.values()) {
+          if (p.isAlive) applyMarketCard(gs, evt);
+        }
         emitToRoom(roomId, 'globalWaveEvent', { triggeredBy: player.name, event: evt });
         break;
       }
@@ -2196,8 +2281,8 @@ async function handleLandingSquare(
         break;
       }
       case FastTrackSquareType.Crisis: {
-        const { FAST_TRACK_CRISIS_EVENTS } = require('./gameCards');
-        const pool = FAST_TRACK_CRISIS_EVENTS ?? [];
+        const { DISEASE_CRISIS_EVENTS } = require('./gameCards');
+        const pool = DISEASE_CRISIS_EVENTS ?? [];
         if (pool.length > 0) {
           const c = pool[Math.floor(Math.random() * pool.length)];
           socket.emit('fastTrackCrisisCard', { crisis: c });
@@ -2223,14 +2308,42 @@ async function handleLandingSquare(
         }
         break;
       }
-      case FastTrackSquareType.LegacyChoice: {
-        pauseGameClock(gs);
-        emitToRoom(roomId, 'gamePaused', { reason: '傳承決策', currentAge: Math.round(getCurrentAge(gs) * 10) / 10 });
-        socket.emit('legacyChoiceRequired', {
-          currentLegacyBonus: player.legacyBonusPoints,
-          numberOfChildren: player.numberOfChildren,
-          netWorth: calcNetWorth(player),
+      case FastTrackSquareType.AssetLeverage: {
+        // 資產槓桿：自動給予被動收入 × 3 的現金獎勵
+        const bonus = Math.max(player.totalPassiveIncome * 3, 10000);
+        player.cash += bonus;
+        socket.emit('assetLeverageBonus', {
+          playerId: player.id,
+          playerName: player.name,
+          bonus,
+          passiveIncome: player.totalPassiveIncome,
+          cashAfter: player.cash,
         });
+        break;
+      }
+      case FastTrackSquareType.DiseaseCrisis: {
+        // 疾病危機：強制 HP -20，抽疾病危機牌，套用 applyCrisisCard
+        const { DISEASE_CRISIS_EVENTS: diseasePool } = require('./gameCards');
+        const diseaseCard = diseasePool[Math.floor(Math.random() * diseasePool.length)];
+        const hpBefore = player.stats.health;
+        player.stats.health = Math.max(0, player.stats.health - 20);
+        const crisisResult = applyCrisisCard(player, diseaseCard);
+        if (crisisResult.deathTriggered) {
+          handlePlayerDeath(player, gs);
+          emitToRoom(roomId, 'playerDied', {
+            playerId: player.id,
+            playerName: player.name,
+            cause: '疾病危機',
+            crisis: diseaseCard,
+          });
+        } else {
+          socket.emit('diseaseCrisisCard', {
+            crisis: diseaseCard,
+            result: crisisResult,
+            hpBefore,
+            hpAfter: player.stats.health,
+          });
+        }
         break;
       }
       default:

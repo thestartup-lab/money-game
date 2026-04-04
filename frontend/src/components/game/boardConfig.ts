@@ -47,13 +47,13 @@ const G = {
   charity:   { color: '#881337', borderColor: '#fb7185' },
   business:  { color: '#7c2d12', borderColor: '#f97316' },
   tax:       { color: '#44403c', borderColor: '#a8a29e' },
-  legacy:    { color: '#78350f', borderColor: '#d97706' },
   wave:      { color: '#1e3a5f', borderColor: '#38bdf8' },
   partner:   { color: '#064e3b', borderColor: '#34d399' },
   crisis:    { color: '#450a0a', borderColor: '#ef4444' },
   travel:    { color: '#2e1065', borderColor: '#a78bfa' },
   relation:  { color: '#831843', borderColor: '#f472b6' },
-  inherit:   { color: '#78350f', borderColor: '#fbbf24' },
+  startup:   { color: '#1e3a5f', borderColor: '#60a5fa' },
+  disease:   { color: '#4a044e', borderColor: '#e879f9' },
 } as const;
 
 // ============================================================
@@ -65,32 +65,33 @@ const G = {
 //   左排 row 5-1 (col 0)：格 19-23
 // ============================================================
 export const innerCircleConfig: SquareConfig[] = [
-  // ── 內圈 24 格（圓形極座標，半徑 37%，起始頂部，順時針每格 15°）
-  // x = 50 + 37*sin(angle),  y = 50 - 37*cos(angle)
-  { id: 'inner-0',  type: 'payday',       name: '發薪日',   icon: '💰', ...C.payday,       pos: [50, 13] },
-  { id: 'inner-1',  type: 'smallDeal',    name: '小交易',   icon: '📋', ...C.smallDeal,    pos: [60, 14] },
-  { id: 'inner-2',  type: 'doodad',       name: '意外支出', icon: '💸', ...C.doodad,       pos: [69, 18] },
-  { id: 'inner-3',  type: 'smallDeal',    name: '小交易',   icon: '📋', ...C.smallDeal,    pos: [76, 24] },
-  { id: 'inner-4',  type: 'bigDeal',      name: '大交易',   icon: '🏢', ...C.bigDeal,      pos: [82, 31] },
-  { id: 'inner-5',  type: 'crisis',       name: '危機事件', icon: '⚡', ...C.crisis,       pos: [86, 40] },
-  { id: 'inner-6',  type: 'payday',       name: '發薪日',   icon: '💰', ...C.payday,       pos: [87, 50] },
-  { id: 'inner-7',  type: 'smallDeal',    name: '小交易',   icon: '📋', ...C.smallDeal,    pos: [86, 60] },
-  { id: 'inner-8',  type: 'doodad',       name: '意外支出', icon: '💸', ...C.doodad,       pos: [82, 69] },
-  { id: 'inner-9',  type: 'baby',         name: '添丁',     icon: '👶', ...C.baby,         pos: [76, 76] },
-  { id: 'inner-10', type: 'relationship', name: '人際關係', icon: '🤝', ...C.relationship, pos: [69, 82] },
-  { id: 'inner-11', type: 'charity',      name: '慈善捐款', icon: '❤️', ...C.charity,      pos: [60, 86] },
-  { id: 'inner-12', type: 'payday',       name: '發薪日',   icon: '💰', ...C.payday,       pos: [50, 87] },
-  { id: 'inner-13', type: 'doodad',       name: '意外支出', icon: '💸', ...C.doodad,       pos: [40, 86] },
-  { id: 'inner-14', type: 'bigDeal',      name: '大交易',   icon: '🏢', ...C.bigDeal,      pos: [31, 82] },
-  { id: 'inner-15', type: 'smallDeal',    name: '小交易',   icon: '📋', ...C.smallDeal,    pos: [24, 76] },
-  { id: 'inner-16', type: 'market',       name: '市場行情', icon: '📈', ...C.market,       pos: [18, 69] },
-  { id: 'inner-17', type: 'crisis',       name: '危機事件', icon: '⚡', ...C.crisis,       pos: [14, 60] },
-  { id: 'inner-18', type: 'payday',       name: '發薪日',   icon: '💰', ...C.payday,       pos: [13, 50] },
-  { id: 'inner-19', type: 'smallDeal',    name: '小交易',   icon: '📋', ...C.smallDeal,    pos: [14, 40] },
-  { id: 'inner-20', type: 'relationship', name: '人際關係', icon: '🤝', ...C.relationship, pos: [18, 31] },
-  { id: 'inner-21', type: 'bigDeal',      name: '大交易',   icon: '🏢', ...C.bigDeal,      pos: [24, 24] },
-  { id: 'inner-22', type: 'downsizing',   name: '裁員',     icon: '📉', ...C.downsizing,   pos: [31, 18] },
-  { id: 'inner-23', type: 'crisis',       name: '危機事件', icon: '⚡', ...C.crisis,       pos: [40, 14] },
+  // ── 內圈 24 格（1.png，中心 (40%,48%)，rx=30% ry=40%，順時針每格 15°）
+  // x = 40 + 30*sin(angle),  y = 48 - 40*cos(angle)
+  { id: 'inner-0',  type: 'payday',       name: '發薪日',   icon: '💰', ...C.payday,       pos: [40.0,  8.0] },
+  { id: 'inner-1',  type: 'smallDeal',    name: '小交易',   icon: '📋', ...C.smallDeal,    pos: [47.8,  9.3] },
+  { id: 'inner-2',  type: 'doodad',       name: '意外支出', icon: '💸', ...C.doodad,       pos: [55.0, 13.3] },
+  { id: 'inner-3',  type: 'smallDeal',    name: '小交易',   icon: '📋', ...C.smallDeal,    pos: [61.2, 19.7] },
+  { id: 'inner-4',  type: 'bigDeal',      name: '大交易',   icon: '🏢', ...C.bigDeal,      pos: [66.0, 28.0] },
+  { id: 'inner-5',  type: 'crisis',       name: '危機事件', icon: '⚡', ...C.crisis,       pos: [68.9, 37.6] },
+  { id: 'inner-6',  type: 'payday',       name: '發薪日',   icon: '💰', ...C.payday,       pos: [70.0, 48.0] },
+  { id: 'inner-7',  type: 'smallDeal',    name: '小交易',   icon: '📋', ...C.smallDeal,    pos: [68.9, 58.4] },
+  { id: 'inner-8',  type: 'doodad',       name: '意外支出', icon: '💸', ...C.doodad,       pos: [66.0, 68.0] },
+  { id: 'inner-9',  type: 'baby',         name: '添丁',     icon: '👶', ...C.baby,         pos: [61.2, 76.3] },
+  { id: 'inner-10', type: 'relationship', name: '人際關係', icon: '🤝', ...C.relationship, pos: [55.0, 82.7] },
+  { id: 'inner-11', type: 'charity',      name: '慈善捐款', icon: '❤️', ...C.charity,      pos: [47.8, 86.7] },
+  { id: 'inner-12', type: 'payday',       name: '發薪日',   icon: '💰', ...C.payday,       pos: [40.0, 88.0] },
+  { id: 'inner-13', type: 'doodad',       name: '意外支出', icon: '💸', ...C.doodad,       pos: [32.2, 86.7] },
+  { id: 'inner-14', type: 'bigDeal',      name: '大交易',   icon: '🏢', ...C.bigDeal,      pos: [25.0, 82.7] },
+  { id: 'inner-15', type: 'smallDeal',    name: '小交易',   icon: '📋', ...C.smallDeal,    pos: [18.8, 76.3] },
+  { id: 'inner-16', type: 'market',       name: '市場行情', icon: '📈', ...C.market,       pos: [14.0, 68.0] },
+  { id: 'inner-17', type: 'crisis',       name: '危機事件', icon: '⚡', ...C.crisis,       pos: [11.1, 58.4] },
+  { id: 'inner-18', type: 'payday',       name: '發薪日',   icon: '💰', ...C.payday,       pos: [10.0, 48.0] },
+  { id: 'inner-19', type: 'smallDeal',    name: '小交易',   icon: '📋', ...C.smallDeal,    pos: [11.1, 37.6] },
+  { id: 'inner-20', type: 'relationship', name: '人際關係', icon: '🤝', ...C.relationship, pos: [14.0, 28.0] },
+  { id: 'inner-21', type: 'bigDeal',      name: '大交易',   icon: '🏢', ...C.bigDeal,      pos: [18.8, 19.7] },
+  { id: 'inner-22', type: 'downsizing',   name: '裁員',     icon: '📉', ...C.downsizing,   pos: [25.0, 13.3] },
+  { id: 'inner-23', type: 'crisis',       name: '危機事件', icon: '⚡', ...C.crisis,       pos: [32.2,  9.3] },
+  { id: 'inner-24', type: 'secondLife',   name: '第二人生', icon: '🌟', ...C.payday,       pos: [36.0,  8.5] },
 ];
 
 // ============================================================
@@ -105,22 +106,23 @@ export const innerCircleConfig: SquareConfig[] = [
 // pos: [left%, top%]，格子自身 translate(-50%,-50%) 居中對齊錨點
 // ============================================================
 export const outerCircleConfig: SquareConfig[] = [
-  // ── 外圈 16 格（圓形極座標，半徑 45%，起始頂部，順時針每格 22.5°）
-  // x = 50 + 45*sin(angle),  y = 50 - 45*cos(angle)
-  { id: 'outer-0',  type: 'ftPayday',     name: '發薪+紅利', icon: '💎', ...G.paydays,   pos: [50,  5]  },
-  { id: 'outer-1',  type: 'ftRealEstate', name: '大型房地產', icon: '🏰', ...G.realestate,pos: [67,  8]  },
-  { id: 'outer-2',  type: 'ftStock',      name: '股市大機會', icon: '📊', ...G.stock,    pos: [82, 18]  },
-  { id: 'outer-3',  type: 'ftNetwork',    name: '人脈峰會',   icon: '🌐', ...G.network,  pos: [92, 33]  },
-  { id: 'outer-4',  type: 'ftCharity',    name: '慈善格',     icon: '❤️', ...G.charity,  pos: [95, 50]  },
-  { id: 'outer-5',  type: 'ftBusiness',   name: '事業投資',   icon: '🤝', ...G.business, pos: [92, 67]  },
-  { id: 'outer-6',  type: 'ftPayday',     name: '發薪+紅利', icon: '💎', ...G.paydays,   pos: [82, 82]  },
-  { id: 'outer-7',  type: 'ftTax',        name: '稅務規劃',   icon: '📑', ...G.tax,      pos: [67, 92]  },
-  { id: 'outer-8',  type: 'ftLegacy',     name: '遺產佈局',   icon: '🏛️', ...G.legacy,  pos: [50, 95]  },
-  { id: 'outer-9',  type: 'ftWave',       name: '時代浪潮',   icon: '🌊', ...G.wave,     pos: [33, 92]  },
-  { id: 'outer-10', type: 'ftPartner',    name: '合夥機會',   icon: '🤲', ...G.partner,  pos: [18, 82]  },
-  { id: 'outer-11', type: 'ftCrisis',     name: '危機考驗',   icon: '⚡', ...G.crisis,   pos: [ 8, 67]  },
-  { id: 'outer-12', type: 'ftPayday',     name: '發薪+紅利', icon: '💎', ...G.paydays,   pos: [ 5, 50]  },
-  { id: 'outer-13', type: 'ftTravel',     name: '生命歷練',   icon: '✈️', ...G.travel,  pos: [ 8, 33]  },
-  { id: 'outer-14', type: 'ftRelation',   name: '人際關係',   icon: '💫', ...G.relation, pos: [18, 18]  },
-  { id: 'outer-15', type: 'ftInherit',    name: '傳承決策',   icon: '👑', ...G.inherit,  pos: [33,  8]  },
+  // ── 外圈 16 格（2.png，橢圓圓心 (50%,49%)，rx=37% ry=34%，順時針每格 22.5°）
+  // x = 50 + 37*sin(angle),  y = 49 - 34*cos(angle)
+  { id: 'outer-0',  type: 'ftPayday',     name: '發薪+紅利', icon: '💎', ...G.paydays,    pos: [50.0, 15.0] },
+  { id: 'outer-1',  type: 'ftRealEstate', name: '大型房地產', icon: '🏰', ...G.realestate, pos: [64.2, 17.6] },
+  { id: 'outer-2',  type: 'ftStock',      name: '股市大機會', icon: '📊', ...G.stock,      pos: [76.2, 25.0] },
+  { id: 'outer-3',  type: 'ftNetwork',    name: '人脈峰會',   icon: '🌐', ...G.network,    pos: [84.2, 36.0] },
+  { id: 'outer-4',  type: 'ftCharity',    name: '慈善格',     icon: '❤️', ...G.charity,    pos: [87.0, 49.0] },
+  { id: 'outer-5',  type: 'ftBusiness',   name: '事業擴張',   icon: '🏗️', ...G.business,   pos: [84.2, 62.0] },
+  { id: 'outer-6',  type: 'ftPayday',     name: '發薪+紅利', icon: '💎', ...G.paydays,    pos: [76.2, 73.0] },
+  { id: 'outer-7',  type: 'ftTax',        name: '稅務規劃',   icon: '📑', ...G.tax,        pos: [64.2, 80.4] },
+  { id: 'outer-8',  type: 'ftStartup',    name: '科技新創',   icon: '💡', ...G.startup,    pos: [50.0, 83.0] },
+  { id: 'outer-9',  type: 'ftWave',       name: '時代浪潮',   icon: '🌊', ...G.wave,       pos: [35.8, 80.4] },
+  { id: 'outer-10', type: 'ftPartner',    name: '合夥機會',   icon: '🤲', ...G.partner,    pos: [23.8, 73.0] },
+  { id: 'outer-11', type: 'ftCrisis',     name: '危機考驗',   icon: '⚡', ...G.crisis,     pos: [15.8, 62.0] },
+  { id: 'outer-12', type: 'ftPayday',     name: '發薪+紅利', icon: '💎', ...G.paydays,    pos: [13.0, 49.0] },
+  { id: 'outer-13', type: 'ftTravel',     name: '生命歷練',   icon: '✈️', ...G.travel,    pos: [15.8, 36.0] },
+  { id: 'outer-14', type: 'ftRelation',   name: '人際關係',   icon: '💫', ...G.relation,   pos: [23.8, 25.0] },
+  { id: 'outer-15', type: 'ftLeverage',   name: '資產槓桿',   icon: '🚀', ...G.leverage,   pos: [35.8, 17.6] },
+  { id: 'outer-16', type: 'ftDisease',    name: '疾病危機',   icon: '🏥', ...G.disease,    pos: [42.9, 15.3] },
 ];

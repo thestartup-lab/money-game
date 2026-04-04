@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import type { GameState, Player } from '../types/game';
 import { QRCodeSVG } from 'qrcode.react';
+import { GameBoard } from '../components/game/GameBoard';
+import type { BoardPlayer } from '../components/game/GameBoard';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
@@ -124,30 +126,44 @@ export default function AdminPage() {
             onChange={(e) => setPassword(e.target.value)}
           />
           <input
-            className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-white placeholder-gray-500 uppercase tracking-widest focus:outline-none focus:border-indigo-500"
-            placeholder="房間代碼（可留空，自動建立）"
+            className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-white placeholder-gray-500 tracking-widest focus:outline-none focus:border-indigo-500"
+            style={{ textTransform: 'uppercase' }}
+            placeholder="房間代碼（4–6 碼英數字，可留空自動產生）"
             value={loginRoomId}
-            onChange={(e) => setLoginRoomId(e.target.value.toUpperCase())}
+            onChange={(e) => setLoginRoomId(e.target.value)}
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
             maxLength={6}
           />
           {loginError && <p className="text-red-400 text-sm text-center">{loginError}</p>}
 
+          {/* 建立新房間（自訂或隨機代號） */}
           <button
             className="btn-primary w-full bg-indigo-600 hover:bg-indigo-500"
             disabled={!connected || !password}
             onClick={() => {
               setLoginError('');
-              if (loginRoomId) {
-                emit('adminLogin', { password, roomId: loginRoomId });
-              } else {
-                // 先儲存密碼，roomCreated 回來後自動帶 roomId 登入
-                pendingLoginPasswordRef.current = password;
-                emit('createRoom', { password });
-              }
+              pendingLoginPasswordRef.current = password;
+              emit('createRoom', { password, roomId: loginRoomId.toUpperCase() || undefined });
             }}
           >
-            {loginRoomId ? '登入已有房間' : '建立新房間並登入'}
+            {loginRoomId ? `建立房間「${loginRoomId.toUpperCase()}」` : '建立新房間（自動產生代號）'}
           </button>
+
+          {/* 加入已有房間 */}
+          {loginRoomId && (
+            <button
+              className="w-full bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-xl transition-colors text-sm"
+              disabled={!connected || !password}
+              onClick={() => {
+                setLoginError('');
+                emit('adminLogin', { password, roomId: loginRoomId.toUpperCase() });
+              }}
+            >
+              加入已有房間「{loginRoomId.toUpperCase()}」
+            </button>
+          )}
 
           {roomList.length > 0 && (
             <div className="mt-2 space-y-2">
@@ -180,173 +196,219 @@ export default function AdminPage() {
   const isStartable = phase === 'Pre20' || phase === 'WaitingForPlayers';
 
   // ── DASHBOARD VIEW ──
+
+  // 把玩家資料轉成 GameBoard 需要的格式
+  const boardPlayers: BoardPlayer[] = players.map((p: Player, idx: number) => ({
+    id: p.id,
+    name: p.name,
+    position: p.currentPosition,
+    fastTrackPosition: p.fastTrackPosition ?? 0,
+    isInFastTrack: p.isInFastTrack ?? false,
+    isMe: false,
+    colorIndex: idx % 6,
+    isBedridden: p.isBedridden,
+  }));
+
+  const currentTurnPlayerId = gameState?.currentPlayerTurnId;
+
+  const playerUrl = `${window.location.protocol}//${window.location.host}/?room=${roomId}`;
+
   return (
-    <div className="min-h-screen bg-gray-950 text-white p-3 space-y-3 max-w-3xl mx-auto">
+    <div className="min-h-screen bg-gray-950 text-white flex flex-col lg:flex-row lg:items-start gap-0">
 
-      {/* 頂部狀態列 */}
-      <div className="card flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <span className="text-indigo-400 font-bold text-lg">主持人後台</span>
-          <span className="ml-3 font-mono text-yellow-300 text-sm">{roomId}</span>
-        </div>
-        <div className="flex items-center gap-3 text-sm">
-          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-            phase === 'RatRace' ? 'bg-blue-800 text-blue-200' :
-            phase === 'FastTrack' ? 'bg-emerald-800 text-emerald-200' :
-            phase === 'GameOver' ? 'bg-gray-700 text-gray-300' :
-            'bg-yellow-900 text-yellow-300'
-          }`}>{phase}</span>
-          <span className="text-gray-300">{players.length} 位玩家</span>
-          {isRunning && <span className="text-yellow-300 font-bold">{currentAge.toFixed(1)} 歲</span>}
-          {isPaused && <span className="text-orange-400">⏸ 暫停中</span>}
-          <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
-        </div>
-      </div>
+      {/* ══════════ 左欄：QR + 名單 ══════════ */}
+      <div className="lg:w-72 xl:w-80 flex-shrink-0 p-3 space-y-3 lg:h-screen lg:overflow-y-auto lg:sticky lg:top-0">
 
-      {/* QR Code 加入卡片 */}
-      {(() => {
-        const playerUrl = `${window.location.protocol}//${window.location.host}/?room=${roomId}`;
-        return (
-          <div className="card flex flex-col sm:flex-row items-center gap-4">
-            <div className="bg-white rounded-xl p-2 flex-shrink-0">
-              <QRCodeSVG value={playerUrl} size={120} />
-            </div>
-            <div className="flex-1 text-center sm:text-left space-y-1">
-              <p className="text-sm font-semibold text-indigo-300">玩家掃碼加入</p>
-              <p className="font-mono text-2xl font-bold text-yellow-300 tracking-widest">{roomId}</p>
-              <p className="text-xs text-gray-500 break-all">{playerUrl}</p>
-              <p className="text-xs text-gray-400">掃描 QR Code 或手動輸入房間代碼即可加入</p>
-            </div>
+        {/* 頂部狀態列 */}
+        <div className="card flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span className="text-indigo-400 font-bold text-base">主持人後台</span>
+            <span className="ml-2 font-mono text-yellow-300 text-sm">{roomId}</span>
           </div>
-        );
-      })()}
-
-      {/* 遊戲控制 */}
-      <div className="card space-y-3">
-        <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">遊戲控制</p>
-        {isStartable && (
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-300 whitespace-nowrap">時長（分鐘）</label>
-            <input
-              type="number"
-              className="w-24 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-white text-sm focus:outline-none focus:border-indigo-500"
-              value={durationMinutes}
-              min={20}
-              max={180}
-              onChange={(e) => setDurationMinutes(Number(e.target.value))}
-            />
-            <button
-              className="btn-primary flex-1 text-sm"
-              onClick={() => emit('startGame', { durationMinutes })}
-            >
-              開始遊戲
-            </button>
-            <button
-              className="bg-gray-600 hover:bg-gray-500 text-white text-sm py-2 px-3 rounded-xl transition-colors"
-              title="強制開始（跳過未完成 Pre-20 的玩家）"
-              onClick={() => emit('startGame', { durationMinutes, force: true })}
-            >
-              強制開始
-            </button>
+          <div className="flex items-center gap-2 text-sm flex-wrap">
+            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+              phase === 'RatRace' ? 'bg-blue-800 text-blue-200' :
+              phase === 'FastTrack' ? 'bg-emerald-800 text-emerald-200' :
+              phase === 'GameOver' ? 'bg-gray-700 text-gray-300' :
+              'bg-yellow-900 text-yellow-300'
+            }`}>{phase}</span>
+            {isRunning && <span className="text-yellow-300 font-bold">{currentAge.toFixed(1)} 歲</span>}
+            {isPaused && <span className="text-orange-400">⏸</span>}
+            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
           </div>
-        )}
-        {isRunning && (
-          <div className="flex gap-2">
-            {isPaused ? (
-              <button className="btn-primary flex-1" onClick={() => emit('resumeGame')}>
-                ▶ 繼續遊戲
+        </div>
+
+        {/* QR Code */}
+        <div className="card flex flex-col items-center gap-3 text-center">
+          <div className="bg-white rounded-xl p-3">
+            <QRCodeSVG value={playerUrl} size={140} />
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-indigo-300 font-semibold">掃碼加入遊戲</p>
+            <p className="font-mono text-3xl font-bold text-yellow-300 tracking-[0.3em]">{roomId}</p>
+            <p className="text-xs text-gray-500 break-all leading-tight">{playerUrl}</p>
+          </div>
+        </div>
+
+        {/* 玩家名單 */}
+        <div className="card space-y-2">
+          <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">
+            參與者 <span className="text-white ml-1">{players.length}</span> 人
+          </p>
+          {players.length === 0 && <p className="text-gray-500 text-sm">尚無玩家加入</p>}
+          {players.map((p: Player, idx: number) => {
+            const hpColor = p.stats.health >= 60 ? 'text-green-400' : p.stats.health >= 30 ? 'text-yellow-400' : 'text-red-400';
+            const cfColor = p.monthlyCashflow >= 0 ? 'text-emerald-400' : 'text-red-400';
+            const dotColors = ['bg-amber-400','bg-blue-400','bg-pink-400','bg-emerald-400','bg-purple-400','bg-orange-400'];
+            return (
+              <div key={p.id} className={`flex items-center gap-2 text-sm ${p.isAlive ? '' : 'opacity-40'}`}>
+                <span className={`w-3 h-3 rounded-full flex-shrink-0 ${dotColors[idx % 6]}`} />
+                <span className={`font-semibold ${p.isAlive ? 'text-white' : 'line-through text-gray-500'}`}>{p.name}</span>
+                <span className="text-gray-400 text-xs truncate">{p.profession?.name}</span>
+                <span className={`ml-auto text-xs font-mono ${hpColor}`}>{p.stats.health}hp</span>
+                <span className={`text-xs font-mono ${cfColor}`}>${(p.monthlyCashflow/1000).toFixed(1)}k</span>
+                {p.isInFastTrack && <span className="text-xs text-emerald-400 flex-shrink-0">外圈</span>}
+                {p.isBedridden && <span className="text-xs text-orange-400 flex-shrink-0">臥床</span>}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* 遊戲控制 */}
+        <div className="card space-y-3">
+          <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">遊戲控制</p>
+          {isStartable && (
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-300 whitespace-nowrap">時長（分）</label>
+              <input
+                type="number"
+                className="w-20 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-white text-sm focus:outline-none focus:border-indigo-500"
+                value={durationMinutes}
+                min={20}
+                max={180}
+                onChange={(e) => setDurationMinutes(Number(e.target.value))}
+              />
+              <button className="btn-primary flex-1 text-sm" onClick={() => emit('startGame', { durationMinutes })}>
+                開始
               </button>
-            ) : (
               <button
-                className="bg-orange-700 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-xl flex-1 transition-colors"
-                onClick={() => emit('pauseGame', { reason: '主持人手動暫停' })}
+                className="bg-gray-600 hover:bg-gray-500 text-white text-sm py-2 px-2 rounded-xl transition-colors"
+                title="強制開始"
+                onClick={() => emit('startGame', { durationMinutes, force: true })}
               >
-                ⏸ 暫停遊戲
+                強制
               </button>
-            )}
-          </div>
-        )}
-      </div>
+            </div>
+          )}
+          {isRunning && (
+            <div className="flex gap-2">
+              {isPaused ? (
+                <button className="btn-primary flex-1" onClick={() => emit('resumeGame')}>▶ 繼續</button>
+              ) : (
+                <button
+                  className="bg-orange-700 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-xl flex-1 transition-colors"
+                  onClick={() => emit('pauseGame', { reason: '主持人手動暫停' })}
+                >
+                  ⏸ 暫停
+                </button>
+              )}
+            </div>
+          )}
+        </div>
 
-      {/* 全局事件 */}
-      <div className="card space-y-2">
-        <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">觸發全局事件</p>
-        <div className="grid grid-cols-4 gap-2">
-          {GLOBAL_EVENTS.map((ev) => (
-            <button
-              key={ev.id}
-              className={`${ev.color} text-white text-xs font-semibold py-2 px-2 rounded-xl transition-colors`}
-              onClick={() => {
-                if (window.confirm(`確定要觸發「${ev.label}」嗎？`)) {
-                  emit('triggerGlobalEvent', { eventId: ev.id });
-                  addLog(`觸發全局事件：${ev.label}`);
-                }
+        {/* 玩家詳細管理（可展開） */}
+        <div className="card space-y-2">
+          <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">玩家管理</p>
+          {players.length === 0 && <p className="text-gray-500 text-sm">尚無玩家</p>}
+          {players.map((p: Player) => (
+            <PlayerRow
+              key={p.id}
+              player={p}
+              currentAge={currentAge}
+              expanded={expandedPlayer === p.id}
+              statsEdit={statsEdit[p.id] ?? { fq: p.stats.financialIQ, hp: p.stats.health, sk: p.stats.careerSkill, nt: p.stats.network }}
+              onToggleExpand={() => setExpandedPlayer((prev) => prev === p.id ? null : p.id)}
+              onStatsChange={(field, val) =>
+                setStatsEdit((prev) => ({
+                  ...prev,
+                  [p.id]: { ...(prev[p.id] ?? { fq: p.stats.financialIQ, hp: p.stats.health, sk: p.stats.careerSkill, nt: p.stats.network }), [field]: val },
+                }))
+              }
+              onApplyStats={() => {
+                const se = statsEdit[p.id];
+                if (!se) return;
+                emit('setPlayerStats', { targetPlayerId: p.id, stats: { fq: se.fq, hp: se.hp, sk: se.sk, nt: se.nt } });
+                addLog(`調整 ${p.name} 數值`);
               }}
-            >
-              {ev.label}
-            </button>
+              onTriggerRelationship={() => {
+                emit('triggerRelationship', { targetPlayerId: p.id });
+                addLog(`觸發 ${p.name} 的邂逅機緣`);
+              }}
+            />
           ))}
         </div>
-      </div>
 
-      {/* 玩家列表 */}
-      <div className="card space-y-2">
-        <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">玩家列表</p>
-        {players.length === 0 && <p className="text-gray-500 text-sm">尚無玩家加入</p>}
-        {players.map((p: Player) => (
-          <PlayerRow
-            key={p.id}
-            player={p}
-            currentAge={currentAge}
-            expanded={expandedPlayer === p.id}
-            statsEdit={statsEdit[p.id] ?? { fq: p.stats.financialIQ, hp: p.stats.health, sk: p.stats.careerSkill, nt: p.stats.network }}
-            onToggleExpand={() => setExpandedPlayer((prev) => prev === p.id ? null : p.id)}
-            onStatsChange={(field, val) =>
-              setStatsEdit((prev) => ({
-                ...prev,
-                [p.id]: { ...(prev[p.id] ?? { fq: p.stats.financialIQ, hp: p.stats.health, sk: p.stats.careerSkill, nt: p.stats.network }), [field]: val },
-              }))
-            }
-            onApplyStats={() => {
-              const se = statsEdit[p.id];
-              if (!se) return;
-              emit('setPlayerStats', { targetPlayerId: p.id, stats: { fq: se.fq, hp: se.hp, sk: se.sk, nt: se.nt } });
-              addLog(`調整 ${p.name} 數值`);
+        {/* 全局事件 */}
+        <div className="card space-y-2">
+          <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">觸發全局事件</p>
+          <div className="grid grid-cols-2 gap-2">
+            {GLOBAL_EVENTS.map((ev) => (
+              <button
+                key={ev.id}
+                className={`${ev.color} text-white text-xs font-semibold py-2 px-2 rounded-xl transition-colors`}
+                onClick={() => {
+                  if (window.confirm(`確定要觸發「${ev.label}」嗎？`)) {
+                    emit('triggerGlobalEvent', { eventId: ev.id });
+                    addLog(`觸發全局事件：${ev.label}`);
+                  }
+                }}
+              >
+                {ev.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 活動日誌 */}
+        <div className="card space-y-1">
+          <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">活動日誌</p>
+          {log.length === 0 && <p className="text-gray-600 text-xs">尚無紀錄</p>}
+          {log.map((l, i) => (
+            <p key={i} className="text-xs text-gray-300 font-mono">{l}</p>
+          ))}
+        </div>
+
+        {/* 房間管理 */}
+        <div className="card flex items-center justify-between">
+          <p className="text-sm text-gray-400">房間管理</p>
+          <button
+            className="bg-red-800 hover:bg-red-700 text-white text-sm py-1.5 px-4 rounded-xl transition-colors"
+            onClick={() => {
+              if (window.confirm('確定要刪除目前房間？所有玩家將被踢出。')) {
+                emit('deleteRoom');
+                setLoggedIn(false);
+                setGameState(null);
+                setRoomId('');
+              }
             }}
-            onTriggerRelationship={() => {
-              emit('triggerRelationship', { targetPlayerId: p.id });
-              addLog(`觸發 ${p.name} 的邂逅機緣`);
-            }}
-          />
-        ))}
+          >
+            刪除房間
+          </button>
+        </div>
       </div>
 
-      {/* 活動日誌 */}
-      <div className="card space-y-1">
-        <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">活動日誌</p>
-        {log.length === 0 && <p className="text-gray-600 text-xs">尚無紀錄</p>}
-        {log.map((l, i) => (
-          <p key={i} className="text-xs text-gray-300 font-mono">{l}</p>
-        ))}
+      {/* ══════════ 右欄：棋盤 ══════════ */}
+      <div
+        className="flex-1 flex items-center justify-center lg:min-h-screen overflow-hidden"
+        style={{
+            backgroundImage: "url('/1.png')",
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+        }}
+      >
+        <GameBoard players={boardPlayers} currentTurnPlayerId={currentTurnPlayerId} />
       </div>
 
-      {/* 房間管理 */}
-      <div className="card flex items-center justify-between">
-        <p className="text-sm text-gray-400">房間管理</p>
-        <button
-          className="bg-red-800 hover:bg-red-700 text-white text-sm py-1.5 px-4 rounded-xl transition-colors"
-          onClick={() => {
-            if (window.confirm('確定要刪除目前房間？所有玩家將被踢出。')) {
-              emit('deleteRoom');
-              setLoggedIn(false);
-              setGameState(null);
-              setRoomId('');
-            }
-          }}
-        >
-          刪除房間
-        </button>
-      </div>
     </div>
   );
 }

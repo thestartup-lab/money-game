@@ -772,6 +772,57 @@ export const CRISIS_EVENTS: CrisisCard[] = [
 // ============================================================
 
 /**
+ * 外圈「疾病危機」格專用危機牌（僅需醫療險，費用較內圈高）。
+ * 2 張 canCauseDeath: true，適合外圈高風險情境。
+ */
+export const DISEASE_CRISIS_EVENTS: CrisisCard[] = [
+  {
+    id: 'dc-001',
+    title: '急性心肌梗塞',
+    description: '突發心肌梗塞緊急送加護病房，手術及後續復健費用高達 $200,000。無醫療險且現金不足者將觸發死亡判定。',
+    requiredInsurance: 'hasMedicalInsurance',
+    baseCost: 200000,
+    insuredCost: 0,
+    turnsLostWithoutInsurance: 3,
+    turnsLostWithInsurance: 0,
+    canCauseDeath: true,
+  },
+  {
+    id: 'dc-002',
+    title: '重大器官手術',
+    description: '需要重大器官手術，醫療費用 $120,000，術後需長期休養。無醫療險且現金不足者將觸發死亡判定。',
+    requiredInsurance: 'hasMedicalInsurance',
+    baseCost: 120000,
+    insuredCost: 0,
+    turnsLostWithoutInsurance: 2,
+    turnsLostWithInsurance: 0,
+    canCauseDeath: true,
+  },
+  {
+    id: 'dc-003',
+    title: '慢性病住院',
+    description: '慢性病急性發作需住院治療，醫療費用 $60,000，需休養一個發薪週期。',
+    requiredInsurance: 'hasMedicalInsurance',
+    baseCost: 60000,
+    insuredCost: 0,
+    turnsLostWithoutInsurance: 1,
+    turnsLostWithInsurance: 0,
+    canCauseDeath: false,
+  },
+  {
+    id: 'dc-004',
+    title: '輕症就醫',
+    description: '輕微病症就醫，門診與用藥費用 $20,000，不影響工作。',
+    requiredInsurance: 'hasMedicalInsurance',
+    baseCost: 20000,
+    insuredCost: 0,
+    turnsLostWithoutInsurance: 0,
+    turnsLostWithInsurance: 0,
+    canCauseDeath: false,
+  },
+];
+
+/**
  * 查詢棋盤上特定位置的格子類型。
  * @param position 玩家當前位置（0-23）
  */
@@ -780,20 +831,21 @@ export const CRISIS_EVENTS: CrisisCard[] = [
 // ============================================================
 
 export enum FastTrackSquareType {
-  PaydayBonus    = 'PaydayBonus',    // 發薪+紅利
-  BigRealEstate  = 'BigRealEstate',  // 大型房地產
-  BusinessDeal   = 'BusinessDeal',   // 事業投資
+  PaydayBonus      = 'PaydayBonus',      // 發薪+紅利
+  BigRealEstate    = 'BigRealEstate',    // 大型房地產
+  BusinessDeal     = 'BusinessDeal',     // 事業擴張
   StockOpportunity = 'StockOpportunity', // 股市大機會
-  Charity        = 'Charity',        // 慈善格
-  NetworkSummit  = 'NetworkSummit',  // 人脈峰會
-  TaxPlanning    = 'TaxPlanning',    // 稅務規劃
-  LegacyPlanning = 'LegacyPlanning', // 遺產佈局
-  GlobalWave     = 'GlobalWave',     // 時代浪潮（全員事件）
-  Partnership    = 'Partnership',    // 合夥機會
-  Crisis         = 'Crisis',         // 危機考驗
-  LifeJourney    = 'LifeJourney',    // 生命歷練（旅遊格）
-  Relationship   = 'Relationship',   // 人際格
-  LegacyChoice   = 'LegacyChoice',   // 傳承決策
+  Charity          = 'Charity',          // 慈善格
+  NetworkSummit    = 'NetworkSummit',    // 人脈峰會
+  TaxPlanning      = 'TaxPlanning',      // 稅務規劃
+  TechStartup      = 'TechStartup',      // 科技新創
+  GlobalWave       = 'GlobalWave',       // 時代浪潮（全員事件）
+  Partnership      = 'Partnership',      // 合夥機會
+  Crisis           = 'Crisis',           // 危機考驗
+  LifeJourney      = 'LifeJourney',      // 生命歷練（旅遊格）
+  Relationship     = 'Relationship',     // 人際格
+  AssetLeverage    = 'AssetLeverage',    // 資產槓桿
+  DiseaseCrisis    = 'DiseaseCrisis',    // 疾病危機
 }
 
 export interface FastTrackSquare {
@@ -803,7 +855,7 @@ export interface FastTrackSquare {
 }
 
 /**
- * FastTrack 外圈棋盤（16 格）。
+ * FastTrack 外圈棋盤（17 格）。
  * 玩家脫出老鼠賽跑後切換到此棋盤循環行走。
  */
 export const FAST_TRACK_BOARD: readonly FastTrackSquare[] = [
@@ -812,17 +864,18 @@ export const FAST_TRACK_BOARD: readonly FastTrackSquare[] = [
   { index: 2,  type: FastTrackSquareType.StockOpportunity,  label: '股市大機會' },
   { index: 3,  type: FastTrackSquareType.NetworkSummit,     label: '人脈峰會'  },
   { index: 4,  type: FastTrackSquareType.Charity,           label: '慈善格'    },
-  { index: 5,  type: FastTrackSquareType.BusinessDeal,      label: '事業投資'  },
+  { index: 5,  type: FastTrackSquareType.BusinessDeal,      label: '事業擴張'  },
   { index: 6,  type: FastTrackSquareType.PaydayBonus,       label: '發薪+紅利'  },
   { index: 7,  type: FastTrackSquareType.TaxPlanning,       label: '稅務規劃'  },
-  { index: 8,  type: FastTrackSquareType.LegacyPlanning,    label: '遺產佈局'  },
+  { index: 8,  type: FastTrackSquareType.TechStartup,       label: '科技新創'  },
   { index: 9,  type: FastTrackSquareType.GlobalWave,        label: '時代浪潮'  },
   { index: 10, type: FastTrackSquareType.Partnership,       label: '合夥機會'  },
   { index: 11, type: FastTrackSquareType.Crisis,            label: '危機考驗'  },
   { index: 12, type: FastTrackSquareType.PaydayBonus,       label: '發薪+紅利'  },
   { index: 13, type: FastTrackSquareType.LifeJourney,       label: '生命歷練'  },
   { index: 14, type: FastTrackSquareType.Relationship,      label: '人際關係'  },
-  { index: 15, type: FastTrackSquareType.LegacyChoice,      label: '傳承決策'  },
+  { index: 15, type: FastTrackSquareType.AssetLeverage,     label: '資產槓桿'  },
+  { index: 16, type: FastTrackSquareType.DiseaseCrisis,     label: '疾病危機'  },
 ];
 
 /** 外圈發薪格索引 */

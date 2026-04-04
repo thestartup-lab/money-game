@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import ReactECharts from 'echarts-for-react';
+import { QRCodeSVG } from 'qrcode.react';
 import type { GameState, RoomPlayerSummary, LifeScoreBreakdown } from '../types/game';
+import { GameBoard } from '../components/game/GameBoard';
+import type { BoardPlayer } from '../components/game/GameBoard';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
@@ -33,6 +36,8 @@ export default function DisplayScreen() {
   const [roomAnalysis, setRoomAnalysis] = useState<{ roomId: string; players: RoomPlayerSummary[]; currentAge: number } | null>(null);
   const [roomCode, setRoomCode] = useState('');
   const [joined, setJoined] = useState(false);
+  const [joinError, setJoinError] = useState('');
+  const [joining, setJoining] = useState(false);
   const [view, setView] = useState<'game' | 'analysis'>('game');
   const [ticker, setTicker] = useState<string[]>([]);
 
@@ -43,7 +48,10 @@ export default function DisplayScreen() {
     socketRef.current = s;
     s.on('connect', () => setConnected(true));
     s.on('disconnect', () => setConnected(false));
-    s.on('gameStateUpdate', (gs: GameState) => setGameState(gs));
+    s.on('joinDisplaySuccess', () => { setJoined(true); setJoining(false); });
+    s.on('joinDisplayFail', (p: { message: string }) => { setJoinError(p.message); setJoining(false); });
+    // 若後端尚未支援 joinDisplay，收到 gameStateUpdate 也視為成功
+    s.on('gameStateUpdate', (gs: GameState) => { setGameState(gs); setJoined(true); setJoining(false); });
     s.on('gameClock', (p: { currentAge: number }) => {
       setGameState((gs) => gs ? { ...gs, currentAge: p.currentAge } : gs);
     });
@@ -76,17 +84,30 @@ export default function DisplayScreen() {
             className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-white uppercase tracking-widest text-center text-xl focus:outline-none focus:border-emerald-500"
             placeholder="輸入房間代碼"
             value={roomCode}
-            onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+            onChange={(e) => { setRoomCode(e.target.value.toUpperCase()); setJoinError(''); }}
             maxLength={6}
+            onKeyDown={(e) => { if (e.key === 'Enter' && roomCode.length >= 4) emit('joinDisplay', { roomId: roomCode }); }}
           />
+          {joinError && <p className="text-red-400 text-sm">{joinError}</p>}
           <button
             className="btn-primary w-full text-lg"
-            disabled={!connected || roomCode.length < 6}
-            onClick={() => { emit('adminLogin', { password: '', roomId: roomCode }); setJoined(true); }}
+            disabled={!connected || roomCode.length < 4 || joining}
+            onClick={() => {
+              setJoinError('');
+              setJoining(true);
+              emit('joinDisplay', { roomId: roomCode });
+              // 3 秒後若還沒進入，提示可能是後端問題
+              setTimeout(() => {
+                setJoining((prev) => {
+                  if (prev) setJoinError('沒有回應，請確認房間代碼是否正確，或稍後再試。');
+                  return false;
+                });
+              }, 3000);
+            }}
           >
-            進入展示模式
+            {joining ? '連線中…' : '進入展示模式'}
           </button>
-          {!connected && <p className="text-yellow-400 text-sm">🔌 連線中…</p>}
+          {!connected && <p className="text-yellow-400 text-sm">連線中…</p>}
         </div>
       </div>
     );
@@ -100,150 +121,155 @@ export default function DisplayScreen() {
     );
   }
 
+  const playerUrl = `${window.location.protocol}//${window.location.host}/?room=${gameState.roomId}`;
+
+  // 把玩家轉為 GameBoard 格式
+  const boardPlayers: BoardPlayer[] = gameState.players.map((p, i) => ({
+    id: p.id,
+    name: p.name,
+    position: p.currentPosition,
+    fastTrackPosition: p.fastTrackPosition ?? 0,
+    isInFastTrack: p.isInFastTrack ?? false,
+    isMe: false,
+    colorIndex: i % 6,
+    isBedridden: p.isBedridden,
+  }));
+
+  const dotColors = ['bg-amber-400', 'bg-blue-400', 'bg-pink-400', 'bg-emerald-400', 'bg-purple-400', 'bg-orange-400'];
+
   return (
-    <div className="min-h-screen p-4 flex flex-col gap-4">
-      {/* 頂部狀態列 */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-bold text-emerald-400">百歲人生</h1>
-          <span className="text-gray-500 text-sm">房間 {gameState.roomId}</span>
-          <span className={`px-2 py-1 rounded-full text-xs ${
-            gameState.gamePhase === 'GameOver' ? 'bg-purple-900 text-purple-200' :
-            gameState.gamePhase === 'FastTrack' ? 'bg-emerald-900 text-emerald-200' :
-            'bg-gray-800 text-gray-300'
+    <div className="min-h-screen bg-gray-950 text-white flex flex-col">
+
+      {/* ══ 頂部大型計時器橫幅 ══ */}
+      <div className="flex items-center justify-between px-6 py-3 bg-gray-900 border-b border-gray-700 flex-shrink-0">
+
+        {/* 左：標題 + 房間 + 階段 */}
+        <div className="flex items-center gap-3 min-w-0">
+          <h1 className="text-2xl font-bold text-emerald-400 whitespace-nowrap">百歲人生</h1>
+          <span className="text-gray-500 text-sm font-mono whitespace-nowrap">#{gameState.roomId}</span>
+          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap ${
+            gameState.gamePhase === 'GameOver'   ? 'bg-purple-900 text-purple-200' :
+            gameState.gamePhase === 'FastTrack'  ? 'bg-emerald-900 text-emerald-200' :
+            gameState.gamePhase === 'RatRace'    ? 'bg-blue-900 text-blue-200' :
+            'bg-yellow-900 text-yellow-300'
           }`}>
             {PHASE_LABELS[gameState.gamePhase] ?? gameState.gamePhase}
           </span>
         </div>
-        <div className="text-right">
-          <div className="text-4xl font-bold text-yellow-300">{gameState.currentAge.toFixed(1)}</div>
-          <div className="text-gray-400 text-sm">{STAGE_LABELS[gameState.currentStage] ?? gameState.currentStage} {gameState.isPaused && '⏸ 暫停'}</div>
-        </div>
-      </div>
 
-      {/* 主要內容 */}
-      <div className="flex gap-4 flex-1">
-        {/* 左：玩家排行榜 */}
-        <div className="w-80 space-y-2">
-          <div className="flex justify-between items-center">
-            <h2 className="text-sm font-semibold text-gray-400">玩家狀態</h2>
-            {gameState.gamePhase === 'GameOver' && (
-              <button className="btn-secondary text-xs px-2 py-1" onClick={() => { emit('requestRoomAnalysis'); }}>
-                顯示分析
-              </button>
-            )}
+        {/* 中：大型年齡計時器 */}
+        <div className="text-center flex-shrink-0">
+          <div className="text-7xl font-bold text-yellow-300 tabular-nums leading-none tracking-tight">
+            {gameState.currentAge.toFixed(1)}
           </div>
-          {gameState.players
-            .slice()
-            .sort((a, b) => b.monthlyCashflow - a.monthlyCashflow)
-            .map((p, i) => (
-              <div
-                key={p.id}
-                className={`card py-2 px-3 ${p.id === gameState.currentPlayerTurnId ? 'border-emerald-600' : ''}`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-500 text-xs w-5">{i + 1}</span>
-                    <div>
-                      <p className="text-white text-sm font-semibold truncate max-w-[100px]">{p.name}</p>
-                      <p className="text-gray-500 text-xs">{p.profession.name}</p>
-                    </div>
-                  </div>
-                  <div className="text-right text-xs">
-                    <p className={p.monthlyCashflow >= 0 ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
-                      ${fmt(p.monthlyCashflow)}/月
-                    </p>
-                    <p className="text-gray-500">${fmt(p.cash)} 現金</p>
-                  </div>
-                </div>
-                {/* 能力值小條 */}
-                <div className="flex gap-1 mt-1">
-                  <StatBar label="FQ" value={p.stats.financialIQ} max={10} color="bg-blue-500" />
-                  <StatBar label="HP" value={p.stats.health} max={100} color={p.stats.health > 30 ? 'bg-green-500' : 'bg-red-500'} />
-                  <StatBar label="NT" value={p.stats.network} max={10} color="bg-yellow-500" />
-                </div>
-                {/* 狀態標籤 */}
-                <div className="flex gap-1 mt-1 flex-wrap">
-                  {p.isInFastTrack && <span className="text-xs text-emerald-400">🚀 外圈</span>}
-                  {p.isMarried && <span className="text-xs text-pink-400">💑</span>}
-                  {p.numberOfChildren > 0 && <span className="text-xs text-blue-400">👶×{p.numberOfChildren}</span>}
-                  {p.isBedridden && <span className="text-xs text-red-400">🛏 臥床</span>}
-                  {!p.isAlive && <span className="text-xs text-gray-500">⚰️ 結束</span>}
-                  {p.id === gameState.currentPlayerTurnId && <span className="text-xs text-emerald-300">← 行動中</span>}
-                </div>
-              </div>
-            ))}
+          <div className="text-base text-gray-300 mt-0.5 tracking-wide">
+            歲 &nbsp;·&nbsp; {STAGE_LABELS[gameState.currentStage] ?? gameState.currentStage}
+            {gameState.isPaused && <span className="ml-2 text-orange-400">⏸ 暫停中</span>}
+          </div>
         </div>
 
-        {/* 右：主視圖（分析雷達或跑馬燈） */}
-        <div className="flex-1 space-y-3">
-          {view === 'analysis' && roomAnalysis ? (
-            <RoomAnalysisView analysis={roomAnalysis} />
-          ) : (
-            <LiveView gameState={gameState} ticker={ticker} />
-          )}
-          {view === 'analysis' && (
-            <button className="btn-secondary text-sm" onClick={() => setView('game')}>
-              返回即時畫面
+        {/* 右：控制按鈕 + 連線狀態 */}
+        <div className="flex items-center gap-2 min-w-0 justify-end">
+          {gameState.gamePhase === 'GameOver' && (
+            <button
+              className="text-sm px-4 py-1.5 rounded-lg bg-purple-800 hover:bg-purple-700 transition-colors whitespace-nowrap"
+              onClick={() => emit('requestRoomAnalysis')}
+            >
+              顯示分析
             </button>
           )}
+          {view === 'analysis' && (
+            <button
+              className="text-sm px-4 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors whitespace-nowrap"
+              onClick={() => setView('game')}
+            >
+              返回棋盤
+            </button>
+          )}
+          <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
         </div>
       </div>
-    </div>
-  );
-}
 
-// ── 能力值橫條元件 ──
-function StatBar({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
-  const pct = Math.round((value / max) * 100);
-  return (
-    <div className="flex-1">
-      <div className="flex justify-between text-xs text-gray-500 mb-0.5">
-        <span>{label}</span><span>{value}</span>
-      </div>
-      <div className="h-1 bg-gray-700 rounded-full">
-        <div className={`h-1 rounded-full ${color}`} style={{ width: `${pct}%` }} />
-      </div>
-    </div>
-  );
-}
-
-// ── 即時遊戲視圖 ──
-function LiveView({ gameState, ticker }: { gameState: GameState; ticker: string[] }) {
-  // 現金流長條圖
-  const players = [...gameState.players].sort((a, b) => b.monthlyCashflow - a.monthlyCashflow);
-  const barOption = {
-    backgroundColor: 'transparent',
-    grid: { left: '25%', right: '8%', top: '5%', bottom: '5%' },
-    xAxis: { type: 'value', axisLabel: { color: '#6b7280', formatter: (v: number) => `$${(v / 1000).toFixed(0)}k` }, axisLine: { lineStyle: { color: '#374151' } }, splitLine: { lineStyle: { color: '#1f2937' } } },
-    yAxis: { type: 'category', data: players.map((p) => p.name), axisLabel: { color: '#e5e7eb', fontSize: 13 }, axisLine: { lineStyle: { color: '#374151' } } },
-    series: [{
-      type: 'bar',
-      data: players.map((p, i) => ({
-        value: p.monthlyCashflow,
-        itemStyle: { color: p.monthlyCashflow >= 0 ? COLORS[i % COLORS.length] : '#ef4444' },
-      })),
-      label: { show: true, position: 'right', color: '#e5e7eb', formatter: (p: { value: number }) => `$${fmt(p.value)}` },
-    }],
-  };
-
-  return (
-    <div className="space-y-3">
-      {/* 月現金流排行 */}
-      <div className="card">
-        <h3 className="text-sm font-semibold text-gray-400 mb-2">月現金流排行</h3>
-        <ReactECharts option={barOption} style={{ height: Math.max(200, players.length * 48) }} />
-      </div>
-
-      {/* 跑馬燈 */}
-      <div className="card bg-gray-800">
-        <h3 className="text-xs text-gray-500 mb-1">最新動態</h3>
-        <div className="space-y-1 max-h-32 overflow-y-auto">
-          {ticker.length > 0
-            ? ticker.map((t, i) => <p key={i} className="text-sm text-gray-200">{t}</p>)
-            : <p className="text-gray-600 text-sm">等待遊戲事件…</p>}
+      {/* 主體 */}
+      {view === 'analysis' && roomAnalysis ? (
+        <div className="flex-1 overflow-y-auto p-4">
+          <RoomAnalysisView analysis={roomAnalysis} />
         </div>
-      </div>
+      ) : (
+        <div className="flex flex-1 overflow-hidden">
+
+          {/* ══ 左欄：QR + 玩家名單 ══ */}
+          <div className="w-52 xl:w-60 flex-shrink-0 flex flex-col gap-3 p-3 overflow-y-auto border-r border-gray-800">
+
+            {/* QR Code */}
+            <div className="flex flex-col items-center gap-2 bg-gray-900 rounded-xl p-3">
+              <div className="bg-white rounded-lg p-2">
+                <QRCodeSVG value={playerUrl} size={150} />
+              </div>
+              <p className="text-xs text-gray-400">掃碼加入遊戲</p>
+              <p className="font-mono text-2xl font-bold text-yellow-300 tracking-[0.3em]">{gameState.roomId}</p>
+            </div>
+
+            {/* 玩家名單 */}
+            <div className="space-y-2">
+              <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider px-1">
+                參與者 {gameState.players.length} 人
+              </p>
+              {[...gameState.players]
+                .sort((a, b) => b.monthlyCashflow - a.monthlyCashflow)
+                .map((p, i) => {
+                  const cfColor = p.monthlyCashflow >= 0 ? 'text-emerald-400' : 'text-red-400';
+                  const hpColor = p.stats.health >= 60 ? 'text-green-400' : p.stats.health >= 30 ? 'text-yellow-400' : 'text-red-400';
+                  const isTurn = p.id === gameState.currentPlayerTurnId;
+                  return (
+                    <div key={p.id} className={`rounded-xl px-3 py-2 ${isTurn ? 'bg-emerald-900/40 border border-emerald-700' : 'bg-gray-900'} ${p.isAlive ? '' : 'opacity-40'}`}>
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${dotColors[i % 6]}`} />
+                        <span className={`text-sm font-semibold ${p.isAlive ? 'text-white' : 'line-through text-gray-500'} truncate flex-1`}>
+                          {p.name}
+                        </span>
+                        {isTurn && <span className="text-xs text-emerald-300 flex-shrink-0">行動中</span>}
+                      </div>
+                      <div className="flex items-center gap-3 mt-1 text-xs pl-4">
+                        <span className={`font-mono font-bold ${cfColor}`}>${fmt(p.monthlyCashflow)}/月</span>
+                        <span className={hpColor}>HP {p.stats.health}</span>
+                        {p.isInFastTrack && <span className="text-emerald-400">外圈</span>}
+                        {p.isBedridden && <span className="text-orange-400">臥床</span>}
+                        {p.isMarried && <span className="text-pink-400">已婚</span>}
+                        {!p.isAlive && <span className="text-gray-500">結束</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+
+            {/* 最新動態 */}
+            {ticker.length > 0 && (
+              <div className="bg-gray-900 rounded-xl p-3 space-y-1">
+                <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider">最新動態</p>
+                {ticker.slice(0, 4).map((t, i) => (
+                  <p key={i} className="text-xs text-gray-300 leading-snug">{t}</p>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ══ 右欄：棋盤（底圖背景填滿）══ */}
+          <div
+            className="flex-1 flex items-center justify-center overflow-hidden"
+            style={{
+              backgroundImage: "url('/1.png')",
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              maxHeight: 'calc(100vh - 90px)',
+            }}
+          >
+            <GameBoard players={boardPlayers} currentTurnPlayerId={gameState.currentPlayerTurnId} />
+          </div>
+
+        </div>
+      )}
+
     </div>
   );
 }

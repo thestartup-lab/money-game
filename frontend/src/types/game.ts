@@ -107,6 +107,7 @@ export interface Player {
   isBedridden: boolean;
   travelPenaltyRemaining: number;
   isInFastTrack: boolean;
+  hasPassedSecondLife: boolean;
   fastTrackPosition: number;
   visitedDestinations: string[];
   legacyBonusPoints: number;
@@ -213,3 +214,113 @@ export interface RoomPlayerSummary {
   score: LifeScoreBreakdown;
   cashflowHistory: { age: number; cashflow: number; netWorth: number }[];
 }
+
+// ── 外圈新格子事件型別 ─────────────────────────────────────
+
+/** 科技新創投資機會（後端 emit 給落格玩家）*/
+export interface TechStartupOffer {
+  playerId: string;
+  playerName: string;
+  investmentAmount: number;
+  playerCash: number;
+}
+
+/** 科技新創結果（後端 emit 給落格玩家）*/
+export interface TechStartupResult {
+  playerId: string;
+  invested: boolean;
+  success?: boolean;
+  diceRoll?: number;
+  investmentAmount: number;
+  monthlyCashflow?: number;
+  cashAfter?: number;
+}
+
+/** 資產槓桿自動獎勵（後端 emit 給落格玩家）*/
+export interface AssetLeverageBonus {
+  playerId: string;
+  playerName: string;
+  bonus: number;
+  passiveIncome: number;
+  cashAfter: number;
+}
+
+/** 疾病危機卡結果（後端 emit 給落格玩家）*/
+export interface DiseaseCrisisCard {
+  crisis: {
+    id: string;
+    title: string;
+    description: string;
+    requiredInsurance: string;
+    baseCost: number;
+    insuredCost: number;
+    turnsLostWithoutInsurance: number;
+    turnsLostWithInsurance: number;
+    canCauseDeath: boolean;
+  };
+  result: {
+    wasInsured: boolean;
+    effectiveCost: number;
+    turnsLost: number;
+    deathTriggered: boolean;
+  };
+  hpBefore: number;
+  hpAfter: number;
+}
+
+// ── 格子事件 & 發薪日表單 ─────────────────────────────────
+
+/** 格子落點後的互動事件（在 PlayerPage 以 activeEvent state 控制顯示）*/
+export type ActiveEvent =
+  | { kind: 'doodad'; title: string; description: string; cashDeducted: number; expenseIncrease: number }
+  | { kind: 'crisis_nt_skip'; title: string; description: string; baseCost: number; network: number; timeoutMs: number }
+  | { kind: 'crisis_applied'; title: string; description: string; effectiveCost: number; turnsLost: number; wasInsured: boolean }
+  | { kind: 'deal_pick'; cards: { id: string; name: string; downPayment: number; monthlyCashflow: number }[] }
+  | { kind: 'charity'; amount: number }
+  | { kind: 'tech_startup_offer'; investmentAmount: number; playerCash: number }
+  | { kind: 'tech_startup_result'; success: boolean; diceRoll: number; investmentAmount: number; monthlyCashflow?: number }
+  | { kind: 'asset_leverage'; bonus: number; passiveIncome: number }
+  | { kind: 'disease_crisis'; title: string; description: string; effectiveCost: number; turnsLost: number; hpBefore: number; hpAfter: number; wasInsured: boolean };
+
+/** 發薪日規劃可用選項（後端 buildAffordableOptions 輸出格式）*/
+export interface AffordableOption {
+  available: boolean;
+  cost: number;
+}
+
+export interface AffordableOptions {
+  fqUpgrade:     AffordableOption;
+  healthBoost:   AffordableOption;
+  healthMaintenance: AffordableOption;
+  skillTraining: AffordableOption;
+  networkInvest: AffordableOption;
+}
+
+/** paydayPlanningRequired 的完整 payload（前端收到後存入 paydayForm state）*/
+export interface PaydayFormData {
+  paydayPosition: number;
+  currentCash: number;
+  currentStats: { financialIQ: number; health: number; careerSkill: number; network: number };
+  affordableOptions: AffordableOptions;
+  currentInsurance: { hasMedicalInsurance: boolean; hasLifeInsurance: boolean; hasPropertyInsurance: boolean };
+  stockDCAPortfolioValue: number;
+  timeoutMs: number;
+  travelDestinations?: Array<{ id: string; name: string; region: string; cost: number; lifeExpGained: number }>;
+}
+
+/** 發薪日規劃表單的送出 payload */
+export interface PaydayPlanPayload {
+  investInFQUpgrade: boolean;
+  investInHealthMaintenance: boolean;
+  investInHealthBoost: boolean;
+  investInSkillTraining: boolean;
+  investInNetwork: boolean;
+  stockDCAAmount: number;
+  buyInsuranceTypes: Array<'medical' | 'life' | 'property'>;
+}
+
+/** 生活體驗選擇 */
+export type LifeChoice =
+  | { type: 'none' }
+  | { type: 'travel'; destinationId: string; destinationName: string }
+  | { type: 'social' };

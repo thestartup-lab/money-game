@@ -12,6 +12,7 @@ import {
   NETWORK_AUTO_GAIN_INTERVAL,
   NETWORK_INVEST_COST,
   NETWORK_INVEST_GAIN,
+  STOCK_DCA_MONTHLY_RETURN_RATE,
 } from './gameConfig';
 import { PROFESSION_MAP } from './gameConfig';
 
@@ -59,6 +60,8 @@ export interface PaydayPlanResult {
     skillTraining: InvestmentOutcome;
     networkInvest: InvestmentOutcome;
   };
+  stockDCA: { executed: boolean; amount: number; newPortfolioValue: number };
+  insurancePurchases: Array<{ type: string; success: boolean; message?: string }>;
   statsAfter: {
     financialIQ: number;
     health: number;
@@ -178,6 +181,37 @@ export function applyPaydayPlan(player: Player, plan: PaydayPlanPayload): Payday
   // 一次性扣款
   player.cash -= totalCostDeducted;
 
+  // --- 股票定期定額 ---
+  const dcaAmount = plan.stockDCAAmount ?? 0;
+  let stockDCAResult = { executed: false, amount: dcaAmount, newPortfolioValue: 0 };
+  if (dcaAmount > 0 && player.cash >= dcaAmount) {
+    player.cash -= dcaAmount;
+    const existing = player.assets.find((a) => a.id === 'stock-dca');
+    if (existing) {
+      existing.cost += dcaAmount;
+      existing.currentValue = (existing.currentValue ?? existing.cost) + dcaAmount;
+    } else {
+      player.assets.push({
+        id: 'stock-dca',
+        name: '指數股票基金（定期定額）',
+        type: 'Stock' as import('./gameConstants').AssetType,
+        cost: dcaAmount,
+        currentValue: dcaAmount,
+        monthlyCashflow: 0,
+      });
+    }
+    const updated = player.assets.find((a) => a.id === 'stock-dca');
+    stockDCAResult = { executed: true, amount: dcaAmount, newPortfolioValue: updated?.currentValue ?? dcaAmount };
+  }
+
+  // --- 保險購買 ---
+  const insurancePurchases: Array<{ type: string; success: boolean; message?: string }> = [];
+  for (const insType of plan.buyInsuranceTypes ?? []) {
+    const { buyInsurance } = require('./gameLogic') as typeof import('./gameLogic');
+    const result = buyInsurance(player, insType as import('./gameLogic').InsuranceType);
+    insurancePurchases.push({ type: insType, success: result.success, message: result.success ? undefined : result.message });
+  }
+
   const careerChangeUnlocked =
     prevSkill < SKILL_CAREER_CHANGE_THRESHOLD &&
     player.stats.careerSkill >= SKILL_CAREER_CHANGE_THRESHOLD;
@@ -191,6 +225,8 @@ export function applyPaydayPlan(player: Player, plan: PaydayPlanPayload): Payday
       skillTraining: skillOutcome,
       networkInvest: networkOutcome,
     },
+    stockDCA: stockDCAResult,
+    insurancePurchases,
     statsAfter: {
       financialIQ: player.stats.financialIQ,
       health: player.stats.health,

@@ -12,21 +12,19 @@
   -webkit-overflow-scrolling: touch;
 }
 
-/* ── 主棋盤容器（底圖）─────────────────────────────────────── */
+/* ── 主棋盤容器（底圖由 JS 動態設定）──────────────────────── */
 .gameboard-wrapper {
   position: relative;
-  width: min(100%, 75vh);
-  aspect-ratio: 1 / 1;
+  width: min(100%, calc(100vh * 16 / 9));
+  aspect-ratio: 16 / 9;
   margin: 0 auto;
 
-  /* 手繪底圖 */
-  background-image: url('/board.jpg');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
 
-  border-radius: 8px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+  box-shadow: none;
 }
 
 /* ── 代幣群組（絕對定位於 pos 座標）──────────────────────── */
@@ -160,4 +158,106 @@
 /* ── 響應式 ──────────────────────────────────────────────── */
 @media (max-width: 480px) {
   .gameboard-scroll { padding: 2px 0; }
+}
+
+/* ── 格子標籤層 ──────────────────────────────────────────── */
+.cell-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  z-index: 2;
+  pointer-events: none;
+  text-align: center;
+}
+
+.cell-icon {
+  font-size: clamp(12px, 2.8vh, 34px);
+  line-height: 1;
+}
+
+.cell-name {
+  font-size: clamp(11px, 1.9vh, 24px);
+  color: rgba(240, 220, 160, 0.95);
+  font-family: 'Noto Sans TC', sans-serif;
+  white-space: nowrap;
+  text-shadow:
+    0 0 4px rgba(0, 0, 0, 1),
+    0 1px 3px rgba(0, 0, 0, 0.9),
+    0 0 8px rgba(0, 0, 0, 0.8);
+  font-weight: 700;
+}
+
+/* 外圈標籤更大 */
+.outer-label .cell-icon {
+  font-size: clamp(16px, 3.6vh, 44px);
+}
+
+.outer-label .cell-name {
+  font-size: clamp(13px, 2.4vh, 30px);
+}
+
+/* ── 頂部「百歲人生」標題（內圈視圖）────────────────────── */
+.board-center-title {
+  position: absolute;
+  top: 4.5%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Noto Sans TC', sans-serif;
+  font-size: clamp(18px, 3.2vh, 40px);
+  font-weight: 900;
+  color: rgba(255, 220, 100, 0.95);
+  text-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.8),
+    0 0 12px rgba(200, 150, 50, 0.5);
+  pointer-events: none;
+  z-index: 2;
+  white-space: nowrap;
+  letter-spacing: 0.12em;
+}
+
+/* ── 中心「百歲人生」標題（外圈視圖，放在 board2 卷軸位置）─ */
+.board-ft-title {
+  position: absolute;
+  top: 49%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: 'Noto Sans TC', sans-serif;
+  font-size: clamp(22px, 4.0vh, 52px);
+  font-weight: 900;
+  color: rgba(255, 220, 100, 0.95);
+  text-shadow:
+    0 1px 6px rgba(0, 0, 0, 0.9),
+    0 0 16px rgba(200, 150, 50, 0.6);
+  pointer-events: none;
+  z-index: 2;
+  white-space: nowrap;
+  letter-spacing: 0.15em;
+}
+
+/* ── 視圖切換按鈕 ────────────────────────────────────────── */
+.board-view-toggle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 200, 80, 0.4);
+  border-radius: 20px;
+  color: rgba(255, 210, 100, 0.95);
+  font-family: 'Noto Sans TC', sans-serif;
+  font-size: clamp(10px, 1.2vh, 14px);
+  font-weight: 700;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  white-space: nowrap;
+}
+
+.board-view-toggle:hover {
+  background: rgba(0, 0, 0, 0.75);
+  border-color: rgba(255, 200, 80, 0.8);
 }

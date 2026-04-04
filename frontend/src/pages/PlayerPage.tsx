@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import type { GameState, Player, PlayerAnalysis } from '../types/game';
+import type { GameState, Player, PlayerAnalysis, ActiveEvent, PaydayFormData, PaydayPlanPayload, LifeChoice } from '../types/game';
 import FinancialStatement from '../components/game/FinancialStatement';
 import DiceRoller from '../components/game/DiceRoller';
 import ActionPanel from '../components/game/ActionPanel';
 import AnalysisPage from './AnalysisPage';
-import { GameBoard, type BoardPlayer } from '../components/game/GameBoard';
+import EventCard from '../components/game/EventCard';
+import PaydayPlanForm from '../components/game/PaydayPlanForm';
+import CollapsePanel from '../components/game/CollapsePanel';
+import { innerCircleConfig, outerCircleConfig } from '../components/game/boardConfig';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
@@ -35,52 +38,7 @@ const GROWTH_FIELDS: { key: 'academic' | 'health' | 'social' | 'resource'; label
   { key: 'resource', label: '資源', desc: '影響起始現金與財商初始值' },
 ];
 
-// ── 棋盤 Tab：將 GameState.players 轉為 BoardPlayer 格式 ──
-function BoardTab({
-  players,
-  myId,
-  currentTurnPlayerId,
-}: {
-  players: Player[];
-  myId: string;
-  currentTurnPlayerId: string;
-}) {
-  const boardPlayers: BoardPlayer[] = players.map((p, i) => ({
-    id: p.id,
-    name: p.name,
-    position: p.currentPosition,
-    fastTrackPosition: p.fastTrackPosition ?? 0,
-    isInFastTrack: p.isInFastTrack ?? false,
-    isMe: p.id === myId,
-    colorIndex: i,
-    isBedridden: p.isBedridden,
-  }));
-
-  return (
-    <GameBoard players={boardPlayers} currentTurnPlayerId={currentTurnPlayerId} />
-  );
-}
-
-// ── 簡易 Tab 元件 ──
-function Tabs({ tabs, panels }: { tabs: string[]; panels: React.ReactNode[] }) {
-  const [active, setActive] = useState(0);
-  return (
-    <div>
-      <div className="flex gap-1 bg-gray-800 p-1 rounded-xl mb-3">
-        {tabs.map((t, i) => (
-          <button
-            key={i}
-            className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition-colors ${active === i ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300'}`}
-            onClick={() => setActive(i)}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-      {panels[active]}
-    </div>
-  );
-}
+// ── 常數與型別 ──
 
 export default function PlayerPage() {
   const socketRef = useRef<Socket | null>(null);
@@ -103,11 +61,20 @@ export default function PlayerPage() {
   const [partnershipOffer, setPartnershipOffer] = useState<PartnershipOffer | null>(null);
   const [loanOffer, setLoanOffer] = useState<LoanOffer | null>(null);
 
+  // 格子事件 & 發薪日表單
+  const [activeEvent, setActiveEvent] = useState<ActiveEvent | null>(null);
+  const [paydayForm, setPaydayForm] = useState<PaydayFormData | null>(null);
+
   // Join form state — pre-fill room code from URL ?room=XXX
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return (params.get('room') ?? '').toUpperCase();
+  });
+  // 只有從 URL 帶入房間碼時才預設為「已鎖定」；手動輸入時一直維持輸入框
+  const [roomLocked, setRoomLocked] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return (params.get('room') ?? '').length > 0;
   });
   const [error, setError] = useState('');
 
@@ -190,7 +157,10 @@ export default function PlayerPage() {
     });
 
     s.on('rollResult', (p: { rolled: number; newPosition: number }) => setLastRoll(p));
-    s.on('paydayPlanningRequired', () => addNotification('發薪日到了！請規劃你的投資'));
+    s.on('paydayPlanningRequired', (p: PaydayFormData) => {
+      setPaydayForm(p);
+      addNotification('💰 發薪日到了！請規劃你的投資');
+    });
     s.on('ratRaceEscaped', (p: { playerName: string; canCongratulate?: boolean; playerId?: string }) => {
       addNotification(`🎉 ${p.playerName} 脫出老鼠賽跑！`);
       if (p.canCongratulate && p.playerId !== s.id) {
@@ -244,10 +214,54 @@ export default function PlayerPage() {
       setAnalysis(data);
       setView('analysis');
     });
-    s.on('cardApplied', (p: { playerName?: string; effect?: { type?: string } }) => {
-      if (p.effect?.type === 'crisis') addNotification('危機事件觸發！');
-      if (p.effect?.type === 'baby') addNotification('添丁！');
+    s.on('cardApplied', (p: { playerName?: string; effect?: { type?: string; cashDeducted?: number; monthlyExpenseIncrease?: number; card?: { title?: string; description?: string }; wasInsured?: boolean; effectiveCost?: number; turnsLost?: number } }) => {
+      if (p.effect?.type === 'baby') addNotification('👶 添丁！');
+      // doodad 結果
+      if (p.effect?.cashDeducted !== undefined || p.effect?.monthlyExpenseIncrease !== undefined) {
+        setActiveEvent({
+          kind: 'doodad',
+          title: p.effect.card?.title ?? '意外支出',
+          description: p.effect.card?.description ?? '',
+          cashDeducted: p.effect.cashDeducted ?? 0,
+          expenseIncrease: p.effect.monthlyExpenseIncrease ?? 0,
+        });
+      }
+      // crisis applied（有保險資訊 + 費用）
+      if (p.effect?.effectiveCost !== undefined && p.effect.card?.title) {
+        setActiveEvent({
+          kind: 'crisis_applied',
+          title: p.effect.card.title,
+          description: p.effect.card.description ?? '',
+          effectiveCost: p.effect.effectiveCost,
+          turnsLost: p.effect.turnsLost ?? 0,
+          wasInsured: p.effect.wasInsured ?? false,
+        });
+      }
     });
+
+    // 格子事件監聽
+    s.on('crisisNTSkipAvailable', (p: { crisis: { title: string; description: string; baseCost: number }; network: number; timeoutMs: number }) => {
+      setActiveEvent({ kind: 'crisis_nt_skip', title: p.crisis.title, description: p.crisis.description, baseCost: p.crisis.baseCost, network: p.network, timeoutMs: p.timeoutMs });
+    });
+    s.on('dealCardsDrawn', (p: { cards: Array<{ id: string; name: string; downPayment: number; monthlyCashflow: number }> }) => {
+      setActiveEvent({ kind: 'deal_pick', cards: p.cards });
+    });
+    s.on('charityCardPending', (p: { amount: number }) => {
+      setActiveEvent({ kind: 'charity', amount: p.amount });
+    });
+    s.on('techStartupOffer', (p: { investmentAmount: number; playerCash: number }) => {
+      setActiveEvent({ kind: 'tech_startup_offer', investmentAmount: p.investmentAmount, playerCash: p.playerCash });
+    });
+    s.on('techStartupResult', (p: { success: boolean; diceRoll: number; investmentAmount: number; monthlyCashflow?: number }) => {
+      setActiveEvent({ kind: 'tech_startup_result', success: p.success, diceRoll: p.diceRoll, investmentAmount: p.investmentAmount, monthlyCashflow: p.monthlyCashflow });
+    });
+    s.on('assetLeverageBonus', (p: { bonus: number; passiveIncome: number }) => {
+      setActiveEvent({ kind: 'asset_leverage', bonus: p.bonus, passiveIncome: p.passiveIncome });
+    });
+    s.on('diseaseCrisisCard', (p: { crisis: { title: string; description: string }; result: { wasInsured: boolean; effectiveCost: number; turnsLost: number; deathTriggered: boolean }; hpBefore: number; hpAfter: number }) => {
+      setActiveEvent({ kind: 'disease_crisis', title: p.crisis.title, description: p.crisis.description, effectiveCost: p.result.effectiveCost, turnsLost: p.result.turnsLost, hpBefore: p.hpBefore, hpAfter: p.hpAfter, wasInsured: p.result.wasInsured });
+    });
+
     s.on('gameClock', (p: { currentAge: number }) => {
       setGameState((gs) => gs ? { ...gs, currentAge: p.currentAge } : gs);
     });
@@ -256,6 +270,21 @@ export default function PlayerPage() {
   }, []);
 
   const emit = (event: string, ...args: unknown[]) => socketRef.current?.emit(event, ...args);
+
+  function handleCardDecision(decision: Record<string, unknown>) {
+    emit('submitCardDecision', decision);
+    setActiveEvent(null);
+  }
+
+  function handlePaydaySubmit(plan: PaydayPlanPayload, lifeChoice: LifeChoice) {
+    emit('submitPaydayPlan', plan);
+    if (lifeChoice.type === 'travel') {
+      emit('goTravel', { destinationId: (lifeChoice as { type: 'travel'; destinationId: string; destinationName: string }).destinationId });
+    } else if (lifeChoice.type === 'social') {
+      emit('attendSocialEvent');
+    }
+    setPaydayForm(null);
+  }
 
   const myPlayer: Player | undefined = gameState?.players.find((p) => p.id === myId);
   const isMyTurn = gameState?.currentPlayerTurnId === myId;
@@ -280,23 +309,27 @@ export default function PlayerPage() {
             autoFocus
           />
 
-          {roomCode ? (
+          {roomLocked && roomCode ? (
             <div className="flex items-center gap-2 bg-gray-800 border border-emerald-700 rounded-xl px-3 py-2">
               <span className="text-gray-400 text-sm">房間：</span>
               <span className="font-mono text-emerald-300 text-lg font-bold tracking-widest flex-1">{roomCode}</span>
               <button
                 className="text-xs text-gray-500 hover:text-gray-300 underline"
-                onClick={() => setRoomCode('')}
+                onClick={() => { setRoomCode(''); setRoomLocked(false); }}
               >
                 更改
               </button>
             </div>
           ) : (
             <input
-              className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-white placeholder-gray-500 uppercase tracking-widest focus:outline-none focus:border-emerald-500"
+              className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-white placeholder-gray-500 tracking-widest focus:outline-none focus:border-emerald-500"
+              style={{ textTransform: 'uppercase' }}
               placeholder="房間代碼 (e.g. ABC123)"
               value={roomCode}
-              onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+              onChange={(e) => setRoomCode(e.target.value)}
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
               maxLength={6}
             />
           )}
@@ -304,10 +337,10 @@ export default function PlayerPage() {
           {error && <p className="text-red-400 text-sm text-center">{error}</p>}
           <button
             className="btn-primary w-full text-lg py-3"
-            disabled={!connected || !playerName.trim() || roomCode.length < 6}
+            disabled={!connected || !playerName.trim() || roomCode.length < 4}
             onClick={() => {
               setError('');
-              emit('playerJoin', { playerName: playerName.trim(), roomCode });
+              emit('playerJoin', { playerName: playerName.trim(), roomCode: roomCode.toUpperCase() });
               // 儲存到 localStorage，供斷線後重連使用
               localStorage.setItem('baisuiGame', JSON.stringify({ playerName: playerName.trim(), roomCode }));
             }}
@@ -633,103 +666,186 @@ export default function PlayerPage() {
 
   // ── GAME VIEW ──
   if ((view === 'game' || view === 'gameover') && myPlayer && gameState) {
+    // 找到目前格子
+    const pos = myPlayer.currentPosition;
+    const cellConfig = myPlayer.isInFastTrack
+      ? outerCircleConfig[pos % outerCircleConfig.length]
+      : innerCircleConfig[pos % innerCircleConfig.length];
+
+    // 計算通知數量
+    const notifCount = notifications.length;
+
     return (
-      <div className="min-h-screen p-3 space-y-3 max-w-lg mx-auto">
-        {/* 頂部狀態列 */}
-        <div className="flex items-center justify-between">
-          <div>
-            <span className="text-white font-bold">{myPlayer.name}</span>
-            <span className="ml-2 text-gray-400 text-sm">{myPlayer.profession.name}</span>
-          </div>
-          <div className="text-right">
-            <span className="text-yellow-300 font-bold">{gameState.currentAge.toFixed(1)} 歲</span>
-            {gameState.isPaused && <span className="ml-2 text-orange-400 text-xs">⏸ 暫停</span>}
-          </div>
-        </div>
+      <div className="min-h-screen bg-gray-900 flex flex-col max-w-lg mx-auto">
 
-        {/* 通知 */}
-        {notifications.length > 0 && (
-          <div className="card bg-gray-800 space-y-1 max-h-24 overflow-y-auto">
-            {notifications.map((n, i) => (
-              <p key={i} className="text-xs text-gray-300">{n}</p>
-            ))}
-          </div>
-        )}
-
-        {/* 幸福指數即時目標提示 */}
-        {!isGameOver && (() => {
-          const cf = myPlayer.monthlyCashflow;
-          const exp = myPlayer.totalExpenses;
-          const hp = myPlayer.stats.health;
-          const nt = myPlayer.stats.network;
-          const travels = myPlayer.visitedDestinations?.length ?? 0;
-          let hint = '';
-          let hintColor = 'text-emerald-300';
-          if (hp < 40) {
-            hint = '❤️ 健康警告！少旅遊多休養，維護生命體驗指數';
-            hintColor = 'text-red-400';
-          } else if (cf < 0) {
-            hint = '📉 現金流為負，賣掉負現金流資產讓錢幫你工作';
-            hintColor = 'text-red-400';
-          } else if (!myPlayer.isMarried && nt < 3) {
-            hint = '🤝 NT 人脈偏低，多社交事件可提升人際關係指數';
-            hintColor = 'text-pink-400';
-          } else if (cf < 500) {
-            hint = '💡 持續投資小交易，增加被動收入提升人生成就指數';
-            hintColor = 'text-yellow-400';
-          } else if (travels < 3) {
-            hint = '✈️ 多出去走走！旅遊可提升生命體驗指數';
-            hintColor = 'text-teal-400';
-          } else if (cf >= exp && !myPlayer.isInFastTrack) {
-            hint = '🚀 被動收入已超越支出，快準備脫出老鼠賽跑！';
-            hintColor = 'text-emerald-400';
-          }
-          return hint ? (
-            <div className={`text-xs px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 ${hintColor}`}>
-              {hint}
-            </div>
-          ) : null;
-        })()}
-
-        {/* 遊戲結束橫幅 */}
-        {isGameOver && (
-          <div className="card bg-purple-900 border-purple-700 text-center">
-            <p className="text-purple-200 font-bold">遊戲結束！</p>
-            <button className="btn-primary mt-2 text-sm" onClick={() => { setView('analysis'); emit('requestPlayerAnalysis'); }}>
-              查看我的人生分析
-            </button>
-          </div>
-        )}
-
-        {/* 擲骰 */}
-        {!isGameOver && (
-          <DiceRoller
-            isMyTurn={isMyTurn}
-            isBedridden={myPlayer.isBedridden}
-            onRoll={(count) => emit('playerRoll', { diceCount: count })}
-            lastRoll={lastRoll}
+        {/* ── 發薪日全螢幕表單（最高層） ── */}
+        {paydayForm && myPlayer && (
+          <PaydayPlanForm
+            data={paydayForm}
+            playerCash={myPlayer.cash}
+            onSubmit={handlePaydaySubmit}
           />
         )}
 
-        {/* 標籤切換：棋盤 / 財報 / 行動 */}
-        <Tabs
-          tabs={['棋盤', '財務報表', '行動']}
-          panels={[
-            <BoardTab key="board" players={gameState.players} myId={myId} currentTurnPlayerId={gameState.currentPlayerTurnId} />,
-            <FinancialStatement key="fs" player={myPlayer} />,
-            <ActionPanel
-              key="ap"
-              player={myPlayer}
-              currentAge={gameState.currentAge}
-              onTravel={(destId) => emit('goTravel', { destinationId: destId })}
-              onSocialEvent={() => emit('attendSocialEvent')}
-              onBuyInsurance={(t) => emit('buyInsurance', { insuranceType: t })}
-              onTakeEmergencyLoan={(amt) => emit('takeEmergencyLoan', { amount: amt })}
-              onRequestAnalysis={() => { emit('requestPlayerAnalysis'); }}
-              isGameOver={isGameOver}
-            />,
-          ]}
-        />
+        {/* ── TopBar ── */}
+        <div className="bg-gray-800 border-b border-gray-700 px-4 py-2 flex items-center justify-between">
+          <div className="min-w-0">
+            <div className="text-white font-bold text-sm truncate">{myPlayer.name}</div>
+            <div className="text-gray-400 text-xs truncate">{myPlayer.profession.name}
+              {myPlayer.isInFastTrack && <span className="ml-1 text-yellow-400">★ FastTrack</span>}
+            </div>
+          </div>
+          <div className="text-right shrink-0 ml-2">
+            <div className="text-yellow-300 font-bold text-sm">{gameState.currentAge.toFixed(1)} 歲</div>
+            {gameState.isPaused && <div className="text-orange-400 text-xs">⏸ 暫停</div>}
+            <div className={`text-xs font-bold ${myPlayer.monthlyCashflow >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {myPlayer.monthlyCashflow >= 0 ? '+' : ''}${fmt(myPlayer.monthlyCashflow)}/月
+            </div>
+          </div>
+        </div>
+
+        {/* ── 主要捲動區 ── */}
+        <div className="flex-1 overflow-y-auto">
+
+          {/* 目前格子大圖 */}
+          {!isGameOver && cellConfig && (
+            <div className="mx-4 mt-4 mb-2 rounded-2xl border border-gray-700 bg-gray-800 p-4 text-center">
+              <div className="text-5xl mb-2">{cellConfig.icon}</div>
+              <div className="text-white font-bold text-lg">{cellConfig.name}</div>
+              <div className="text-gray-400 text-xs mt-0.5">
+                {myPlayer.isInFastTrack ? '外圈' : '內圈'} 第 {pos + 1} 格
+              </div>
+            </div>
+          )}
+
+          {/* 事件卡（有事件時取代格子顯示，或加在下面） */}
+          {activeEvent && (
+            <div className="mx-4 mb-3">
+              <EventCard
+                event={activeEvent}
+                onDecision={handleCardDecision}
+                onDismiss={() => setActiveEvent(null)}
+              />
+            </div>
+          )}
+
+          {/* 擲骰區 */}
+          {!isGameOver && (
+            <div className="mx-4 mb-3">
+              <DiceRoller
+                isMyTurn={isMyTurn}
+                isBedridden={myPlayer.isBedridden}
+                onRoll={(count) => emit('playerRoll', { diceCount: count })}
+                lastRoll={lastRoll}
+              />
+            </div>
+          )}
+
+          {/* 幸福指數提示 */}
+          {!isGameOver && (() => {
+            const cf = myPlayer.monthlyCashflow;
+            const exp = myPlayer.totalExpenses;
+            const hp = myPlayer.stats.health;
+            const nt = myPlayer.stats.network;
+            const travels = myPlayer.visitedDestinations?.length ?? 0;
+            let hint = '';
+            let hintColor = 'text-emerald-300';
+            if (hp < 40) { hint = '❤️ 健康警告！少旅遊多休養，維護生命體驗指數'; hintColor = 'text-red-400'; }
+            else if (cf < 0) { hint = '📉 現金流為負，賣掉負現金流資產讓錢幫你工作'; hintColor = 'text-red-400'; }
+            else if (!myPlayer.isMarried && nt < 3) { hint = '🤝 NT 人脈偏低，多社交事件可提升人際關係指數'; hintColor = 'text-pink-400'; }
+            else if (cf < 500) { hint = '💡 持續投資小交易，增加被動收入'; hintColor = 'text-yellow-400'; }
+            else if (travels < 3) { hint = '✈️ 多出去走走！旅遊可提升生命體驗指數'; hintColor = 'text-teal-400'; }
+            else if (cf >= exp && !myPlayer.isInFastTrack) { hint = '🚀 被動收入已超越支出，快準備脫出老鼠賽跑！'; hintColor = 'text-emerald-400'; }
+            return hint ? (
+              <div className={`mx-4 text-xs px-3 py-2 rounded-xl bg-gray-800 border border-gray-700 mb-2 ${hintColor}`}>{hint}</div>
+            ) : null;
+          })()}
+
+          {/* 遊戲結束橫幅 */}
+          {isGameOver && (
+            <div className="mx-4 mt-4 rounded-xl bg-purple-900 border border-purple-700 p-4 text-center">
+              <p className="text-purple-200 font-bold text-lg mb-2">遊戲結束！</p>
+              <button className="btn-primary text-sm w-full" onClick={() => { setView('analysis'); emit('requestPlayerAnalysis'); }}>
+                查看我的人生分析
+              </button>
+            </div>
+          )}
+
+          {/* ── 可展開面板 ── */}
+          <div className="mt-2">
+            <CollapsePanel title="財務報表" badge={myPlayer.monthlyCashflow < 0 ? '!' : undefined}>
+              <FinancialStatement player={myPlayer} />
+            </CollapsePanel>
+
+            <CollapsePanel title="行動" defaultOpen={false}>
+              <ActionPanel
+                player={myPlayer}
+                currentAge={gameState.currentAge}
+                onTravel={(destId) => emit('goTravel', { destinationId: destId })}
+                onSocialEvent={() => emit('attendSocialEvent')}
+                onBuyInsurance={(t) => emit('buyInsurance', { insuranceType: t })}
+                onTakeEmergencyLoan={(amt) => emit('takeEmergencyLoan', { amount: amt })}
+                onRequestAnalysis={() => { emit('requestPlayerAnalysis'); }}
+                isGameOver={isGameOver}
+              />
+            </CollapsePanel>
+
+            <CollapsePanel title="通知" badge={notifCount > 0 ? notifCount : undefined} defaultOpen={false}>
+              {notifications.length > 0 ? (
+                <div className="space-y-1">
+                  {notifications.map((n, i) => (
+                    <p key={i} className="text-xs text-gray-300">{n}</p>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500">目前沒有通知</p>
+              )}
+            </CollapsePanel>
+          </div>
+
+          {/* 互動彈出卡片（合夥、借貸、恭喜、競標）移至通知面板以外的懸浮層 */}
+          {congratulatableEvent && (
+            <div className="mx-4 my-2 rounded-xl border border-yellow-600 bg-yellow-900 p-3 space-y-2">
+              <p className="text-yellow-200 font-semibold text-sm">🎉 {congratulatableEvent.targetName} {congratulatableEvent.event}！</p>
+              <p className="text-yellow-400 text-xs">花費 $500 送上祝賀（對方 +$500，NT+0.2）</p>
+              <div className="flex gap-2">
+                <button className="btn-primary text-sm flex-1" onClick={() => { emit('congratulate', { targetPlayerId: congratulatableEvent.targetId, event: congratulatableEvent.event }); setCongratulatableEvent(null); }}>🎊 恭喜（$500）</button>
+                <button className="btn-secondary text-sm" onClick={() => setCongratulatableEvent(null)}>略過</button>
+              </div>
+            </div>
+          )}
+          {activeAuction && (
+            <div className="mx-4 my-2 rounded-xl border border-blue-600 bg-blue-900 p-3 space-y-2">
+              <p className="text-blue-200 font-semibold text-sm">🔔 {activeAuction.triggeredByName} 觸發競標</p>
+              <div className="flex gap-2">
+                <input type="number" value={auctionBid} onChange={(e) => setAuctionBid(e.target.value)} placeholder="出價金額" className="input-field flex-1 text-sm" />
+                <button className="btn-primary text-sm" onClick={() => { emit('bidDeal', { auctionId: activeAuction.auctionId, bidAmount: Number(auctionBid) }); setAuctionBid(''); }}>出價</button>
+                <button className="btn-secondary text-sm" onClick={() => setActiveAuction(null)}>放棄</button>
+              </div>
+            </div>
+          )}
+          {partnershipOffer && (
+            <div className="mx-4 my-2 rounded-xl border border-green-600 bg-green-900 p-3 space-y-2">
+              <p className="text-green-200 font-semibold text-sm">🤝 {partnershipOffer.offerorName} 邀請你合夥！</p>
+              <div className="flex gap-2">
+                <button className="btn-primary text-sm flex-1" onClick={() => { emit('partnershipResponse', { offerId: partnershipOffer.offerId, accepted: true }); setPartnershipOffer(null); }}>✅ 接受</button>
+                <button className="btn-secondary text-sm" onClick={() => { emit('partnershipResponse', { offerId: partnershipOffer.offerId, accepted: false }); setPartnershipOffer(null); }}>❌ 拒絕</button>
+              </div>
+            </div>
+          )}
+          {loanOffer && (
+            <div className="mx-4 my-2 rounded-xl border border-purple-600 bg-purple-900 p-3 space-y-2">
+              <p className="text-purple-200 font-semibold text-sm">💳 {loanOffer.lenderName} 願意借你 ${fmt(loanOffer.amount)}</p>
+              <p className="text-purple-400 text-xs">月息 {(loanOffer.monthlyRate * 100).toFixed(1)}%</p>
+              <div className="flex gap-2">
+                <button className="btn-primary text-sm flex-1" onClick={() => { emit('loanResponse', { offerId: loanOffer.offerId, accepted: true }); setLoanOffer(null); }}>✅ 借款</button>
+                <button className="btn-secondary text-sm" onClick={() => { emit('loanResponse', { offerId: loanOffer.offerId, accepted: false }); setLoanOffer(null); }}>❌ 拒絕</button>
+              </div>
+            </div>
+          )}
+
+          <div className="h-4" /> {/* 底部空間 */}
+        </div>
       </div>
     );
   }

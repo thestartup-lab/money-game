@@ -209,6 +209,10 @@ export interface PaydayPlanPayload {
   investInSkillTraining: boolean;
   /** 主動拓展人脈：+1 NT（費用 $400） */
   investInNetwork: boolean;
+  /** 股票定期定額投入金額（0 = 不投入；可選 1000 / 2000 / 5000）*/
+  stockDCAAmount: number;
+  /** 本次購買的保險類型（已持有的將被跳過）*/
+  buyInsuranceTypes: Array<'medical' | 'life' | 'property'>;
 }
 
 // ============================================================
@@ -412,6 +416,8 @@ export class Player {
   skipFirstPayday: boolean;
   /** 玩家是否處於斷線等待重連狀態（30 秒內可重新加入恢復資料）。 */
   isDisconnected: boolean;
+  /** 玩家是否已至少路過「第二人生」格一次；路過後才能進入 FastTrack。 */
+  hasPassedSecondLife: boolean;
   /**
    * 玩家人生事件日誌。
    * 用於遊戲結束後的決策反思分析，記錄每個關鍵決策點的前後財務狀況。
@@ -475,6 +481,7 @@ export class Player {
     this.actionTokensThisPayday = profession.hasFlexibleSchedule ? Infinity : 1;
     this.skipFirstPayday = false;
     this.isDisconnected = false;
+    this.hasPassedSecondLife = false;
     this.eventLog = [];
   }
 

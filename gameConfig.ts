@@ -19,13 +19,22 @@ import {
 // ============================================================
 
 /** 老鼠賽跑圈的總格數 */
-export const RAT_RACE_TRACK_SIZE = 24;
+export const RAT_RACE_TRACK_SIZE = 25;
 
 /** 外圈（FastTrack）棋盤的總格數 */
-export const FAST_TRACK_TRACK_SIZE = 16;
+export const FAST_TRACK_TRACK_SIZE = 17;
 
 /** 外圈發薪日額外紅利倍率（總資產 × 此比率）*/
 export const FAST_TRACK_PAYDAY_BONUS_RATE = 0.01;
+
+/** 股票定期定額每發薪日複利增長率（模擬指數基金長期報酬）*/
+export const STOCK_DCA_MONTHLY_RETURN_RATE = 0.005;
+
+/** 股票定期定額可選投入金額選項 */
+export const STOCK_DCA_AMOUNTS = [1000, 2000, 5000] as const;
+
+/** 「第二人生」格的索引（內圈第 25 格，路過後才能進入外圈）*/
+export const SECOND_LIFE_CELL = 24;
 
 /**
  * 所有「發薪日」格的索引位置。
