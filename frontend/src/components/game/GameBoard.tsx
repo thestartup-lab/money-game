@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { innerCircleConfig, outerCircleConfig } from './boardConfig';
 import './GameBoard.css';
 
 // ============================================================
@@ -26,37 +25,10 @@ const PLAYER_COLORS = [
 ];
 
 // ============================================================
-// 主組件 — 雙底圖切換：board1.jpg（內圈）/ board2.jpg（外圈）
+// 主組件 — 雙底圖切換：1.png（內圈）/ 2.png（外圈）
 // ============================================================
 export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
   const [boardView, setBoardView] = useState<'inner' | 'outer'>('inner');
-
-  // ── 依格子位置分組玩家 ────────────────────────────────────
-  const byPos: Record<number, BoardPlayer[]> = {};
-  const ftByPos: Record<number, BoardPlayer[]> = {};
-
-  for (const p of players) {
-    if (p.isInFastTrack) {
-      const idx = p.fastTrackPosition % outerCircleConfig.length;
-      if (!ftByPos[idx]) ftByPos[idx] = [];
-      ftByPos[idx].push(p);
-    } else {
-      const idx = p.position % innerCircleConfig.length;
-      if (!byPos[idx]) byPos[idx] = [];
-      byPos[idx].push(p);
-    }
-  }
-
-  // ── 當前回合玩家格位 ──────────────────────────────────────
-  const turnPlayer = players.find((p) => p.id === currentTurnPlayerId);
-  const turnInnerPos =
-    turnPlayer && !turnPlayer.isInFastTrack
-      ? turnPlayer.position % innerCircleConfig.length
-      : -1;
-  const turnFtPos =
-    turnPlayer && turnPlayer.isInFastTrack
-      ? turnPlayer.fastTrackPosition % outerCircleConfig.length
-      : -1;
 
   const bgImage = boardView === 'inner' ? "url('/1.png')" : "url('/2.png')";
 
@@ -75,78 +47,6 @@ export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
           {boardView === 'inner' ? 'FastTrack ▶' : '◀ 老鼠賽跑'}
         </button>
 
-        {/* ══ 內圈視圖 ══ */}
-        {boardView === 'inner' && (
-          <>
-            {/* 格子標籤由圖片本身提供，此處不再渲染 */}
-
-            {/* 代幣 */}
-            {innerCircleConfig.map((sq, i) => {
-              if (!sq.pos) return null;
-              const cellPlayers = byPos[i] ?? [];
-              const isActive = i === turnInnerPos;
-              if (cellPlayers.length === 0 && !isActive) return null;
-              const [lp, tp] = sq.pos;
-              return (
-                <div
-                  key={sq.id}
-                  className={`token-cluster${isActive ? ' active' : ''}`}
-                  style={{ left: `${lp}%`, top: `${tp}%` }}
-                >
-                  {isActive && <div className="active-ring" />}
-                  {cellPlayers.map((p) => (
-                    <div
-                      key={p.id}
-                      className={`player-token${p.isMe ? ' is-me' : ''}${p.isBedridden ? ' bedridden' : ''}`}
-                      style={{ backgroundColor: PLAYER_COLORS[p.colorIndex % 6] }}
-                      data-name={p.name.slice(0, 4)}
-                      title={p.name}
-                    >
-                      {p.name[0]}
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
-          </>
-        )}
-
-        {/* ══ 外圈視圖（FastTrack）══ */}
-        {boardView === 'outer' && (
-          <>
-            {/* 格子標籤由圖片本身提供，此處不再渲染 */}
-
-            {/* 代幣 */}
-            {outerCircleConfig.map((sq, i) => {
-              if (!sq.pos) return null;
-              const cellPlayers = ftByPos[i] ?? [];
-              const isActive = i === turnFtPos;
-              if (cellPlayers.length === 0 && !isActive) return null;
-              const [lp, tp] = sq.pos;
-              return (
-                <div
-                  key={sq.id}
-                  className={`token-cluster outer${isActive ? ' active' : ''}`}
-                  style={{ left: `${lp}%`, top: `${tp}%` }}
-                >
-                  {isActive && <div className="active-ring" />}
-                  {cellPlayers.map((p) => (
-                    <div
-                      key={p.id}
-                      className={`player-token${p.isMe ? ' is-me' : ''}${p.isBedridden ? ' bedridden' : ''}`}
-                      style={{ backgroundColor: PLAYER_COLORS[p.colorIndex % 6] }}
-                      data-name={p.name.slice(0, 4)}
-                      title={p.name}
-                    >
-                      {p.name[0]}
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
-          </>
-        )}
-
         {/* ══ 玩家清單（底部半透明浮層）══ */}
         {players.length > 0 && (
           <div className="board-player-list">
@@ -164,7 +64,7 @@ export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
                 <span className="board-player-pos">
                   {p.isInFastTrack
                     ? `FT#${p.fastTrackPosition % 16}`
-                    : `#${p.position % 24}`}
+                    : `#${p.position % 25}`}
                 </span>
               </div>
             ))}

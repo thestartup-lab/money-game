@@ -1,5 +1,5 @@
 /* ============================================================
-   GameBoard.css — board.jpg 底圖 + 玩家代幣疊加層
+   GameBoard.css — 1.png / 2.png 底圖 + 玩家清單覆疊
    ============================================================ */
 
 @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Noto+Sans+TC:wght@400;700&display=swap');
@@ -24,100 +24,6 @@
   background-repeat: no-repeat;
 
   border-radius: 4px;
-  box-shadow: none;
-}
-
-/* ── 代幣群組（絕對定位於 pos 座標）──────────────────────── */
-.token-cluster {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 2px;
-  z-index: 3;
-  max-width: 60px;
-  padding-bottom: 18px; /* 為姓名標籤留空間 */
-}
-
-/* ── 當前回合高亮環 ────────────────────────────────────────── */
-.active-ring {
-  position: absolute;
-  inset: -8px;
-  border-radius: 50%;
-  border: 2px dashed rgba(255, 255, 255, 0.95);
-  animation: ring-pulse 1.4s ease-in-out infinite;
-  pointer-events: none;
-  z-index: 0;
-}
-
-@keyframes ring-pulse {
-  0%, 100% { opacity: 0.95; transform: scale(1); }
-  50%       { opacity: 0.4; transform: scale(1.2); }
-}
-
-/* ── 玩家代幣 ──────────────────────────────────────────────── */
-.player-token {
-  position: relative;
-  z-index: 1;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  font-family: 'Noto Sans TC', sans-serif;
-  font-size: 11px;
-  font-weight: 900;
-  color: #fff;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  border: 2px solid rgba(255, 255, 255, 0.8);
-  box-shadow:
-    0 2px 6px rgba(0, 0, 0, 0.7),
-    0 0 0 1px rgba(0, 0, 0, 0.4);
-  transition: transform 0.15s ease;
-  overflow: hidden;
-  line-height: 1;
-}
-
-/* 代幣底部姓名小標籤 */
-.player-token::after {
-  content: attr(data-name);
-  position: absolute;
-  bottom: -16px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-family: 'Noto Sans TC', sans-serif;
-  font-size: 9px;
-  font-weight: 700;
-  white-space: nowrap;
-  color: #fff;
-  text-shadow: 0 1px 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.8);
-  pointer-events: none;
-}
-
-.player-token.is-me {
-  outline: 2.5px solid #ffffff;
-  outline-offset: 2px;
-  transform: scale(1.25);
-  box-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.8),
-    0 0 10px rgba(255, 255, 255, 0.4);
-}
-
-.player-token.bedridden {
-  opacity: 0.45;
-  filter: grayscale(0.6);
-  transform: rotate(90deg);
-}
-
-/* 外圈代幣更大 */
-.token-cluster.outer .player-token {
-  width: 32px;
-  height: 32px;
-  font-size: 12px;
 }
 
 /* ── 玩家清單浮層（底部半透明）──────────────────────────── */
@@ -126,135 +32,62 @@
   bottom: 6px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(4px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  padding: 6px 12px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  min-width: 120px;
-  max-width: 200px;
+  gap: 3px;
+  min-width: 140px;
+  max-width: 260px;
   z-index: 10;
 }
 
 .board-player-item {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
 }
 
 .board-player-dot {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  border: 1.5px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
 }
 
 .board-player-name {
-  font-family: 'Caveat', 'Noto Sans TC', cursive, sans-serif;
-  font-size: 10px;
-  color: rgba(220, 200, 160, 0.85);
+  font-family: 'Noto Sans TC', sans-serif;
+  font-size: 12px;
+  color: rgba(240, 220, 180, 0.9);
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
 }
 
 .board-player-item.is-me .board-player-name {
-  color: #e8d5a0;
+  color: #fde68a;
   font-weight: 700;
 }
 
 .board-player-pos {
-  font-family: 'Caveat', cursive;
-  font-size: 9px;
-  color: rgba(150, 120, 70, 0.8);
+  font-family: 'Noto Sans TC', cursive;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(180, 150, 80, 0.9);
   flex-shrink: 0;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
 /* ── 響應式 ──────────────────────────────────────────────── */
 @media (max-width: 480px) {
   .gameboard-scroll { padding: 2px 0; }
-}
-
-/* ── 格子標籤層 ──────────────────────────────────────────── */
-.cell-label {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1px;
-  z-index: 2;
-  pointer-events: none;
-  text-align: center;
-}
-
-.cell-icon {
-  font-size: clamp(12px, 2.8vh, 34px);
-  line-height: 1;
-}
-
-.cell-name {
-  font-size: clamp(11px, 1.9vh, 24px);
-  color: rgba(240, 220, 160, 0.95);
-  font-family: 'Noto Sans TC', sans-serif;
-  white-space: nowrap;
-  text-shadow:
-    0 0 4px rgba(0, 0, 0, 1),
-    0 1px 3px rgba(0, 0, 0, 0.9),
-    0 0 8px rgba(0, 0, 0, 0.8);
-  font-weight: 700;
-}
-
-/* 外圈標籤更大 */
-.outer-label .cell-icon {
-  font-size: clamp(16px, 3.6vh, 44px);
-}
-
-.outer-label .cell-name {
-  font-size: clamp(13px, 2.4vh, 30px);
-}
-
-/* ── 頂部「百歲人生」標題（內圈視圖）────────────────────── */
-.board-center-title {
-  position: absolute;
-  top: 4.5%;
-  left: 50%;
-  transform: translateX(-50%);
-  font-family: 'Noto Sans TC', sans-serif;
-  font-size: clamp(18px, 3.2vh, 40px);
-  font-weight: 900;
-  color: rgba(255, 220, 100, 0.95);
-  text-shadow:
-    0 1px 4px rgba(0, 0, 0, 0.8),
-    0 0 12px rgba(200, 150, 50, 0.5);
-  pointer-events: none;
-  z-index: 2;
-  white-space: nowrap;
-  letter-spacing: 0.12em;
-}
-
-/* ── 中心「百歲人生」標題（外圈視圖，放在 board2 卷軸位置）─ */
-.board-ft-title {
-  position: absolute;
-  top: 49%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-family: 'Noto Sans TC', sans-serif;
-  font-size: clamp(22px, 4.0vh, 52px);
-  font-weight: 900;
-  color: rgba(255, 220, 100, 0.95);
-  text-shadow:
-    0 1px 6px rgba(0, 0, 0, 0.9),
-    0 0 16px rgba(200, 150, 50, 0.6);
-  pointer-events: none;
-  z-index: 2;
-  white-space: nowrap;
-  letter-spacing: 0.15em;
 }
 
 /* ── 視圖切換按鈕 ────────────────────────────────────────── */
