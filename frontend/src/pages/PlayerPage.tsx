@@ -225,6 +225,7 @@ export default function PlayerPage() {
     });
     s.on('cardApplied', (p: { playerName?: string; effect?: { type?: string; cashDeducted?: number; monthlyExpenseIncrease?: number; card?: { title?: string; description?: string }; wasInsured?: boolean; effectiveCost?: number; turnsLost?: number } }) => {
       if (p.effect?.type === 'baby') addNotification('👶 添丁！');
+      if (p.effect?.type === 'crisisAvoided') addNotification('🍀 危機事件：恭喜平安無事！這次有驚無險。');
       // doodad 結果
       if (p.effect?.cashDeducted !== undefined || p.effect?.monthlyExpenseIncrease !== undefined) {
         setActiveEvent({
