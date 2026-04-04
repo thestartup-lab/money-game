@@ -17,6 +17,8 @@ export interface SquareConfig {
   color: string;
   /** 格子邊框色 */
   borderColor: string;
+  /** 格子說明文字（可選），顯示於玩家手機格子卡片下方 */
+  description?: string;
   /**
    * 絕對定位座標（僅外圈使用），以百分比表示相對 board-wrapper 的位置。
    * [left%, top%]
@@ -68,25 +70,25 @@ const G = {
 export const innerCircleConfig: SquareConfig[] = [
   // ── 內圈 24 格（1.png，中心 (40%,48%)，rx=30% ry=40%，順時針每格 15°）
   // x = 40 + 30*sin(angle),  y = 48 - 40*cos(angle)
-  { id: 'inner-0',  type: 'payday',       name: '發薪日',   icon: '💰', ...C.payday,       pos: [40.0,  8.0] },
+  { id: 'inner-0',  type: 'payday',       name: '發薪日',   icon: '💰', ...C.payday,       description: '領取薪水！可投資 FQ／HP／SK／NT、買保險、股票定期定額，也能安排旅遊或社交體驗。', pos: [40.0,  8.0] },
   { id: 'inner-1',  type: 'smallDeal',    name: '小交易',   icon: '📋', ...C.smallDeal,    pos: [47.8,  9.3] },
   { id: 'inner-2',  type: 'doodad',       name: '意外支出', icon: '💸', ...C.doodad,       pos: [55.0, 13.3] },
   { id: 'inner-3',  type: 'smallDeal',    name: '小交易',   icon: '📋', ...C.smallDeal,    pos: [61.2, 19.7] },
   { id: 'inner-4',  type: 'bigDeal',      name: '大交易',   icon: '🏢', ...C.bigDeal,      pos: [66.0, 28.0] },
   { id: 'inner-5',  type: 'crisis',       name: '危機事件', icon: '⚡', ...C.crisis,       pos: [68.9, 37.6] },
-  { id: 'inner-6',  type: 'payday',       name: '發薪日',   icon: '💰', ...C.payday,       pos: [70.0, 48.0] },
+  { id: 'inner-6',  type: 'payday',       name: '發薪日',   icon: '💰', ...C.payday,       description: '領取薪水！可投資 FQ／HP／SK／NT、買保險、股票定期定額，也能安排旅遊或社交體驗。', pos: [70.0, 48.0] },
   { id: 'inner-7',  type: 'smallDeal',    name: '小交易',   icon: '📋', ...C.smallDeal,    pos: [68.9, 58.4] },
   { id: 'inner-8',  type: 'doodad',       name: '意外支出', icon: '💸', ...C.doodad,       pos: [66.0, 68.0] },
   { id: 'inner-9',  type: 'baby',         name: '添丁',     icon: '👶', ...C.baby,         pos: [61.2, 76.3] },
   { id: 'inner-10', type: 'relationship', name: '人際關係', icon: '🤝', ...C.relationship, pos: [55.0, 82.7] },
   { id: 'inner-11', type: 'charity',      name: '慈善捐款', icon: '❤️', ...C.charity,      pos: [47.8, 86.7] },
-  { id: 'inner-12', type: 'payday',       name: '發薪日',   icon: '💰', ...C.payday,       pos: [40.0, 88.0] },
+  { id: 'inner-12', type: 'payday',       name: '發薪日',   icon: '💰', ...C.payday,       description: '領取薪水！可投資 FQ／HP／SK／NT、買保險、股票定期定額，也能安排旅遊或社交體驗。', pos: [40.0, 88.0] },
   { id: 'inner-13', type: 'doodad',       name: '意外支出', icon: '💸', ...C.doodad,       pos: [32.2, 86.7] },
   { id: 'inner-14', type: 'bigDeal',      name: '大交易',   icon: '🏢', ...C.bigDeal,      pos: [25.0, 82.7] },
   { id: 'inner-15', type: 'smallDeal',    name: '小交易',   icon: '📋', ...C.smallDeal,    pos: [18.8, 76.3] },
   { id: 'inner-16', type: 'market',       name: '市場行情', icon: '📈', ...C.market,       pos: [14.0, 68.0] },
   { id: 'inner-17', type: 'crisis',       name: '危機事件', icon: '⚡', ...C.crisis,       pos: [11.1, 58.4] },
-  { id: 'inner-18', type: 'payday',       name: '發薪日',   icon: '💰', ...C.payday,       pos: [10.0, 48.0] },
+  { id: 'inner-18', type: 'payday',       name: '發薪日',   icon: '💰', ...C.payday,       description: '領取薪水！可投資 FQ／HP／SK／NT、買保險、股票定期定額，也能安排旅遊或社交體驗。', pos: [10.0, 48.0] },
   { id: 'inner-19', type: 'smallDeal',    name: '小交易',   icon: '📋', ...C.smallDeal,    pos: [11.1, 37.6] },
   { id: 'inner-20', type: 'relationship', name: '人際關係', icon: '🤝', ...C.relationship, pos: [14.0, 28.0] },
   { id: 'inner-21', type: 'bigDeal',      name: '大交易',   icon: '🏢', ...C.bigDeal,      pos: [18.8, 19.7] },
@@ -109,19 +111,19 @@ export const innerCircleConfig: SquareConfig[] = [
 export const outerCircleConfig: SquareConfig[] = [
   // ── 外圈 16 格（2.png，橢圓圓心 (50%,49%)，rx=37% ry=34%，順時針每格 22.5°）
   // x = 50 + 37*sin(angle),  y = 49 - 34*cos(angle)
-  { id: 'outer-0',  type: 'ftPayday',     name: '發薪+紅利', icon: '💎', ...G.paydays,    pos: [50.0, 15.0] },
+  { id: 'outer-0',  type: 'ftPayday',     name: '發薪+紅利', icon: '💎', ...G.paydays,    description: '領取薪水與 FastTrack 紅利！同樣可投資、買保險、安排體驗。', pos: [50.0, 15.0] },
   { id: 'outer-1',  type: 'ftRealEstate', name: '大型房地產', icon: '🏰', ...G.realestate, pos: [64.2, 17.6] },
   { id: 'outer-2',  type: 'ftStock',      name: '股市大機會', icon: '📊', ...G.stock,      pos: [76.2, 25.0] },
   { id: 'outer-3',  type: 'ftNetwork',    name: '人脈峰會',   icon: '🌐', ...G.network,    pos: [84.2, 36.0] },
   { id: 'outer-4',  type: 'ftCharity',    name: '慈善格',     icon: '❤️', ...G.charity,    pos: [87.0, 49.0] },
   { id: 'outer-5',  type: 'ftBusiness',   name: '事業擴張',   icon: '🏗️', ...G.business,   pos: [84.2, 62.0] },
-  { id: 'outer-6',  type: 'ftPayday',     name: '發薪+紅利', icon: '💎', ...G.paydays,    pos: [76.2, 73.0] },
+  { id: 'outer-6',  type: 'ftPayday',     name: '發薪+紅利', icon: '💎', ...G.paydays,    description: '領取薪水與 FastTrack 紅利！同樣可投資、買保險、安排體驗。', pos: [76.2, 73.0] },
   { id: 'outer-7',  type: 'ftTax',        name: '稅務規劃',   icon: '📑', ...G.tax,        pos: [64.2, 80.4] },
   { id: 'outer-8',  type: 'ftStartup',    name: '科技新創',   icon: '💡', ...G.startup,    pos: [50.0, 83.0] },
   { id: 'outer-9',  type: 'ftWave',       name: '時代浪潮',   icon: '🌊', ...G.wave,       pos: [35.8, 80.4] },
   { id: 'outer-10', type: 'ftPartner',    name: '合夥機會',   icon: '🤲', ...G.partner,    pos: [23.8, 73.0] },
   { id: 'outer-11', type: 'ftCrisis',     name: '危機考驗',   icon: '⚡', ...G.crisis,     pos: [15.8, 62.0] },
-  { id: 'outer-12', type: 'ftPayday',     name: '發薪+紅利', icon: '💎', ...G.paydays,    pos: [13.0, 49.0] },
+  { id: 'outer-12', type: 'ftPayday',     name: '發薪+紅利', icon: '💎', ...G.paydays,    description: '領取薪水與 FastTrack 紅利！同樣可投資、買保險、安排體驗。', pos: [13.0, 49.0] },
   { id: 'outer-13', type: 'ftTravel',     name: '生命歷練',   icon: '✈️', ...G.travel,    pos: [15.8, 36.0] },
   { id: 'outer-14', type: 'ftRelation',   name: '人際關係',   icon: '💫', ...G.relation,   pos: [23.8, 25.0] },
   { id: 'outer-15', type: 'ftLeverage',   name: '資產槓桿',   icon: '🚀', ...G.leverage,   pos: [35.8, 17.6] },

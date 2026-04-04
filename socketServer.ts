@@ -218,6 +218,7 @@ function serializePlayer(p: Player): object {
     growthPointsRemaining: p.growthPointsRemaining,
     lifeExperience: p.lifeExperience,
     hasContinuedEducation: p.hasContinuedEducation,
+    startAge: p.startAge ?? 20,
     isMarried: p.isMarried,
     marriageBonus: p.marriageBonus,
     relationshipPoints: p.relationshipPoints,
@@ -1214,6 +1215,7 @@ io.on('connection', (socket: Socket) => {
     player.expenses.creditCardPayment = chosen.startingCreditCard;
     player.expenses.otherExpenses = chosen.startingOtherExpenses;
     player.actionTokensThisPayday = chosen.hasFlexibleSchedule ? Infinity : 1;
+    player.startAge = hasEdu ? 25 : 22;
     player.pre20Done = true;
 
     console.log(`[selectQuadrant] ${player.name}（${roomId}）選擇 ${quadrant} 象限，分配職業：${chosen.name}${hasEdu ? '（進修後）' : ''}`);

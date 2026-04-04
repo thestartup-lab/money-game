@@ -216,6 +216,9 @@ export default function PlayerPage() {
     s.on('playerFinalScore', (p: { playerName: string; deathAge: number; score: { total: number } }) => {
       addNotification(`${p.playerName} 在 ${p.deathAge} 歲結束人生（${p.score.total} 分）`);
     });
+    s.on('globalEventAnnouncement', (p: { event: { title: string; description: string } }) => {
+      addNotification(`📢 全局事件：${p.event?.title ?? ''} — ${p.event?.description ?? ''}`);
+    });
     s.on('playerAnalysis', (data: PlayerAnalysis) => {
       setAnalysis(data);
       setView('analysis');
@@ -710,7 +713,9 @@ export default function PlayerPage() {
             </div>
           </div>
           <div className="text-right shrink-0 ml-2">
-            <div className="text-yellow-300 font-bold text-sm">{gameState.currentAge.toFixed(1)} 歲</div>
+            <div className="text-yellow-300 font-bold text-sm">
+              {(gameState.currentAge + ((myPlayer.startAge ?? 20) - 20)).toFixed(1)} 歲
+            </div>
             {gameState.isPaused && <div className="text-orange-400 text-xs">⏸ 暫停</div>}
             <div className={`text-xs font-bold ${myPlayer.monthlyCashflow >= 0 ? 'text-green-400' : 'text-red-400'}`}>
               {myPlayer.monthlyCashflow >= 0 ? '+' : ''}${fmt(myPlayer.monthlyCashflow)}/月
@@ -729,6 +734,11 @@ export default function PlayerPage() {
               <div className="text-gray-400 text-xs mt-0.5">
                 {myPlayer.isInFastTrack ? '外圈' : '內圈'} 第 {pos + 1} 格
               </div>
+              {cellConfig.description && (
+                <div className="mt-2 text-xs text-emerald-300 bg-emerald-950/50 rounded-xl px-3 py-2 text-left">
+                  {cellConfig.description}
+                </div>
+              )}
             </div>
           )}
 
@@ -860,6 +870,14 @@ export default function PlayerPage() {
           )}
 
           <div className="h-4" /> {/* 底部空間 */}
+
+          {/* 大型年齡提示（底部裝飾性數字） */}
+          <div className="flex items-center justify-center pb-8 pt-2 select-none pointer-events-none">
+            <span className="text-9xl font-black tabular-nums leading-none"
+              style={{ color: 'rgba(253,224,71,0.12)' }}>
+              {Math.floor(gameState.currentAge + ((myPlayer.startAge ?? 20) - 20))}
+            </span>
+          </div>
         </div>
       </div>
     );

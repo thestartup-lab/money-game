@@ -97,7 +97,7 @@ export default function AdminPage() {
     s.on('gamePaused', (p: { reason?: string }) => addLog(`遊戲暫停${p.reason ? `：${p.reason}` : ''}`));
     s.on('gameResumed', () => addLog('遊戲繼續'));
     s.on('gameStarted', (p: { durationMinutes: number }) => addLog(`遊戲開始，時長 ${p.durationMinutes} 分鐘`));
-    s.on('globalEventAnnouncement', (p: { title: string }) => addLog(`全局事件：${p.title}`));
+    s.on('globalEventAnnouncement', (p: { event: { title: string; description: string } }) => addLog(`全局事件：${p.event?.title ?? '未知事件'}`));
     s.on('playerStatUpdated', (p: { playerName: string }) => addLog(`玩家數值已更新：${p.playerName}`));
     s.on('error', (p: { message: string }) => addLog(`錯誤：${p.message}`));
 

@@ -44,6 +44,9 @@ export default function DisplayScreen() {
   const [joining, setJoining] = useState(false);
   const [view, setView] = useState<'game' | 'analysis'>('game');
   const [ticker, setTicker] = useState<string[]>([]);
+  // 倒數計時（毫秒），從 gameState 的 gameDurationMs 與 currentAge 算出，每秒本地遞減
+  const [countdownMs, setCountdownMs] = useState(0);
+  const countdownRef = useRef(0);
 
   const addTicker = (msg: string) => setTicker((prev) => [msg, ...prev].slice(0, 6));
 
@@ -84,6 +87,17 @@ export default function DisplayScreen() {
     });
     return () => { s.disconnect(); };
   }, []);
+
+  // 每秒本地遞減倒數計時（暫停時停止）
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!gameState?.isPaused && countdownRef.current > 0) {
+        countdownRef.current = Math.max(0, countdownRef.current - 1000);
+        setCountdownMs(countdownRef.current);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [gameState?.isPaused]);
 
   const emit = (ev: string, ...args: unknown[]) => socketRef.current?.emit(ev, ...args);
 
@@ -134,6 +148,25 @@ export default function DisplayScreen() {
     );
   }
 
+  // 計算剩餘毫秒（從 currentAge 反推）並同步到 countdownRef
+  const calcRemaining = (gs: GameState) => {
+    const ratio = Math.min(1, Math.max(0, (gs.currentAge - 20) / 80));
+    return Math.max(0, Math.round(gs.gameDurationMs * (1 - ratio)));
+  };
+
+  // 每次 gameState 更新時重新校正倒數
+  if (Math.abs(countdownRef.current - calcRemaining(gameState)) > 3000 || countdownRef.current === 0) {
+    countdownRef.current = calcRemaining(gameState);
+  }
+
+  // 格式化為 MM:SS
+  const formatCountdown = (ms: number) => {
+    const totalSec = Math.max(0, Math.ceil(ms / 1000));
+    const m = Math.floor(totalSec / 60).toString().padStart(2, '0');
+    const s = (totalSec % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
   const playerUrl = `${window.location.protocol}//${window.location.host}/?room=${gameState.roomId}`;
 
   // 把玩家轉為 GameBoard 格式
@@ -170,14 +203,15 @@ export default function DisplayScreen() {
           </span>
         </div>
 
-        {/* 中：大型年齡計時器 */}
+        {/* 中：倒數計時器（取代年齡顯示） */}
         <div className="text-center flex-shrink-0">
-          <div className="text-7xl font-bold text-yellow-300 tabular-nums leading-none tracking-tight">
-            {gameState.currentAge.toFixed(1)}
+          <div className={`text-7xl font-bold tabular-nums leading-none tracking-tight ${
+            countdownMs < 300_000 ? 'text-red-400' : countdownMs < 600_000 ? 'text-orange-300' : 'text-yellow-300'
+          }`}>
+            {gameState.isPaused ? '⏸' : formatCountdown(countdownMs)}
           </div>
           <div className="text-base text-gray-300 mt-0.5 tracking-wide">
-            歲 &nbsp;·&nbsp; {STAGE_LABELS[gameState.currentStage] ?? gameState.currentStage}
-            {gameState.isPaused && <span className="ml-2 text-orange-400">⏸ 暫停中</span>}
+            {gameState.isPaused ? '暫停中' : `剩餘時間 · ${STAGE_LABELS[gameState.currentStage] ?? gameState.currentStage}`}
           </div>
         </div>
 
@@ -240,6 +274,9 @@ export default function DisplayScreen() {
                         <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${dotColors[i % 6]}`} />
                         <span className={`text-sm font-semibold ${p.isAlive ? 'text-white' : 'line-through text-gray-500'} truncate flex-1`}>
                           {p.name}
+                        </span>
+                        <span className="text-xs text-yellow-300 font-mono flex-shrink-0">
+                          {Math.floor(gameState.currentAge + ((p.startAge ?? 20) - 20))}歲
                         </span>
                         {isTurn && <span className="text-xs text-emerald-300 flex-shrink-0">行動中</span>}
                       </div>

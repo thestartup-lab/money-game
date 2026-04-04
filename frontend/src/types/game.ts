@@ -99,6 +99,7 @@ export interface Player {
   growthPointsRemaining: number;
   lifeExperience: number;
   hasContinuedEducation: boolean;
+  startAge: number;
   isMarried: boolean;
   marriageBonus: number;
   relationshipPoints: number;

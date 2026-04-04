@@ -361,6 +361,8 @@ export class Player {
   lifeExperience: number;
   /** 是否曾選擇「繼續進修」（20 歲職業選擇時），會帶來學生貸款但開放高階職業 */
   hasContinuedEducation: boolean;
+  /** 玩家職涯起始年齡（22 = 基礎職業，25 = 進修後高階職業） */
+  startAge: number;
   /** 是否已結婚（影響部分事件機率與 marriageBonus） */
   isMarried: boolean;
   /** 結婚帶來的月收入加成（$0 若未婚） */
@@ -466,6 +468,7 @@ export class Player {
     this.growthPointsRemaining = 0;
     this.lifeExperience = 0;
     this.hasContinuedEducation = false;
+    this.startAge = 20;
     this.isMarried = false;
     this.marriageBonus = 0;
     this.relationshipPoints = 0;
