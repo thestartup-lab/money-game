@@ -19,12 +19,36 @@
   }
   h2 { font-size: 14px; color: #aaa; }
 
+  /* 圖片切換標籤 */
+  #tabs {
+    display: flex;
+    gap: 6px;
+  }
+  #tabs button {
+    padding: 6px 20px;
+    border-radius: 8px 8px 0 0;
+    border: 2px solid #555;
+    border-bottom: none;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: bold;
+    background: #222;
+    color: #aaa;
+    transition: all 0.15s;
+  }
+  #tabs button.active {
+    background: #1d4ed8;
+    color: #fff;
+    border-color: #1d4ed8;
+  }
+
   #board-wrap {
     position: relative;
     width: min(100vw, 177.8vh);
     aspect-ratio: 16 / 9;
     cursor: crosshair;
     user-select: none;
+    border: 2px solid #444;
   }
   #board-wrap img {
     position: absolute;
@@ -117,14 +141,20 @@
     color: #888;
     text-align: center;
     line-height: 1.6;
+    padding-bottom: 16px;
   }
 </style>
 </head>
 <body>
 <h2>棋盤座標校準工具 — 點擊格子中心 → 記錄座標</h2>
 
+<div id="tabs">
+  <button class="active" onclick="switchBoard(1)">🌀 內圈 1.png（0–24）</button>
+  <button onclick="switchBoard(2)">⚡ FastTrack 2.png（0–16）</button>
+</div>
+
 <div id="board-wrap">
-  <img src="/1.png" alt="board">
+  <img id="board-img" src="/1.png" alt="board">
   <div id="live">left: --, top: --</div>
 </div>
 
@@ -137,30 +167,66 @@
 
 <textarea id="log" placeholder="點擊棋盤後，座標會出現在這裡..."></textarea>
 
-<div id="hint">
-  使用方式：滑鼠移到每個格子<b>中心點</b>後點擊，依序點完 25 格（0–24）。<br>
+<div id="hint" id="hint-text">
+  使用方式：滑鼠移到每個格子<b>中心點</b>後點擊，依序點完格子。<br>
   格式：<code>[left%, top%],  // N 格名稱</code> — 完成後點「複製座標」貼給 AI。
 </div>
 
 <script>
-const wrap = document.getElementById('board-wrap');
-const live = document.getElementById('live');
-const logEl = document.getElementById('log');
+const wrap    = document.getElementById('board-wrap');
+const imgEl   = document.getElementById('board-img');
+const live    = document.getElementById('live');
+const logEl   = document.getElementById('log');
 const countEl = document.getElementById('count');
 
-const CELL_NAMES = [
+// 內圈 25 格名稱
+const INNER_NAMES = [
   '發薪日','小交易','意外支出','小交易','大交易','危機事件',
   '發薪日','小交易','意外支出','添丁','人際關係','慈善捐款',
   '發薪日','意外支出','大交易','小交易','市場行情','危機事件',
   '發薪日','小交易','人際關係','大交易','裁員','危機事件','第二人生'
 ];
 
-let recorded = [];  // [{left, top, idx}]
+// 外圈 FastTrack 17 格名稱
+const OUTER_NAMES = [
+  'FT發薪日','FT小交易','FT大交易','FT人際關係','FT發薪日',
+  'FT危機事件','FT科技新創','FT資產槓桿','FT發薪日',
+  'FT大交易','FT人際關係','FT小交易','FT發薪日',
+  'FT大交易','FT科技新創','FT資產槓桿','疾病危機'
+];
+
+let currentBoard = 1;  // 1 = 內圈, 2 = FastTrack
+let recorded = [];
+
+function switchBoard(n) {
+  if (currentBoard === n) return;
+  currentBoard = n;
+  imgEl.src = '/' + n + '.png';
+  document.querySelectorAll('#tabs button').forEach((b, i) => {
+    b.classList.toggle('active', i + 1 === n);
+  });
+  clearAll(true);
+  refreshHint();
+}
+
+function cellNames() {
+  return currentBoard === 1 ? INNER_NAMES : OUTER_NAMES;
+}
+
+function totalCells() {
+  return cellNames().length;
+}
+
+function refreshHint() {
+  const total = totalCells();
+  document.getElementById('hint').innerHTML =
+    `使用方式：滑鼠移到每個格子<b>中心點</b>後點擊，依序點完 <b>${total}</b> 格（0–${total-1}）。<br>` +
+    `格式：<code>[left%, top%],  // N 格名稱</code> — 完成後點「複製座標」貼給 AI。`;
+}
 
 // 建立網格線（每 5%）
 function buildGrid() {
   for (let i = 5; i < 100; i += 5) {
-    // 橫線
     const h = document.createElement('div');
     h.className = 'grid-line h';
     h.style.top = i + '%';
@@ -172,7 +238,6 @@ function buildGrid() {
     lh.textContent = i + '%';
     wrap.appendChild(lh);
 
-    // 縱線
     const v = document.createElement('div');
     v.className = 'grid-line v';
     v.style.left = i + '%';
@@ -199,14 +264,17 @@ wrap.addEventListener('mouseleave', () => {
 
 // 點擊記錄
 wrap.addEventListener('click', (e) => {
-  // 避免點到已有的 dot
   if (e.target.classList.contains('dot')) return;
+  if (recorded.length >= totalCells()) {
+    alert(`已記錄完所有 ${totalCells()} 格！如需重做請點「清除全部」。`);
+    return;
+  }
 
   const r = wrap.getBoundingClientRect();
   const lf = parseFloat(((e.clientX - r.left) / r.width * 100).toFixed(1));
   const tp = parseFloat(((e.clientY - r.top)  / r.height * 100).toFixed(1));
   const idx = recorded.length;
-  const name = CELL_NAMES[idx] ?? '?';
+  const name = cellNames()[idx] ?? '?';
 
   recorded.push({ left: lf, top: tp, idx, name });
   addDot(lf, tp, idx);
@@ -225,10 +293,10 @@ function addDot(lf, tp, idx) {
 
 function refreshLog() {
   const lines = recorded.map(r =>
-    `  [${r.left}, ${r.tp || r.top}],  // ${r.idx} ${r.name}`
+    `  [${r.left}, ${r.top}],  // ${r.idx} ${r.name}`
   );
   logEl.value = lines.join('\n');
-  countEl.textContent = `已記錄：${recorded.length} / 25 格`;
+  countEl.textContent = `已記錄：${recorded.length} / ${totalCells()} 格`;
 }
 
 function undo() {
@@ -239,12 +307,12 @@ function undo() {
   refreshLog();
 }
 
-function clearAll() {
-  if (!confirm('確定清除全部記錄？')) return;
+function clearAll(silent) {
+  if (!silent && recorded.length && !confirm('確定清除全部記錄？')) return;
   recorded = [];
   document.querySelectorAll('.dot').forEach(d => d.remove());
   logEl.value = '';
-  countEl.textContent = '已記錄：0 格';
+  countEl.textContent = `已記錄：0 / ${totalCells()} 格`;
 }
 
 function copyLog() {
@@ -260,6 +328,7 @@ function copyLog() {
 }
 
 buildGrid();
+refreshHint();
 </script>
 </body>
 </html>
