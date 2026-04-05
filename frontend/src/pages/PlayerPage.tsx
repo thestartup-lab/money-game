@@ -873,10 +873,14 @@ export default function PlayerPage() {
           <div className="h-4" /> {/* 底部空間 */}
 
           {/* 大型年齡提示（底部裝飾性數字） */}
-          <div className="flex items-center justify-center pb-8 pt-2 select-none pointer-events-none">
+          <div className="flex items-end justify-center pb-8 pt-2 select-none pointer-events-none gap-1">
             <span className="text-9xl font-black tabular-nums leading-none"
               style={{ color: 'rgba(253,224,71,0.12)' }}>
               {Math.floor(gameState.currentAge + ((myPlayer.startAge ?? 20) - 20))}
+            </span>
+            <span className="text-2xl font-bold pb-3"
+              style={{ color: 'rgba(253,224,71,0.12)' }}>
+              歲
             </span>
           </div>
         </div>
