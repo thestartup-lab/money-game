@@ -57,11 +57,13 @@ const fmt = (n: number) => n.toLocaleString();
 interface Props {
   player: Player;
   currentAge: number;
+  otherPlayers: { id: string; name: string }[];
   onTravel: (destinationId: string) => void;
   onSocialEvent: () => void;
   onBuyInsurance: (type: 'medical' | 'life' | 'property') => void;
   onTakeEmergencyLoan: (amount: number) => void;
   onInvestStockDCA: (amount: number) => void;
+  onLoanOffer: (targetId: string, amount: number, monthlyRate: number) => void;
   onRequestAnalysis: () => void;
   isGameOver: boolean;
 }
@@ -69,11 +71,13 @@ interface Props {
 export default function ActionPanel({
   player,
   currentAge,
+  otherPlayers,
   onTravel,
   onSocialEvent,
   onBuyInsurance,
   onTakeEmergencyLoan,
   onInvestStockDCA,
+  onLoanOffer,
   onRequestAnalysis,
   isGameOver,
 }: Props) {
@@ -81,6 +85,10 @@ export default function ActionPanel({
   const [insuranceConfirm, setInsuranceConfirm] = useState<'medical' | 'life' | 'property' | null>(null);
   const [showLoanPanel, setShowLoanPanel] = useState(false);
   const [showDCAPanel, setShowDCAPanel] = useState(false);
+  const [showP2PPanel, setShowP2PPanel] = useState(false);
+  const [p2pTarget, setP2pTarget] = useState('');
+  const [p2pAmount, setP2pAmount] = useState(5000);
+  const [p2pRate, setP2pRate] = useState(0.01);
 
   const noTokensLeft = !player.hasFlexibleSchedule && player.actionTokensThisPayday <= 0;
   const scheduleLabel = player.hasFlexibleSchedule
@@ -367,6 +375,73 @@ export default function ActionPanel({
           <span className="text-white">{player.profession.name} ({player.quadrant})</span>
         </div>
       </div>
+
+      {/* ── P2P 借貸 ─────────────────────── */}
+      {!isGameOver && (
+        <div className="card">
+          <p className="text-xs text-gray-400 mb-2">P2P 玩家借貸</p>
+          {otherPlayers.length === 0 ? (
+            <p className="text-xs text-gray-500 text-center py-2">需要其他參與者才能使用<br />P2P 借貸功能</p>
+          ) : showP2PPanel ? (
+            <div className="space-y-2">
+              <p className="text-xs text-gray-400">選擇借款對象、金額與月利率，傳送借款邀請給對方</p>
+              <select
+                className="w-full rounded-lg bg-gray-700 border border-gray-600 text-white text-sm px-2 py-1.5"
+                value={p2pTarget}
+                onChange={(e) => setP2pTarget(e.target.value)}
+              >
+                <option value="">-- 選擇借款人 --</option>
+                {otherPlayers.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              <div className="flex gap-2 items-center">
+                <span className="text-xs text-gray-400 shrink-0">金額</span>
+                <select
+                  className="flex-1 rounded-lg bg-gray-700 border border-gray-600 text-white text-sm px-2 py-1.5"
+                  value={p2pAmount}
+                  onChange={(e) => setP2pAmount(Number(e.target.value))}
+                >
+                  {[1000, 2000, 5000, 10000, 20000, 50000].map((a) => (
+                    <option key={a} value={a}>${fmt(a)}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex gap-2 items-center">
+                <span className="text-xs text-gray-400 shrink-0">月利率</span>
+                <select
+                  className="flex-1 rounded-lg bg-gray-700 border border-gray-600 text-white text-sm px-2 py-1.5"
+                  value={p2pRate}
+                  onChange={(e) => setP2pRate(Number(e.target.value))}
+                >
+                  {[0.005, 0.01, 0.015, 0.02].map((r) => (
+                    <option key={r} value={r}>{(r * 100).toFixed(1)}%</option>
+                  ))}
+                </select>
+              </div>
+              {p2pTarget && (
+                <div className="text-xs text-gray-400">
+                  對方月還款：<span className="text-yellow-300">${fmt(Math.round(p2pAmount * p2pRate))}</span>
+                  {'  '}你付出：<span className={player.cash >= p2pAmount ? 'text-emerald-400' : 'text-red-400'}>${fmt(p2pAmount)}</span>
+                  {player.cash < p2pAmount && <span className="text-red-400 ml-1">（現金不足）</span>}
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <button className="btn-secondary text-sm" onClick={() => setShowP2PPanel(false)}>取消</button>
+                <button
+                  className="btn-primary text-sm"
+                  disabled={!p2pTarget || player.cash < p2pAmount}
+                  onClick={() => { onLoanOffer(p2pTarget, p2pAmount, p2pRate); setShowP2PPanel(false); setP2pTarget(''); }}
+                >發送邀請</button>
+              </div>
+            </div>
+          ) : (
+            <button className="btn-secondary w-full text-sm" onClick={() => setShowP2PPanel(true)}>
+              🤝 借款給其他玩家
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── 決策分析 ──────────────────── */}
       <button className="btn-primary w-full" onClick={onRequestAnalysis}>

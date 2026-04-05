@@ -106,27 +106,46 @@ export default function EventCard({ event, onDecision, onDismiss }: EventCardPro
       {event.kind === 'deal_pick' && (
         <>
           <div className="text-green-400 font-bold text-base">📋 交易機會</div>
-          <p className="text-sm text-gray-400">選擇一張交易牌或拒絕</p>
+          <div className="flex justify-between text-sm mb-1">
+            <span className="text-gray-400">手頭現金</span>
+            <span className="font-bold text-emerald-400">${event.playerCash.toLocaleString()}</span>
+          </div>
+          <p className="text-xs text-gray-400">選擇一張交易牌或拒絕</p>
           <div className="space-y-2">
-            {event.cards.map((card) => (
-              <button
-                key={card.id}
-                className={`w-full text-left p-3 rounded-xl border text-sm transition-colors ${
-                  selectedCardId === card.id
-                    ? 'border-green-400 bg-green-900'
-                    : 'border-gray-600 bg-gray-700 hover:border-green-500'
-                }`}
-                onClick={() => setSelectedCardId(card.id)}
-              >
-                <div className="font-semibold text-white">{card.name}</div>
-                {card.description && <div className="text-gray-400 text-xs mb-1">{card.description}</div>}
-                <div className="text-gray-300">頭期款：${(card.downPayment ?? 0).toLocaleString()} ｜ 月現金流：
-                  <span className={card.monthlyCashflow >= 0 ? 'text-green-400' : 'text-red-400'}>
-                    {card.monthlyCashflow >= 0 ? '+' : ''}${(card.monthlyCashflow ?? 0).toLocaleString()}
-                  </span>
-                </div>
-              </button>
-            ))}
+            {event.cards.map((card) => {
+              const canAfford = event.playerCash >= (card.downPayment ?? 0);
+              const remaining = event.playerCash - (card.downPayment ?? 0);
+              return (
+                <button
+                  key={card.id}
+                  className={`w-full text-left p-3 rounded-xl border text-sm transition-colors ${
+                    selectedCardId === card.id
+                      ? 'border-green-400 bg-green-900'
+                      : canAfford
+                        ? 'border-gray-600 bg-gray-700 hover:border-green-500'
+                        : 'border-red-800 bg-gray-800 opacity-60 cursor-not-allowed'
+                  }`}
+                  onClick={() => canAfford && setSelectedCardId(card.id)}
+                  disabled={!canAfford}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-white">{card.name}</span>
+                    {!canAfford && <span className="text-xs text-red-400">現金不足</span>}
+                  </div>
+                  {card.description && <div className="text-gray-400 text-xs mb-1">{card.description}</div>}
+                  <div className="text-gray-300 text-xs">
+                    頭期款：<span className={canAfford ? 'text-yellow-300' : 'text-red-400'}>${(card.downPayment ?? 0).toLocaleString()}</span>
+                    {'  '}月現金流：
+                    <span className={card.monthlyCashflow >= 0 ? 'text-green-400' : 'text-red-400'}>
+                      {card.monthlyCashflow >= 0 ? '+' : ''}${(card.monthlyCashflow ?? 0).toLocaleString()}
+                    </span>
+                  </div>
+                  {canAfford && selectedCardId === card.id && (
+                    <div className="text-xs text-gray-400 mt-0.5">支付後剩餘：<span className="text-emerald-400">${remaining.toLocaleString()}</span></div>
+                  )}
+                </button>
+              );
+            })}
           </div>
           <div className="grid grid-cols-2 gap-2">
             <button

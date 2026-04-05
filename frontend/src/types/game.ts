@@ -276,7 +276,7 @@ export type ActiveEvent =
   | { kind: 'doodad'; title: string; description: string; cashDeducted: number; expenseIncrease: number }
   | { kind: 'crisis_nt_skip'; title: string; description: string; baseCost: number; network: number; timeoutMs: number }
   | { kind: 'crisis_applied'; title: string; description: string; effectiveCost: number; turnsLost: number; wasInsured: boolean }
-  | { kind: 'deal_pick'; cards: { id: string; name: string; description?: string; downPayment: number; monthlyCashflow: number }[] }
+  | { kind: 'deal_pick'; cards: { id: string; name: string; description?: string; downPayment: number; monthlyCashflow: number }[]; playerCash: number }
   | { kind: 'charity'; amount: number }
   | { kind: 'tech_startup_offer'; investmentAmount: number; playerCash: number }
   | { kind: 'tech_startup_result'; success: boolean; diceRoll: number; investmentAmount: number; monthlyCashflow?: number }

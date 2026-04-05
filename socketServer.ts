@@ -702,7 +702,7 @@ io.on('connection', (socket: Socket) => {
             player.skipFirstPayday = false;
             socket.emit('paydaySkipped', { reason: '你正在進修，跳過這個回合' });
             emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
-            return;
+            continue;  // 跳過本次發薪日其餘處理，但繼續執行後續流程（advanceToNextTurn 等）
           }
 
           triggerPayday(player, gs, maintenanceDone);
@@ -796,9 +796,14 @@ io.on('connection', (socket: Socket) => {
     } catch (err) {
       console.error(`[playerRoll] 未預期錯誤：`, err);
       socket.emit('error', { message: '擲骰處理時發生錯誤，請重新整理頁面。' });
+      // 發送一個空的 rollResult 讓前端解除 rollingLocked
+      socket.emit('rollResult', { diceCount: 1, rolled: 0, newPosition: -1, passedPaydays: [] });
       try {
         const gs2 = getRoomState(socket);
-        if (gs2) gs2.advanceToNextTurn();
+        if (gs2) {
+          emitToRoom(gs2.gameId, 'gameStateUpdate', serializeGameState(gs2));
+          gs2.advanceToNextTurn();
+        }
       } catch (_) { /* ignore */ }
     }
     }
@@ -2578,7 +2583,7 @@ async function handleLandingSquare(
         downPayment: c.asset.downPayment ?? c.asset.cost,
         monthlyCashflow: c.asset.monthlyCashflow,
       }));
-      socket.emit('dealCardsDrawn', { cards: cardsForClient, canPickTwo: drawCount > 1 });
+      socket.emit('dealCardsDrawn', { cards: cardsForClient, canPickTwo: drawCount > 1, playerCash: player.cash });
       const decision = await waitForCardDecision(socket);
 
       if (decision && decision.accepted) {
@@ -2586,6 +2591,18 @@ async function handleLandingSquare(
         const chosen = selectedId
           ? drawnCards.find((c) => c.id === selectedId) ?? drawnCards[0]
           : drawnCards[0];
+
+        const downPayment = chosen.asset.downPayment ?? chosen.asset.cost ?? 0;
+        if (player.cash < downPayment) {
+          socket.emit('error', { message: `現金不足，無法完成此交易（需 $${downPayment.toLocaleString()}，目前 $${player.cash.toLocaleString()}）。` });
+          drawnCards.forEach((c) => deck.discard(c));
+          emitToRoom(roomId, 'cardApplied', {
+            playerId: player.id,
+            squareType,
+            effect: { type: 'dealDeclined' },
+          });
+          break;
+        }
 
         const _dcCB = player.cash; const _dcFB = player.monthlyCashflow; const _dcNWB = calcNetWorth(player);
         acceptDealCard(player, chosen);

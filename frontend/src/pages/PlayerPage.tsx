@@ -114,7 +114,7 @@ export default function PlayerPage() {
       }
     });
     s.on('disconnect', () => setConnected(false));
-    s.on('error', (p: { message: string }) => setError(p.message));
+    s.on('error', (p: { message: string }) => { setError(p.message); setRollingLocked(false); });
 
     // 重連成功
     s.on('rejoinSuccess', () => {
@@ -257,8 +257,8 @@ export default function PlayerPage() {
     s.on('crisisNTSkipAvailable', (p: { crisis: { title: string; description: string; baseCost: number }; network: number; timeoutMs: number }) => {
       setActiveEvent({ kind: 'crisis_nt_skip', title: p.crisis.title, description: p.crisis.description, baseCost: p.crisis.baseCost, network: p.network, timeoutMs: p.timeoutMs });
     });
-    s.on('dealCardsDrawn', (p: { cards: Array<{ id: string; name: string; downPayment: number; monthlyCashflow: number }> }) => {
-      setActiveEvent({ kind: 'deal_pick', cards: p.cards });
+    s.on('dealCardsDrawn', (p: { cards: Array<{ id: string; name: string; description?: string; downPayment: number; monthlyCashflow: number }>; playerCash: number }) => {
+      setActiveEvent({ kind: 'deal_pick', cards: p.cards, playerCash: p.playerCash ?? 0 });
     });
     s.on('charityCardPending', (p: { amount: number }) => {
       setActiveEvent({ kind: 'charity', amount: p.amount });
@@ -811,11 +811,13 @@ export default function PlayerPage() {
               <ActionPanel
                 player={myPlayer}
                 currentAge={gameState.currentAge}
+                otherPlayers={gameState.players.filter((p) => p.id !== myId && p.isAlive).map((p) => ({ id: p.id, name: p.name }))}
                 onTravel={(destId) => emit('goTravel', { destinationId: destId })}
                 onSocialEvent={() => emit('attendSocialEvent')}
                 onBuyInsurance={(t) => emit('buyInsurance', { insuranceType: t })}
                 onTakeEmergencyLoan={(amt) => emit('takeEmergencyLoan', { amount: amt })}
                 onInvestStockDCA={(amt) => emit('investStockDCA', { amount: amt })}
+                onLoanOffer={(targetId, amount, monthlyRate) => emit('loanOffer', { targetPlayerId: targetId, amount, monthlyRate })}
                 onRequestAnalysis={() => { emit('requestPlayerAnalysis'); }}
                 isGameOver={isGameOver}
               />
