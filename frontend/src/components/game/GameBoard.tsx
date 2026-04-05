@@ -136,27 +136,56 @@ export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
         ))}
 
         {/* ══ 玩家棋子（座標表定位）══ */}
-        {!calibrate && visiblePlayers.map((p) => {
-          const cellIdx = isOuter
-            ? p.fastTrackPosition % OUTER_CELL_POSITIONS.length
-            : p.position % INNER_CELL_POSITIONS.length;
-          const pos = getPos(cellIdx, isOuter);
-          const color = PLAYER_COLORS[p.colorIndex % 6];
-          const isActive = p.id === currentTurnPlayerId;
-          return (
-            <div
-              key={p.id}
-              className={`board-token${isActive ? ' active' : ''}`}
-              style={{ left: pos.left, top: pos.top, '--token-color': color } as React.CSSProperties}
-              title={`${p.name} — 格 ${isOuter ? p.fastTrackPosition : p.position}`}
-            >
-              <div className="board-token-circle" style={{ backgroundColor: color }}>
-                {p.name.charAt(0)}
+        {!calibrate && (() => {
+          // 按格子分組，計算每格有多少玩家，以便分散排列避免重疊
+          const cellGroups = new Map<number, typeof visiblePlayers>();
+          for (const p of visiblePlayers) {
+            const cellIdx = isOuter
+              ? p.fastTrackPosition % OUTER_CELL_POSITIONS.length
+              : p.position % INNER_CELL_POSITIONS.length;
+            if (!cellGroups.has(cellIdx)) cellGroups.set(cellIdx, []);
+            cellGroups.get(cellIdx)!.push(p);
+          }
+
+          return visiblePlayers.map((p) => {
+            const cellIdx = isOuter
+              ? p.fastTrackPosition % OUTER_CELL_POSITIONS.length
+              : p.position % INNER_CELL_POSITIONS.length;
+            const pos = getPos(cellIdx, isOuter);
+            const color = PLAYER_COLORS[p.colorIndex % 6];
+            const isActive = p.id === currentTurnPlayerId;
+
+            // 計算此格的偏移
+            const group = cellGroups.get(cellIdx)!;
+            const slotIndex = group.indexOf(p);
+            const total = group.length;
+            let offsetX = 0;
+            let offsetY = 0;
+            if (total > 1) {
+              // 以圓形分散排列，半徑 1.8%（相對容器）
+              const angle = (2 * Math.PI * slotIndex) / total - Math.PI / 2;
+              offsetX = Math.cos(angle) * 1.8;
+              offsetY = Math.sin(angle) * 1.8;
+            }
+
+            const left = `calc(${pos.left} + ${offsetX.toFixed(2)}%)`;
+            const top  = `calc(${pos.top}  + ${offsetY.toFixed(2)}%)`;
+
+            return (
+              <div
+                key={p.id}
+                className={`board-token${isActive ? ' active' : ''}`}
+                style={{ left, top, '--token-color': color } as React.CSSProperties}
+                title={`${p.name} — 格 ${isOuter ? p.fastTrackPosition : p.position}`}
+              >
+                <div className="board-token-circle" style={{ backgroundColor: color }}>
+                  {p.name.charAt(0)}
+                </div>
+                <div className="board-token-label">{p.name}</div>
               </div>
-              <div className="board-token-label">{p.name}</div>
-            </div>
-          );
-        })}
+            );
+          });
+        })()}
 
         {/* ══ 玩家清單（底部半透明浮層）══ */}
         {players.length > 0 && (

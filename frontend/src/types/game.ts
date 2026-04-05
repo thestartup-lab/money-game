@@ -30,6 +30,7 @@ export interface Asset {
   currentValue?: number;
   downPayment?: number;
   monthlyCashflow: number;
+  linkedLiabilityId?: string;
 }
 
 export interface Liability {
@@ -282,7 +283,8 @@ export type ActiveEvent =
   | { kind: 'tech_startup_result'; success: boolean; diceRoll: number; investmentAmount: number; monthlyCashflow?: number }
   | { kind: 'asset_leverage'; bonus: number; passiveIncome: number }
   | { kind: 'disease_crisis'; title: string; description: string; effectiveCost: number; turnsLost: number; hpBefore: number; hpAfter: number; wasInsured: boolean }
-  | { kind: 'global_event'; title: string; description: string };
+  | { kind: 'global_event'; title: string; description: string }
+  | { kind: 'marriage_window'; title: string; description: string; monthlyBonus: number; lifeExpGain: number; inPeakWindow: boolean; timeoutMs: number };
 
 /** 發薪日規劃可用選項（後端 buildAffordableOptions 輸出格式）*/
 export interface AffordableOption {

@@ -64,6 +64,7 @@ interface Props {
   onTakeEmergencyLoan: (amount: number) => void;
   onInvestStockDCA: (amount: number) => void;
   onLoanOffer: (targetId: string, amount: number, monthlyRate: number) => void;
+  onSellAsset: (assetId: string) => void;
   onRequestAnalysis: () => void;
   isGameOver: boolean;
 }
@@ -78,6 +79,7 @@ export default function ActionPanel({
   onTakeEmergencyLoan,
   onInvestStockDCA,
   onLoanOffer,
+  onSellAsset,
   onRequestAnalysis,
   isGameOver,
 }: Props) {
@@ -89,6 +91,7 @@ export default function ActionPanel({
   const [p2pTarget, setP2pTarget] = useState('');
   const [p2pAmount, setP2pAmount] = useState(5000);
   const [p2pRate, setP2pRate] = useState(0.01);
+  const [sellConfirmId, setSellConfirmId] = useState<string | null>(null);
 
   const noTokensLeft = !player.hasFlexibleSchedule && player.actionTokensThisPayday <= 0;
   const scheduleLabel = player.hasFlexibleSchedule
@@ -440,6 +443,54 @@ export default function ActionPanel({
               🤝 借款給其他玩家
             </button>
           )}
+        </div>
+      )}
+
+      {/* ── 持有資產（含賣出） ────────── */}
+      {player.assets && player.assets.length > 0 && (
+        <div className="card">
+          <p className="text-xs text-gray-400 mb-2">持有資產</p>
+          <div className="space-y-2">
+            {player.assets.map((asset) => {
+              const isSellConfirming = sellConfirmId === asset.id;
+              const netChange = (asset.currentValue ?? asset.cost) - (asset.linkedLiabilityId
+                ? (player.liabilities?.find((l) => l.id === asset.linkedLiabilityId)?.totalDebt ?? 0)
+                : 0);
+              return (
+                <div key={asset.id} className="rounded-xl border border-gray-600 bg-gray-750 px-3 py-2 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-white">{asset.name}</span>
+                    <span className={`text-xs font-bold ${asset.monthlyCashflow >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {asset.monthlyCashflow >= 0 ? '+' : ''}${fmt(asset.monthlyCashflow)}/月
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-gray-400">
+                    <span>市值 <span className="text-yellow-300">${fmt(asset.currentValue ?? asset.cost)}</span></span>
+                    {asset.linkedLiabilityId && (
+                      <span>還款後淨得 <span className={netChange >= 0 ? 'text-emerald-400' : 'text-red-400'}>${fmt(netChange)}</span></span>
+                    )}
+                  </div>
+                  {isSellConfirming ? (
+                    <div className="space-y-1">
+                      <p className="text-xs text-yellow-300">確認賣出？淨收益 <span className={netChange >= 0 ? 'text-emerald-400' : 'text-red-400'}>${fmt(netChange)}</span></p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button className="btn-secondary text-xs py-1 rounded-lg" onClick={() => setSellConfirmId(null)}>取消</button>
+                        <button
+                          className="text-xs py-1 rounded-lg bg-red-700 hover:bg-red-600 text-white"
+                          onClick={() => { onSellAsset(asset.id); setSellConfirmId(null); }}
+                        >確認賣出</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      className="w-full text-xs py-1 rounded-lg border border-gray-600 text-gray-300 hover:border-red-500 hover:text-red-400 transition-colors"
+                      onClick={() => setSellConfirmId(asset.id)}
+                    >賣出</button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 

@@ -592,9 +592,9 @@ io.on('connection', (socket: Socket) => {
             reason: 'bedridden',
             turnsRemaining: 0,
           });
-          emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
         }
         gs.advanceToNextTurn();
+        emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
         return;
       }
 
@@ -606,8 +606,8 @@ io.on('connection', (socket: Socket) => {
           reason: 'crisis',
           turnsRemaining: player.turnsToSkip,
         });
-        emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
         gs.advanceToNextTurn();
+        emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
         return;
       }
 
@@ -686,6 +686,10 @@ io.on('connection', (socket: Socket) => {
           }
 
           await waitForAllPlanningDone(gs, PAYDAY_PLANNING_TIMEOUT_MS);
+
+          // #region agent log
+          fetch('http://127.0.0.1:7470/ingest/7fa87a60-2288-4996-82e8-42825f0ef04e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b98e21'},body:JSON.stringify({sessionId:'b98e21',location:'socketServer.ts:689',message:'waitForAllPlanningDone resolved',data:{confirmedCount:gs.paydayPlanningConfirmed.size,alive:countAlivePlayers(gs),confirmedIds:Array.from(gs.paydayPlanningConfirmed),playerOrder:gs.playerOrder},timestamp:Date.now(),hypothesisId:'H-B'})}).catch(()=>{});
+          // #endregion
 
           resumeGameClock(gs);
           emitToRoom(roomId, 'gameResumed', {
@@ -788,11 +792,14 @@ io.on('connection', (socket: Socket) => {
         applyFastTrackAppreciation(player);
       }
 
-      // --- 6. 廣播最終遊戲狀態 ---
-      emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
-
-      // --- 7. 推進回合 ---
+      // --- 6. 廣播最終遊戲狀態 & 推進回合 ---
+      // #region agent log
+      const _beforeTurnId = gs.currentPlayerTurnId;
       gs.advanceToNextTurn();
+      const _afterTurnId = gs.currentPlayerTurnId;
+      fetch('http://127.0.0.1:7470/ingest/7fa87a60-2288-4996-82e8-42825f0ef04e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b98e21'},body:JSON.stringify({sessionId:'b98e21',location:'socketServer.ts:793',message:'advanceToNextTurn called',data:{before:_beforeTurnId,after:_afterTurnId,playerOrder:gs.playerOrder,playerName:player.name},timestamp:Date.now(),hypothesisId:'H-A'})}).catch(()=>{});
+      // #endregion
+      emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
     } catch (err) {
       console.error(`[playerRoll] 未預期錯誤：`, err);
       socket.emit('error', { message: '擲骰處理時發生錯誤，請重新整理頁面。' });
@@ -801,8 +808,8 @@ io.on('connection', (socket: Socket) => {
       try {
         const gs2 = getRoomState(socket);
         if (gs2) {
-          emitToRoom(gs2.gameId, 'gameStateUpdate', serializeGameState(gs2));
           gs2.advanceToNextTurn();
+          emitToRoom(gs2.gameId, 'gameStateUpdate', serializeGameState(gs2));
         }
       } catch (_) { /* ignore */ }
     }
@@ -2231,6 +2238,7 @@ async function handleLandingSquare(
         player.cash += cf;
         player.paydayCount += 1;
         applyFastTrackAppreciation(player);
+        socket.emit('squareLandingNotice', { cellName: 'FT 發薪日', message: `💰 外圈發薪日！現金流 $${cf.toLocaleString()} + 資產增值獎勵。` });
         emitToRoom(roomId, 'fastTrackPayday', {
           playerId: player.id, playerName: player.name,
           cashflow: cf, bonus, cashAfter: player.cash,
@@ -2243,6 +2251,7 @@ async function handleLandingSquare(
         // 大型交易：從現有大交易牌組抽牌
         const { BIG_DEALS } = require('./gameCards');
         const deal: DealCard = BIG_DEALS[Math.floor(Math.random() * BIG_DEALS.length)];
+        socket.emit('squareLandingNotice', { cellName: 'FT 大交易', message: `💼 外圈大型投資機會：${deal.title}！` });
         pauseGameClock(gs);
         emitToRoom(roomId, 'gamePaused', { reason: '外圈大型交易', currentAge: Math.round(getCurrentAge(gs) * 10) / 10 });
         socket.emit('fastTrackDealCard', {
@@ -2256,6 +2265,7 @@ async function handleLandingSquare(
         const ntBonus = player.stats.network * 5000;
         player.cash += ntBonus;
         player.lifeExperience += 8;
+        socket.emit('squareLandingNotice', { cellName: 'FT 人際關係', message: `🤝 人脈高峰！人脈值 ${player.stats.network} × $5,000 = +$${ntBonus.toLocaleString()}。` });
         emitToRoom(roomId, 'fastTrackNetworkSummit', {
           playerId: player.id, playerName: player.name,
           ntLevel: player.stats.network, cashBonus: ntBonus,
@@ -2268,16 +2278,20 @@ async function handleLandingSquare(
           player.cash -= charityAmount;
           player.lifeExperience += 15;
           player.legacyBonusPoints += 5;
+          socket.emit('squareLandingNotice', { cellName: 'FT 慈善', message: `❤️ 外圈慈善！捐出 $${charityAmount.toLocaleString()}，獲得生命體驗 +15、傳承 +5。` });
           emitToRoom(roomId, 'fastTrackCharity', {
             playerId: player.id, playerName: player.name,
             amount: charityAmount, legacyBonus: 5,
           });
+        } else {
+          socket.emit('squareLandingNotice', { cellName: 'FT 慈善', message: '❤️ 外圈慈善格，現金不足或現金流為零，跳過捐款。' });
         }
         break;
       }
       case FastTrackSquareType.TaxPlanning: {
         const taxSaving = Math.round(player.expenses.taxes * 0.2);
         player.cash += taxSaving;
+        socket.emit('squareLandingNotice', { cellName: 'FT 稅務規劃', message: `📊 稅務優化！節省稅款 +$${taxSaving.toLocaleString()}。` });
         emitToRoom(roomId, 'fastTrackTaxPlanning', {
           playerId: player.id, playerName: player.name, taxSaving,
         });
@@ -2287,6 +2301,7 @@ async function handleLandingSquare(
         // 科技新創：隨機投資金額，擲骰決定成敗
         const amounts = [20000, 50000, 100000];
         const investmentAmount = amounts[Math.floor(Math.random() * amounts.length)];
+        socket.emit('squareLandingNotice', { cellName: 'FT 科技新創', message: `💡 科技新創機會！投入 $${investmentAmount.toLocaleString()} 擲骰決定成敗（≥4 成功）。` });
         pauseGameClock(gs);
         emitToRoom(roomId, 'gamePaused', { reason: '科技新創投資機會', currentAge: Math.round(getCurrentAge(gs) * 10) / 10 });
         socket.emit('techStartupOffer', {
@@ -2343,15 +2358,19 @@ async function handleLandingSquare(
         for (const p of gs.players.values()) {
           if (p.isAlive) applyMarketCard(gs, evt);
         }
+        socket.emit('squareLandingNotice', { cellName: 'FT 全球浪潮', message: `🌊 全球市場波動：${evt.title}，影響所有玩家資產！` });
         emitToRoom(roomId, 'globalWaveEvent', { triggeredBy: player.name, event: evt });
         break;
       }
       case FastTrackSquareType.Partnership: {
         const others = [...gs.players.values()].filter((p) => p.id !== player.id && p.isAlive);
         if (others.length > 0) {
+          socket.emit('squareLandingNotice', { cellName: 'FT 合夥機會', message: '🤝 合夥機會！可邀請其他玩家共同投資，雙方各得 +15 生命體驗。' });
           socket.emit('partnershipOpportunity', {
             availablePartners: others.map((p) => ({ id: p.id, name: p.name })),
           });
+        } else {
+          socket.emit('squareLandingNotice', { cellName: 'FT 合夥機會', message: '🤝 合夥機會格，但目前沒有其他存活玩家，跳過。' });
         }
         break;
       }
@@ -2360,7 +2379,10 @@ async function handleLandingSquare(
         const pool = DISEASE_CRISIS_EVENTS ?? [];
         if (pool.length > 0) {
           const c = pool[Math.floor(Math.random() * pool.length)];
+          socket.emit('squareLandingNotice', { cellName: 'FT 危機事件', message: `⚠️ 外圈危機：${c.title}！` });
           socket.emit('fastTrackCrisisCard', { crisis: c });
+        } else {
+          socket.emit('squareLandingNotice', { cellName: 'FT 危機事件', message: '✅ 危機牌庫已空，平安通過。' });
         }
         break;
       }
@@ -2368,6 +2390,7 @@ async function handleLandingSquare(
         const { TRAVEL_DESTINATIONS } = require('./gameConfig');
         const outerDests = (TRAVEL_DESTINATIONS as Array<{ id: string; name: string; tier: string; cost: number; lifeExpGained: number; region: string }>)
           .filter((d) => d.tier === 'outer' || d.tier === 'both');
+        socket.emit('squareLandingNotice', { cellName: 'FT 人生旅程', message: '✈️ 外圈人生旅程！可選擇更遠的旅遊目的地，獲得豐富的生命體驗。' });
         socket.emit('fastTrackTravelOptions', {
           destinations: outerDests.map((d) => ({ id: d.id, name: d.name, region: d.region, cost: d.cost, lifeExpGained: d.lifeExpGained })),
         });
@@ -2379,7 +2402,10 @@ async function handleLandingSquare(
         if (rel) {
           const { applyRelationshipCard } = require('./cardSystem');
           applyRelationshipCard(player, rel);
+          socket.emit('squareLandingNotice', { cellName: 'FT 人際關係', message: `🤝 外圈人際事件：${rel.title}` });
           socket.emit('relationshipCardApplied', { card: rel });
+        } else {
+          socket.emit('squareLandingNotice', { cellName: 'FT 人際關係', message: '🤝 外圈人際關係格，無特殊事件。' });
         }
         break;
       }
@@ -2387,6 +2413,7 @@ async function handleLandingSquare(
         // 資產槓桿：自動給予被動收入 × 3 的現金獎勵
         const bonus = Math.max(player.totalPassiveIncome * 3, 10000);
         player.cash += bonus;
+        socket.emit('squareLandingNotice', { cellName: 'FT 資產槓桿', message: `🚀 資產槓桿！獲得 +$${bonus.toLocaleString()} 現金獎勵。` });
         socket.emit('assetLeverageBonus', {
           playerId: player.id,
           playerName: player.name,
@@ -2403,6 +2430,7 @@ async function handleLandingSquare(
         const hpBefore = player.stats.health;
         player.stats.health = Math.max(0, player.stats.health - 20);
         const crisisResult = applyCrisisCard(player, diseaseCard);
+        socket.emit('squareLandingNotice', { cellName: 'FT 疾病危機', message: `🏥 疾病危機：${diseaseCard.title}！HP -20，請確認保險狀態。` });
         if (crisisResult.deathTriggered) {
           handlePlayerDeath(player, gs);
           emitToRoom(roomId, 'playerDied', {
@@ -2443,6 +2471,7 @@ async function handleLandingSquare(
       const babyWindow = LIFE_EVENT_WINDOWS.children;
 
       if (player.stats.health < HP_ACTIVITY_THRESHOLDS.baby) {
+        socket.emit('squareLandingNotice', { cellName: '添丁', message: '👶 健康值不足，這次無法迎接新成員。' });
         emitToRoom(roomId, 'cardApplied', {
           playerId: player.id,
           effect: { type: 'babySkipped', ageAtEvent: Math.round(babyAge), reason: 'lowHP' },
@@ -2458,6 +2487,7 @@ async function handleLandingSquare(
         applyBabyCard(player);
         addLifeExperience(player, LIFE_EXP.HAVE_CHILD);
         logPlayerEvent(player, gs, 'child', `添丁！第 ${player.numberOfChildren} 個孩子`, _byCB, _byFB, _byNWB, { childCount: player.numberOfChildren });
+        socket.emit('squareLandingNotice', { cellName: '添丁', message: `👶 恭喜！迎來第 ${player.numberOfChildren} 個孩子。` });
         emitToRoom(roomId, 'cardApplied', {
           playerId: player.id,
           squareType,
@@ -2465,8 +2495,10 @@ async function handleLandingSquare(
         });
       } else {
         if (!player.isMarried && Math.random() < LIFE_EVENT_WINDOWS.marriage.baseProbability) {
+          socket.emit('squareLandingNotice', { cellName: '添丁', message: '💍 緣分到了！婚姻機會出現。' });
           await triggerMarriageWindow(socket, player, gs);
         } else {
+          socket.emit('squareLandingNotice', { cellName: '添丁', message: '👼 這次沒有新成員，繼續努力！' });
           emitToRoom(roomId, 'cardApplied', {
             playerId: player.id,
             squareType,
@@ -2479,9 +2511,13 @@ async function handleLandingSquare(
 
     case SquareType.Doodad: {
       const card = gs.doodadDeck.draw();
-      if (!card) break;
+      if (!card) {
+        socket.emit('squareLandingNotice', { cellName: '意外支出', message: '✅ 本次意外支出牌庫已空，平安通過。' });
+        break;
+      }
       const result = applyDoodadCard(player, card);
       gs.doodadDeck.discard(card);
+      socket.emit('squareLandingNotice', { cellName: '意外支出', message: `💸 ${card.title}：意外支出到來！` });
       socket.emit('cardDrawn', { squareType, card });
       emitToRoom(roomId, 'cardApplied', { playerId: player.id, squareType, effect: result });
       break;
@@ -2494,6 +2530,7 @@ async function handleLandingSquare(
         description: '公司裁員，下一個發薪日薪資暫停發放。',
         turnsWithoutSalary: 1,
       });
+      socket.emit('squareLandingNotice', { cellName: '裁員', message: '⚠️ 公司裁員！下一個發薪日薪資暫停發放。' });
       emitToRoom(roomId, 'cardApplied', {
         playerId: player.id,
         squareType,
@@ -2517,6 +2554,9 @@ async function handleLandingSquare(
 
     case SquareType.SmallDeal:
     case SquareType.BigDeal: {
+      const dealTypeName = squareType === SquareType.BigDeal ? '大交易' : '小交易';
+      socket.emit('squareLandingNotice', { cellName: dealTypeName, message: `📋 ${dealTypeName}機會出現！查看可用的投資選項。` });
+
       if (squareType === SquareType.BigDeal && player.stats.health < HP_ACTIVITY_THRESHOLDS.bigDeal) {
         socket.emit('error', {
           message: `健康值不足，無法執行大型交易（需要 ${HP_ACTIVITY_THRESHOLDS.bigDeal}，目前 ${player.stats.health}）。`,
@@ -2533,7 +2573,10 @@ async function handleLandingSquare(
         if (c) drawnCards.push(c);
       }
 
-      if (drawnCards.length === 0) break;
+      if (drawnCards.length === 0) {
+        socket.emit('squareLandingNotice', { cellName: dealTypeName, message: `📋 ${dealTypeName}牌庫已空，本次無交易機會。` });
+        break;
+      }
 
       // 廣播競標機會給同圈玩家（20秒）
       const auctionId = `auction-${Date.now()}`;
@@ -2630,7 +2673,8 @@ async function handleLandingSquare(
       const card: CharityCard = CHARITY_CARD;
       const donationAmount = Math.round(player.salary * card.donationPercentage);
 
-      socket.emit('charityCardPending', { card, donationAmount });
+      socket.emit('squareLandingNotice', { cellName: '慈善捐款', message: `❤️ 慈善格子！捐出 $${donationAmount.toLocaleString()} 可獲得生命體驗與傳承加成，是否參與？` });
+      socket.emit('charityCardPending', { amount: donationAmount });
       const decision = await waitForCardDecision(socket);
       const donate = decision?.donate === true;
 
@@ -2650,6 +2694,7 @@ async function handleLandingSquare(
 
       const freqMultiplier = CRISIS_FREQ_BY_STAGE[stage];
       if (Math.random() > Math.min(1, freqMultiplier / 2.2)) {
+        socket.emit('squareLandingNotice', { cellName: '危機事件', message: '🍀 恭喜！這次危機擦身而過，平安無事。' });
         emitToRoom(roomId, 'cardApplied', {
           playerId: player.id,
           squareType,
@@ -2662,6 +2707,8 @@ async function handleLandingSquare(
       const stageCards = CRISIS_EVENTS.filter((c) => stagePool.includes(c.id));
       const eligibleCards = stageCards.length > 0 ? stageCards : CRISIS_EVENTS;
       const card = eligibleCards[Math.floor(Math.random() * eligibleCards.length)];
+
+      socket.emit('squareLandingNotice', { cellName: '危機事件', message: `⚠️ 危機來臨：${card.title}！` });
 
       if (player.stats.network >= 3 && !player.stats.networkCrisisSkipUsed) {
         socket.emit('crisisNTSkipAvailable', { card, timeoutMs: 15000 });
@@ -2715,6 +2762,7 @@ async function handleLandingSquare(
 
     case SquareType.Relationship: {
       const relCard = RELATIONSHIP_EVENTS[Math.floor(Math.random() * RELATIONSHIP_EVENTS.length)];
+      socket.emit('squareLandingNotice', { cellName: '人際關係', message: `🤝 人際關係格子：${relCard.title}` });
 
       // ── 機遇型事件：等待玩家 15 秒決策 ──
       if (relCard.eventCategory === 'opportunity') {

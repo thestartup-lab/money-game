@@ -19,6 +19,7 @@ const borderColors: Record<string, string> = {
   asset_leverage:      'border-emerald-500',
   disease_crisis:      'border-purple-500',
   global_event:        'border-orange-400',
+  marriage_window:     'border-pink-400',
 };
 
 export default function EventCard({ event, onDecision, onDismiss }: EventCardProps) {
@@ -35,6 +36,21 @@ export default function EventCard({ event, onDecision, onDismiss }: EventCardPro
           if (prev === null || prev <= 1) {
             clearInterval(interval);
             onDecision({ useNTSkip: false });
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+    if (event.kind === 'marriage_window') {
+      const secs = Math.ceil(event.timeoutMs / 1000);
+      setSecondsLeft(secs);
+      const interval = setInterval(() => {
+        setSecondsLeft((prev) => {
+          if (prev === null || prev <= 1) {
+            clearInterval(interval);
+            onDecision({ acceptMarriage: false });
             return 0;
           }
           return prev - 1;
@@ -254,6 +270,42 @@ export default function EventCard({ event, onDecision, onDismiss }: EventCardPro
           <p className="text-sm text-gray-300">{event.description}</p>
           <p className="text-xs text-orange-300 mt-1">此事件影響所有玩家的資產與現金流。</p>
           <button className="w-full btn-secondary py-2 rounded-xl text-sm" onClick={onDismiss}>確認</button>
+        </>
+      )}
+
+      {event.kind === 'marriage_window' && (
+        <>
+          <div className="flex justify-between items-center">
+            <span className="text-pink-400 font-bold text-base">💍 婚姻機會</span>
+            {secondsLeft !== null && secondsLeft > 0 && (
+              <span className="text-xs text-gray-400">⏱ {secondsLeft}秒</span>
+            )}
+          </div>
+          {event.inPeakWindow && (
+            <p className="text-xs text-pink-300 bg-pink-950/40 rounded-lg px-2 py-1">✨ 正值黃金婚配年齡（25–40 歲）</p>
+          )}
+          <p className="text-sm font-semibold text-white">{event.title}</p>
+          <p className="text-sm text-gray-300">{event.description}</p>
+          <div className="space-y-1 text-sm">
+            <div className="flex justify-between">
+              <span className="text-gray-400">每月收入加成</span>
+              <span className="font-bold text-emerald-400">+${event.monthlyBonus.toLocaleString()}/月</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-400">生命體驗</span>
+              <span className="font-bold text-yellow-300">+{event.lifeExpGain}</span>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              className="py-2 rounded-xl text-sm bg-pink-700 hover:bg-pink-600 text-white"
+              onClick={() => onDecision({ acceptMarriage: true })}
+            >💒 答應</button>
+            <button
+              className="py-2 rounded-xl text-sm bg-gray-700 hover:bg-gray-600 text-white"
+              onClick={() => onDecision({ acceptMarriage: false })}
+            >婉拒</button>
+          </div>
         </>
       )}
     </div>

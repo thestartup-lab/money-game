@@ -276,7 +276,7 @@ export default function DisplayScreen() {
                           {p.name}
                         </span>
                         <span className="text-xs text-yellow-300 font-mono flex-shrink-0">
-                          {Math.floor(gameState.currentAge)}歲
+                          {Math.floor(gameState.currentAge + ((p.startAge ?? 20) - 20))}歲
                         </span>
                         {isTurn && <span className="text-xs text-emerald-300 flex-shrink-0">行動中</span>}
                       </div>

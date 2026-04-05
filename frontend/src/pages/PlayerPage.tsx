@@ -134,6 +134,10 @@ export default function PlayerPage() {
       else if (amIInGame && ['RatRace', 'FastTrack'].includes(gs.gamePhase)) setView((v) => (v === 'pre20' || v === 'join') ? 'game' : v);
       // 輪到自己時解除擲骰鎖定（以防 rollResult 沒有正確觸發）
       if (gs.currentPlayerTurnId === s.id) setRollingLocked(false);
+      // #region agent log
+      const _me = gs.players.find((p) => p.id === s.id);
+      fetch('http://127.0.0.1:7470/ingest/7fa87a60-2288-4996-82e8-42825f0ef04e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b98e21'},body:JSON.stringify({sessionId:'b98e21',location:'PlayerPage.tsx:gameStateUpdate',message:'state received',data:{currentPlayerTurnId:gs.currentPlayerTurnId,myId:s.id,isMyTurn:gs.currentPlayerTurnId===s.id,currentAge:gs.currentAge,myStartAge:_me?.startAge,personalAge:(_me?.startAge??20)+(gs.currentAge-20)},timestamp:Date.now(),hypothesisId:'H-A/H-D'})}).catch(()=>{});
+      // #endregion
     });
 
     s.on('socialClassRolled', (p: { socialClass: string; label: string; growthPoints: number; startingCashBonus: number }) => {
@@ -167,10 +171,36 @@ export default function PlayerPage() {
       setPaydayForm(p);
       addNotification('💰 發薪日到了！請規劃你的投資');
     });
+    s.on('paydaySkipped', (_p: { playerId?: string; reason?: string }) => {
+      addNotification('📚 進修中，本次發薪日跳過。');
+    });
     s.on('ratRaceEscaped', (p: { playerName: string; canCongratulate?: boolean; playerId?: string }) => {
       addNotification(`🎉 ${p.playerName} 脫出老鼠賽跑！`);
       if (p.canCongratulate && p.playerId !== s.id) {
         setCongratulatableEvent({ targetId: p.playerId ?? '', targetName: p.playerName, event: '脫出老鼠賽跑' });
+      }
+    });
+    s.on('marriageWindowOpened', (p: { card: { title: string; description: string; monthlyBonus: number; lifeExpGain: number }; currentAge: number; inPeakWindow: boolean; timeoutMs: number }) => {
+      setActiveEvent({
+        kind: 'marriage_window',
+        title: p.card.title,
+        description: p.card.description,
+        monthlyBonus: p.card.monthlyBonus,
+        lifeExpGain: p.card.lifeExpGain,
+        inPeakWindow: p.inPeakWindow,
+        timeoutMs: p.timeoutMs,
+      });
+    });
+    s.on('playerMarried', (p: { playerName: string; card: { title: string; monthlyBonus: number }; playerId?: string }) => {
+      if (p.playerId === s.id) {
+        addNotification(`💍 恭喜結婚！${p.card.title}，月收入 +$${p.card.monthlyBonus.toLocaleString()}`);
+      } else {
+        addNotification(`💍 ${p.playerName} 結婚了！`);
+      }
+    });
+    s.on('marriageDeclined', (p: { playerName: string; playerId?: string }) => {
+      if (p.playerId === s.id) {
+        addNotification('💔 婉拒了這段緣分。');
       }
     });
     s.on('marriageAnnouncement', (p: { playerName: string; marriageType: string; playerId?: string; canCongratulate?: boolean }) => {
@@ -274,6 +304,11 @@ export default function PlayerPage() {
     });
     s.on('diseaseCrisisCard', (p: { crisis: { title: string; description: string }; result: { wasInsured: boolean; effectiveCost: number; turnsLost: number; deathTriggered: boolean }; hpBefore: number; hpAfter: number }) => {
       setActiveEvent({ kind: 'disease_crisis', title: p.crisis.title, description: p.crisis.description, effectiveCost: p.result.effectiveCost, turnsLost: p.result.turnsLost, hpBefore: p.hpBefore, hpAfter: p.hpAfter, wasInsured: p.result.wasInsured });
+    });
+
+    s.on('assetSold', (p: { assetId: string; proceeds: number; debtSettled: number; netCashChange: number }) => {
+      const sign = p.netCashChange >= 0 ? '+' : '';
+      addNotification(`💹 資產出售！淨收益 ${sign}$${p.netCashChange.toLocaleString()}（賣價 $${p.proceeds.toLocaleString()}${p.debtSettled > 0 ? `，清償負債 $${p.debtSettled.toLocaleString()}` : ''}）`);
     });
 
     // 發薪日規劃完成廣播：非當前玩家自動回報 planningDone，避免遊戲卡住等待 30 秒
@@ -694,6 +729,9 @@ export default function PlayerPage() {
       ? outerCircleConfig[pos % outerCircleConfig.length]
       : innerCircleConfig[pos % innerCircleConfig.length];
 
+    // 玩家個人年齡 = 全局時鐘 + (startAge - 20)
+    const personalAge = gameState.currentAge + ((myPlayer.startAge ?? 20) - 20);
+
     // 計算通知數量
     const notifCount = notifications.length;
 
@@ -719,7 +757,7 @@ export default function PlayerPage() {
           </div>
           <div className="text-right shrink-0 ml-2">
             <div className="text-yellow-300 font-bold text-sm">
-              {gameState.currentAge.toFixed(1)} 歲
+              {personalAge.toFixed(1)} 歲
             </div>
             {gameState.isPaused && <div className="text-orange-400 text-xs">⏸ 暫停</div>}
             <div className={`text-xs font-bold ${myPlayer.monthlyCashflow >= 0 ? 'text-green-400' : 'text-red-400'}`}>
@@ -818,6 +856,7 @@ export default function PlayerPage() {
                 onTakeEmergencyLoan={(amt) => emit('takeEmergencyLoan', { amount: amt })}
                 onInvestStockDCA={(amt) => emit('investStockDCA', { amount: amt })}
                 onLoanOffer={(targetId, amount, monthlyRate) => emit('loanOffer', { targetPlayerId: targetId, amount, monthlyRate })}
+                onSellAsset={(assetId) => emit('sellAsset', { assetId })}
                 onRequestAnalysis={() => { emit('requestPlayerAnalysis'); }}
                 isGameOver={isGameOver}
               />
@@ -883,7 +922,7 @@ export default function PlayerPage() {
           <div className="flex items-end justify-center pb-8 pt-2 select-none pointer-events-none gap-1">
             <span className="text-9xl font-black tabular-nums leading-none"
               style={{ color: 'rgba(253,224,71,0.12)' }}>
-              {Math.floor(gameState.currentAge)}
+              {Math.floor(personalAge)}
             </span>
             <span className="text-2xl font-bold pb-3"
               style={{ color: 'rgba(253,224,71,0.12)' }}>
