@@ -18,6 +18,7 @@ const borderColors: Record<string, string> = {
   tech_startup_result_fail:    'border-red-400',
   asset_leverage:      'border-emerald-500',
   disease_crisis:      'border-purple-500',
+  global_event:        'border-orange-400',
 };
 
 export default function EventCard({ event, onDecision, onDismiss }: EventCardProps) {
@@ -224,6 +225,15 @@ export default function EventCard({ event, onDecision, onDismiss }: EventCardPro
             ? <p className="text-sm text-green-400">✅ 醫療險已減免費用</p>
             : <p className="text-sm text-yellow-400">⚠️ 建議購買醫療險以降低風險</p>
           }
+          <button className="w-full btn-secondary py-2 rounded-xl text-sm" onClick={onDismiss}>確認</button>
+        </>
+      )}
+
+      {event.kind === 'global_event' && (
+        <>
+          <div className="text-orange-400 font-bold text-base">🌍 全局事件：{event.title}</div>
+          <p className="text-sm text-gray-300">{event.description}</p>
+          <p className="text-xs text-orange-300 mt-1">此事件影響所有玩家的資產與現金流。</p>
           <button className="w-full btn-secondary py-2 rounded-xl text-sm" onClick={onDismiss}>確認</button>
         </>
       )}

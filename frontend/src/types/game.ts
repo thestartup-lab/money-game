@@ -281,7 +281,8 @@ export type ActiveEvent =
   | { kind: 'tech_startup_offer'; investmentAmount: number; playerCash: number }
   | { kind: 'tech_startup_result'; success: boolean; diceRoll: number; investmentAmount: number; monthlyCashflow?: number }
   | { kind: 'asset_leverage'; bonus: number; passiveIncome: number }
-  | { kind: 'disease_crisis'; title: string; description: string; effectiveCost: number; turnsLost: number; hpBefore: number; hpAfter: number; wasInsured: boolean };
+  | { kind: 'disease_crisis'; title: string; description: string; effectiveCost: number; turnsLost: number; hpBefore: number; hpAfter: number; wasInsured: boolean }
+  | { kind: 'global_event'; title: string; description: string };
 
 /** 發薪日規劃可用選項（後端 buildAffordableOptions 輸出格式）*/
 export interface AffordableOption {

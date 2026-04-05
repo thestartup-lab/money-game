@@ -332,7 +332,7 @@ export default function AdminPage() {
                   className={`${ev.color} text-white text-xs font-semibold py-2 px-2 rounded-xl transition-colors`}
                   onClick={() => {
                     if (window.confirm(`確定要觸發「${ev.label}」嗎？`)) {
-                      emit('triggerGlobalEvent', { eventId: ev.id });
+                      emit('triggerGlobalEvent', { eventId: ev.id, roomId });
                       addLog(`觸發全局事件：${ev.label}`);
                     }
                   }}

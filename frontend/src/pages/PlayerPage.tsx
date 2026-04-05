@@ -218,6 +218,10 @@ export default function PlayerPage() {
     });
     s.on('globalEventAnnouncement', (p: { event: { title: string; description: string } }) => {
       addNotification(`📢 全局事件：${p.event?.title ?? ''} — ${p.event?.description ?? ''}`);
+      setActiveEvent({ kind: 'global_event', title: p.event?.title ?? '全局事件', description: p.event?.description ?? '' });
+    });
+    s.on('squareLandingNotice', (p: { cellName: string; message: string }) => {
+      addNotification(`📍 ${p.cellName}：${p.message}`);
     });
     s.on('playerAnalysis', (data: PlayerAnalysis) => {
       setAnalysis(data);
@@ -715,7 +719,7 @@ export default function PlayerPage() {
           </div>
           <div className="text-right shrink-0 ml-2">
             <div className="text-yellow-300 font-bold text-sm">
-              {(gameState.currentAge + ((myPlayer.startAge ?? 20) - 20)).toFixed(1)} 歲
+              {gameState.currentAge.toFixed(1)} 歲
             </div>
             {gameState.isPaused && <div className="text-orange-400 text-xs">⏸ 暫停</div>}
             <div className={`text-xs font-bold ${myPlayer.monthlyCashflow >= 0 ? 'text-green-400' : 'text-red-400'}`}>
@@ -877,7 +881,7 @@ export default function PlayerPage() {
           <div className="flex items-end justify-center pb-8 pt-2 select-none pointer-events-none gap-1">
             <span className="text-9xl font-black tabular-nums leading-none"
               style={{ color: 'rgba(253,224,71,0.12)' }}>
-              {Math.floor(gameState.currentAge + ((myPlayer.startAge ?? 20) - 20))}
+              {Math.floor(gameState.currentAge)}
             </span>
             <span className="text-2xl font-bold pb-3"
               style={{ color: 'rgba(253,224,71,0.12)' }}>

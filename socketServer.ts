@@ -1101,14 +1101,22 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 觸發全局市場事件 (triggerGlobalEvent) — 主持人專用
   // ----------------------------------------------------------
-  socket.on('triggerGlobalEvent', (payload: { eventId: string }) => {
-    const gs = getRoomState(socket);
+  socket.on('triggerGlobalEvent', (payload: { eventId: string; roomId?: string }) => {
+    const gs = (payload.roomId ? rooms.get(payload.roomId) : null) ?? getRoomState(socket);
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
     if (socket.id !== gs.adminSocketId) {
-      socket.emit('error', { message: '權限不足：僅管理員可觸發全局事件。' });
-      return;
+      // 允許同一密碼管理員（已用 roomId 查到房間）重新綁定
+      if (payload.roomId && gs.adminSocketId) {
+        // 以 roomId 方式觸發時，更新 adminSocketId 並繼續
+        gs.adminSocketId = socket.id;
+        socketRoomMap.set(socket.id, roomId);
+        socket.join(roomId);
+      } else {
+        socket.emit('error', { message: '權限不足：僅管理員可觸發全局事件。' });
+        return;
+      }
     }
 
     const event = ADMIN_GLOBAL_EVENT_MAP.get(payload.eventId);
@@ -2409,6 +2417,7 @@ async function handleLandingSquare(
         break;
       }
       default:
+        socket.emit('squareLandingNotice', { cellName: '快速通道格子', message: '✅ 本格無特殊事件，平安通過。' });
         break;
     }
 
@@ -2421,6 +2430,7 @@ async function handleLandingSquare(
 
   switch (squareType) {
     case SquareType.Payday:
+      socket.emit('squareLandingNotice', { cellName: '發薪日', message: '💰 發薪日到了！領取薪水，並規劃投資與生活安排。' });
       break;
 
     case SquareType.Baby: {
@@ -2489,10 +2499,14 @@ async function handleLandingSquare(
 
     case SquareType.Market: {
       const card = gs.marketDeck.draw();
-      if (!card) break;
+      if (!card) {
+        socket.emit('squareLandingNotice', { cellName: '市場行情', message: '📈 市場目前平靜，無特殊波動。' });
+        break;
+      }
       const result = applyMarketCard(gs, card);
       gs.marketDeck.discard(card);
       emitToRoom(roomId, 'marketCardApplied', { card, affectedAssets: result.affectedAssets });
+      socket.emit('squareLandingNotice', { cellName: '市場行情', message: `📈 市場行情：${card.title}` });
       break;
     }
 
@@ -2753,12 +2767,10 @@ async function handleLandingSquare(
     }
 
     default:
+      socket.emit('squareLandingNotice', { cellName: '普通格子', message: '✅ 本格無特殊事件，平安通過。' });
       break;
   }
 }
-
-// ============================================================
-// 婚姻視窗觸發輔助函數
 // ============================================================
 
 async function triggerMarriageWindow(
