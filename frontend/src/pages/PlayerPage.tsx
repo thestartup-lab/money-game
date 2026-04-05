@@ -811,6 +811,7 @@ export default function PlayerPage() {
                 onSocialEvent={() => emit('attendSocialEvent')}
                 onBuyInsurance={(t) => emit('buyInsurance', { insuranceType: t })}
                 onTakeEmergencyLoan={(amt) => emit('takeEmergencyLoan', { amount: amt })}
+                onInvestStockDCA={(amt) => emit('investStockDCA', { amount: amt })}
                 onRequestAnalysis={() => { emit('requestPlayerAnalysis'); }}
                 isGameOver={isGameOver}
               />

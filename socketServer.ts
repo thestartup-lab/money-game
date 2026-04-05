@@ -554,6 +554,7 @@ io.on('connection', (socket: Socket) => {
         return;
       }
 
+      try {
       // --- 1b. 臥床狀態：自動跳過並判斷死亡 ---
       if (player.isBedridden) {
         const died = checkBedriddenDeath(player);
@@ -792,6 +793,14 @@ io.on('connection', (socket: Socket) => {
 
       // --- 7. 推進回合 ---
       gs.advanceToNextTurn();
+    } catch (err) {
+      console.error(`[playerRoll] 未預期錯誤：`, err);
+      socket.emit('error', { message: '擲骰處理時發生錯誤，請重新整理頁面。' });
+      try {
+        const gs2 = getRoomState(socket);
+        if (gs2) gs2.advanceToNextTurn();
+      } catch (_) { /* ignore */ }
+    }
     }
   );
 
@@ -982,6 +991,47 @@ io.on('connection', (socket: Socket) => {
       newCreditScore: result.newCreditScore,
     });
 
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
+  // ----------------------------------------------------------
+  // 股票定期定額投資 (investStockDCA)
+  // ----------------------------------------------------------
+  socket.on('investStockDCA', (payload: { amount: number }) => {
+    const gs = getRoomState(socket);
+    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+
+    const player = gs.players.get(socket.id);
+    if (!player || !player.isAlive) {
+      socket.emit('error', { message: '玩家不存在或已出局。' });
+      return;
+    }
+
+    const amount = payload.amount ?? 0;
+    if (amount <= 0) { socket.emit('error', { message: '投資金額必須大於 0。' }); return; }
+    if (player.cash < amount) { socket.emit('error', { message: '現金不足，無法投資。' }); return; }
+
+    player.cash -= amount;
+    const existing = player.assets.find((a) => a.id === 'stock-dca');
+    if (existing) {
+      existing.cost += amount;
+      existing.currentValue = (existing.currentValue ?? existing.cost) + amount;
+    } else {
+      player.assets.push({
+        id: 'stock-dca',
+        name: '指數股票基金（定期定額）',
+        type: 'Stock' as import('./gameConstants').AssetType,
+        cost: amount,
+        currentValue: amount,
+        monthlyCashflow: 0,
+      });
+    }
+    const updated = player.assets.find((a) => a.id === 'stock-dca');
+    socket.emit('stockDCAResult', {
+      amount,
+      newPortfolioValue: updated?.currentValue ?? amount,
+      remainingCash: player.cash,
+    });
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 
@@ -2072,16 +2122,25 @@ function waitForPaydayPlan(socket: Socket, player: Player): Promise<PaydayPlanPa
       buyInsuranceTypes: [],
     };
 
+    const cleanup = () => {
+      clearTimeout(timer);
+      socket.off('submitPaydayPlan', onPlan);
+      socket.off('disconnect', onDisconnect);
+    };
+    const onPlan = (plan: PaydayPlanPayload) => { cleanup(); resolve(plan ?? emptyPlan); };
+    const onDisconnect = () => {
+      cleanup();
+      console.log(`[paydayPlan] ${player.name} 斷線，自動略過規劃`);
+      resolve(emptyPlan);
+    };
     const timer = setTimeout(() => {
-      socket.removeAllListeners('submitPaydayPlan');
+      cleanup();
       console.log(`[paydayPlan] ${player.name} 逾時自動略過規劃`);
       resolve(emptyPlan);
     }, PAYDAY_PLANNING_TIMEOUT_MS);
 
-    socket.once('submitPaydayPlan', (plan: PaydayPlanPayload) => {
-      clearTimeout(timer);
-      resolve(plan ?? emptyPlan);
-    });
+    socket.once('submitPaydayPlan', onPlan);
+    socket.once('disconnect', onDisconnect);
   });
 }
 
@@ -2094,15 +2153,16 @@ function waitForCardDecision(
   timeoutMs = 15000
 ): Promise<Record<string, unknown> | null> {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      socket.removeAllListeners('submitCardDecision');
-      resolve(null);
-    }, timeoutMs);
-
-    socket.once('submitCardDecision', (decision: Record<string, unknown>) => {
+    const cleanup = () => {
       clearTimeout(timer);
-      resolve(decision ?? null);
-    });
+      socket.off('submitCardDecision', onDecision);
+      socket.off('disconnect', onDisconnect);
+    };
+    const onDecision = (decision: Record<string, unknown>) => { cleanup(); resolve(decision ?? null); };
+    const onDisconnect = () => { cleanup(); resolve(null); };
+    const timer = setTimeout(() => { cleanup(); resolve(null); }, timeoutMs);
+    socket.once('submitCardDecision', onDecision);
+    socket.once('disconnect', onDisconnect);
   });
 }
 
