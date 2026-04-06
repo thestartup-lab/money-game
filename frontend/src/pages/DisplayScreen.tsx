@@ -47,6 +47,10 @@ export default function DisplayScreen() {
   // 倒數計時（毫秒），從 gameState 的 gameDurationMs 與 currentAge 算出，每秒本地遞減
   const [countdownMs, setCountdownMs] = useState(0);
   const countdownRef = useRef(0);
+  // 置中大字幕：落地事件與里程碑
+  type CellEvent = { playerName: string; cellName: string; message: string; isMilestone?: boolean };
+  const [centerEvent, setCenterEvent] = useState<CellEvent | null>(null);
+  const centerEventTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const addTicker = (msg: string) => setTicker((prev) => [msg, ...prev].slice(0, 6));
 
@@ -76,6 +80,20 @@ export default function DisplayScreen() {
       addTicker(`🚀 ${p.playerName} 脫出老鼠賽跑！被動收入 $${fmt(p.monthlyPassiveIncome)}/月`);
     });
     s.on('marriageAnnouncement', (p: { playerName: string }) => addTicker(`💑 ${p.playerName} 結婚了！`));
+
+    const showCenterEvent = (evt: CellEvent, durationMs: number) => {
+      setCenterEvent(evt);
+      if (centerEventTimer.current) clearTimeout(centerEventTimer.current);
+      centerEventTimer.current = setTimeout(() => setCenterEvent(null), durationMs);
+    };
+
+    s.on('cellEventBroadcast', (p: { playerName: string; cellName: string; message: string }) => {
+      showCenterEvent({ playerName: p.playerName, cellName: p.cellName, message: p.message }, 4000);
+    });
+    s.on('milestoneAnnounced', (p: { playerName: string; milestone: string; description: string }) => {
+      addTicker(`🏆 ${p.description}`);
+      showCenterEvent({ playerName: p.playerName, cellName: `🏆 ${p.milestone}`, message: p.description, isMilestone: true }, 6000);
+    });
     s.on('playerFinalScore', (p: { playerName: string; deathAge: number; score: { total: number } }) => {
       addTicker(`⚰️ ${p.playerName} 在 ${p.deathAge} 歲結束人生，得 ${Math.round(p.score.total)} 分`);
     });
@@ -304,12 +322,38 @@ export default function DisplayScreen() {
             )}
           </div>
 
-          {/* ══ 右欄：棋盤 ══ */}
+          {/* ══ 右欄：棋盤 + 置中大字幕 ══ */}
           <div
-            className="flex-1 flex items-center justify-center overflow-hidden"
+            className="flex-1 flex items-center justify-center overflow-hidden relative"
             style={{ maxHeight: 'calc(100vh - 90px)' }}
           >
             <GameBoard players={boardPlayers} currentTurnPlayerId={gameState.currentPlayerTurnId} />
+
+            {/* 置中大字幕 overlay */}
+            {centerEvent && (
+              <div
+                className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none"
+                style={{ animation: 'fadeInOut 0.3s ease' }}
+              >
+                <div className={`rounded-2xl px-10 py-8 text-center shadow-2xl max-w-xl w-full mx-4 ${
+                  centerEvent.isMilestone
+                    ? 'bg-yellow-950/90 border-2 border-yellow-500 backdrop-blur'
+                    : 'bg-black/80 border border-gray-600 backdrop-blur'
+                }`}>
+                  <p className={`text-base font-semibold mb-1 ${centerEvent.isMilestone ? 'text-yellow-400' : 'text-yellow-300'}`}>
+                    👤 {centerEvent.playerName}
+                  </p>
+                  <p className={`font-black leading-none mb-3 ${
+                    centerEvent.isMilestone ? 'text-4xl text-yellow-300' : 'text-5xl text-white'
+                  }`}>
+                    {centerEvent.cellName}
+                  </p>
+                  <p className={`text-lg leading-snug ${centerEvent.isMilestone ? 'text-yellow-200' : 'text-gray-200'}`}>
+                    {centerEvent.message}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
         </div>

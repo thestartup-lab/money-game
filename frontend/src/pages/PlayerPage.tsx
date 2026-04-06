@@ -65,6 +65,10 @@ export default function PlayerPage() {
   // 格子事件 & 發薪日表單
   const [activeEvent, setActiveEvent] = useState<ActiveEvent | null>(null);
   const [paydayForm, setPaydayForm] = useState<PaydayFormData | null>(null);
+  const [careerChangeData, setCareerChangeData] = useState<{
+    message: string;
+    availableProfessions: AvailableProfession[];
+  } | null>(null);
 
   // Join form state — pre-fill room code from URL ?room=XXX
   const [playerName, setPlayerName] = useState('');
@@ -257,11 +261,12 @@ export default function PlayerPage() {
       setAnalysis(data);
       setView('analysis');
     });
-    s.on('cardApplied', (p: { playerName?: string; effect?: { type?: string; cashDeducted?: number; monthlyExpenseIncrease?: number; card?: { title?: string; description?: string }; wasInsured?: boolean; effectiveCost?: number; turnsLost?: number } }) => {
-      if (p.effect?.type === 'baby') addNotification('👶 添丁！');
-      if (p.effect?.type === 'crisisAvoided') addNotification('🍀 危機事件：恭喜平安無事！這次有驚無險。');
+    s.on('cardApplied', (p: { playerId?: string; playerName?: string; effect?: { type?: string; cashDeducted?: number; monthlyExpenseIncrease?: number; card?: { title?: string; description?: string }; wasInsured?: boolean; effectiveCost?: number; turnsLost?: number } }) => {
+      const isMe = p.playerId === s.id;
+      // baby 保持全員通知（公開喜事）
+      if (p.effect?.type === 'baby') addNotification(`👶 ${p.playerName ?? '有玩家'} 添丁！`);
       // doodad 結果
-      if (p.effect?.cashDeducted !== undefined || p.effect?.monthlyExpenseIncrease !== undefined) {
+      if (isMe && (p.effect?.cashDeducted !== undefined || p.effect?.monthlyExpenseIncrease !== undefined)) {
         setActiveEvent({
           kind: 'doodad',
           title: p.effect.card?.title ?? '意外支出',
@@ -271,7 +276,7 @@ export default function PlayerPage() {
         });
       }
       // crisis applied（有保險資訊 + 費用）
-      if (p.effect?.effectiveCost !== undefined && p.effect.card?.title) {
+      if (isMe && p.effect?.effectiveCost !== undefined && p.effect.card?.title) {
         setActiveEvent({
           kind: 'crisis_applied',
           title: p.effect.card.title,
@@ -312,11 +317,33 @@ export default function PlayerPage() {
     });
 
     // 發薪日規劃完成廣播：非當前玩家自動回報 planningDone，避免遊戲卡住等待 30 秒
-    s.on('paydayPlanResult', (p: { playerId: string }) => {
+    s.on('paydayPlanResult', (p: { playerId: string; planResult?: { stockDCA?: { executed: boolean; amount: number; newPortfolioValue: number } } }) => {
       if (p.playerId !== s.id) {
         s.emit('planningDone');
+      } else if (p.planResult?.stockDCA?.executed) {
+        addNotification(`📈 發薪日定投 $${fmt(p.planResult.stockDCA.amount)}，股票組合總值 $${fmt(p.planResult.stockDCA.newPortfolioValue)}`);
       }
       setPaydayForm(null);
+    });
+
+    s.on('stockDCAResult', (p: { amount: number; newPortfolioValue: number; remainingCash: number }) => {
+      addNotification(`📈 投入 $${fmt(p.amount)}，股票組合總值 $${fmt(p.newPortfolioValue)}`);
+    });
+
+    s.on('careerChangeUnlocked', (p: { message: string; availableProfessions: AvailableProfession[] }) => {
+      setCareerChangeData(p);
+      addNotification('🎯 技能值達到頂峰！現在可以轉職了，請在行動面板中選擇新職業。');
+    });
+    s.on('careerChangeResult', (p: { success: boolean; message: string; newProfession?: string }) => {
+      if (p.success) addNotification(`🎉 轉職成功！新職業：${p.newProfession}`);
+      else addNotification(`❌ 轉職失敗：${p.message}`);
+      setCareerChangeData(null);
+    });
+    s.on('careerChangeAnnouncement', (p: { playerName: string; previousProfession: string; newProfession: string }) => {
+      addNotification(`🔄 ${p.playerName} 轉職：${p.previousProfession} → ${p.newProfession}！`);
+    });
+    s.on('milestoneAnnounced', (p: { playerName: string; milestone: string; description: string }) => {
+      addNotification(`🏆 ${p.description}`);
     });
 
     s.on('gameClock', (p: { currentAge: number }) => {
@@ -859,6 +886,8 @@ export default function PlayerPage() {
                 onSellAsset={(assetId) => emit('sellAsset', { assetId })}
                 onRequestAnalysis={() => { emit('requestPlayerAnalysis'); }}
                 isGameOver={isGameOver}
+                careerChangeData={careerChangeData}
+                onCareerChange={(professionId) => emit('requestCareerChange', { newProfessionId: professionId })}
               />
             </CollapsePanel>
 

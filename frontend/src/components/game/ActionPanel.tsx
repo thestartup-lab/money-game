@@ -67,6 +67,8 @@ interface Props {
   onSellAsset: (assetId: string) => void;
   onRequestAnalysis: () => void;
   isGameOver: boolean;
+  careerChangeData?: { message: string; availableProfessions: { id: string; name: string; quadrant?: string; description?: string }[] } | null;
+  onCareerChange?: (professionId: string) => void;
 }
 
 export default function ActionPanel({
@@ -82,6 +84,8 @@ export default function ActionPanel({
   onSellAsset,
   onRequestAnalysis,
   isGameOver,
+  careerChangeData,
+  onCareerChange,
 }: Props) {
   const [showTravelPanel, setShowTravelPanel] = useState(false);
   const [insuranceConfirm, setInsuranceConfirm] = useState<'medical' | 'life' | 'property' | null>(null);
@@ -490,6 +494,27 @@ export default function ActionPanel({
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* ── 轉職 ──────────────────────── */}
+      {careerChangeData && onCareerChange && (
+        <div className="card border-2 border-yellow-500">
+          <p className="text-xs text-yellow-400 font-bold mb-1">🎯 技能巔峰 — 可以轉職！</p>
+          <p className="text-xs text-gray-300 mb-2">{careerChangeData.message}</p>
+          <div className="space-y-1">
+            {careerChangeData.availableProfessions.map((prof) => (
+              <button
+                key={prof.id}
+                className="w-full text-left text-xs px-3 py-2 rounded-xl bg-yellow-900/40 hover:bg-yellow-900/70 border border-yellow-700 text-yellow-200 transition-colors"
+                onClick={() => onCareerChange(prof.id)}
+              >
+                <span className="font-bold">{prof.name}</span>
+                {prof.quadrant && <span className="ml-2 text-yellow-500">（{prof.quadrant}）</span>}
+                {prof.description && <span className="block text-gray-400 text-xs mt-0.5">{prof.description}</span>}
+              </button>
+            ))}
           </div>
         </div>
       )}

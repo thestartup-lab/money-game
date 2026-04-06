@@ -68,7 +68,8 @@ export interface PaydayPlanResult {
     careerSkill: number;
     network: number;
   };
-  careerChangeUnlocked: boolean;  // SK 是否首次達到轉職門檻
+  careerChangeUnlocked: boolean;
+  ntMilestonesUnlocked: number[];
 }
 
 /** executeCareerChange 的回傳結果 */
@@ -165,6 +166,7 @@ export function applyPaydayPlan(player: Player, plan: PaydayPlanPayload): Payday
   }
 
   // --- 人脈投資 ---
+  const prevNetwork = player.stats.network;
   const networkOutcome: InvestmentOutcome = {
     attempted: plan.investInNetwork,
     executed: false,
@@ -177,6 +179,9 @@ export function applyPaydayPlan(player: Player, plan: PaydayPlanPayload): Payday
       player.stats.network = Math.min(10, player.stats.network + NETWORK_INVEST_GAIN);
     }
   }
+  const ntMilestonesUnlocked = [3, 5, 8].filter(
+    (t) => prevNetwork < t && player.stats.network >= t
+  );
 
   // 一次性扣款
   player.cash -= totalCostDeducted;
@@ -234,6 +239,7 @@ export function applyPaydayPlan(player: Player, plan: PaydayPlanPayload): Payday
       network: player.stats.network,
     },
     careerChangeUnlocked,
+    ntMilestonesUnlocked,
   };
 }
 
