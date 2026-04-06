@@ -9,6 +9,7 @@ import EventCard from '../components/game/EventCard';
 import PaydayPlanForm from '../components/game/PaydayPlanForm';
 import CollapsePanel from '../components/game/CollapsePanel';
 import { innerCircleConfig, outerCircleConfig } from '../components/game/boardConfig';
+import IntroSheet from '../components/game/IntroSheet';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
@@ -69,6 +70,7 @@ export default function PlayerPage() {
     message: string;
     availableProfessions: AvailableProfession[];
   } | null>(null);
+  const [showIntro, setShowIntro] = useState(false);
 
   // Join form state — pre-fill room code from URL ?room=XXX
   const [playerName, setPlayerName] = useState('');
@@ -783,13 +785,21 @@ export default function PlayerPage() {
               {myPlayer.isInFastTrack && <span className="ml-1 text-yellow-400">★ FastTrack</span>}
             </div>
           </div>
-          <div className="text-right shrink-0 ml-2">
-            <div className="text-yellow-300 font-bold text-sm">
-              {personalAge.toFixed(1)} 歲
-            </div>
-            {gameState.isPaused && <div className="text-orange-400 text-xs">⏸ 暫停</div>}
-            <div className={`text-xs font-bold ${myPlayer.monthlyCashflow >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {myPlayer.monthlyCashflow >= 0 ? '+' : ''}${fmt(myPlayer.monthlyCashflow)}/月
+          <div className="flex items-center gap-2 shrink-0 ml-2">
+            <button
+              className="text-xs px-2 py-1 rounded-lg bg-emerald-900/60 hover:bg-emerald-900 border border-emerald-700 text-emerald-300 transition-colors"
+              onClick={() => setShowIntro(true)}
+            >
+              策略指南
+            </button>
+            <div className="text-right">
+              <div className="text-yellow-300 font-bold text-sm">
+                {personalAge.toFixed(1)} 歲
+              </div>
+              {gameState.isPaused && <div className="text-orange-400 text-xs">⏸ 暫停</div>}
+              <div className={`text-xs font-bold ${myPlayer.monthlyCashflow >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {myPlayer.monthlyCashflow >= 0 ? '+' : ''}${fmt(myPlayer.monthlyCashflow)}/月
+              </div>
             </div>
           </div>
         </div>
@@ -960,6 +970,16 @@ export default function PlayerPage() {
             </span>
           </div>
         </div>
+
+        {/* 策略指南 bottom sheet */}
+        {showIntro && (
+          <div className="fixed inset-0 z-50 flex flex-col justify-end">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowIntro(false)} />
+            <div className="relative bg-gray-950 rounded-t-2xl border-t border-gray-700 h-[85vh] flex flex-col">
+              <IntroSheet onClose={() => setShowIntro(false)} mode="sheet" />
+            </div>
+          </div>
+        )}
       </div>
     );
   }

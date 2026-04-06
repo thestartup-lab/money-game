@@ -2051,6 +2051,19 @@ io.on('connection', (socket: Socket) => {
         cashflowHistory: p.eventLog
           .filter((e) => e.type === 'payday')
           .map((e) => ({ age: e.age, cashflow: e.cashflowAfter, netWorth: e.netWorthAfter })),
+        eventLog: p.eventLog
+          .filter((e) => ['asset_buy','asset_sell','travel','marriage','child','crisis','career_change','education','rat_race_escaped','loan_taken','franchise','relationship'].includes(e.type))
+          .map((e) => ({
+            age: e.age,
+            type: e.type,
+            description: e.description,
+            cashBefore: e.cashBefore,
+            cashAfter: e.cashAfter,
+            cashflowBefore: e.cashflowBefore,
+            cashflowAfter: e.cashflowAfter,
+            netWorthBefore: e.netWorthBefore,
+            netWorthAfter: e.netWorthAfter,
+          })),
       };
     });
 

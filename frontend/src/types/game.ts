@@ -215,6 +215,12 @@ export interface RoomPlayerSummary {
   finalPassiveIncome: number;
   score: LifeScoreBreakdown;
   cashflowHistory: { age: number; cashflow: number; netWorth: number }[];
+  eventLog?: {
+    age: number; type: string; description: string;
+    cashBefore: number; cashAfter: number;
+    cashflowBefore: number; cashflowAfter: number;
+    netWorthBefore: number; netWorthAfter: number;
+  }[];
 }
 
 // ── 外圈新格子事件型別 ─────────────────────────────────────

@@ -5,6 +5,8 @@ import { QRCodeSVG } from 'qrcode.react';
 import type { GameState, RoomPlayerSummary, LifeScoreBreakdown } from '../types/game';
 import { GameBoard } from '../components/game/GameBoard';
 import type { BoardPlayer } from '../components/game/GameBoard';
+import IntroSheet from '../components/game/IntroSheet';
+import DecisionHistoryView from '../components/analysis/DecisionHistoryView';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
@@ -42,7 +44,7 @@ export default function DisplayScreen() {
   const [joined, setJoined] = useState(false);
   const [joinError, setJoinError] = useState('');
   const [joining, setJoining] = useState(false);
-  const [view, setView] = useState<'game' | 'analysis'>('game');
+  const [view, setView] = useState<'game' | 'analysis' | 'intro' | 'history'>('game');
   const [ticker, setTicker] = useState<string[]>([]);
   // 倒數計時（毫秒），從 gameState 的 gameDurationMs 與 currentAge 算出，每秒本地遞減
   const [countdownMs, setCountdownMs] = useState(0);
@@ -51,6 +53,19 @@ export default function DisplayScreen() {
   type CellEvent = { playerName: string; cellName: string; message: string; isMilestone?: boolean };
   const [centerEvent, setCenterEvent] = useState<CellEvent | null>(null);
   const centerEventTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 發薪日決策小卡
+  type PaydayCard = {
+    playerName: string; colorIndex: number;
+    fqUpgrade: boolean; healthBoost: boolean; healthMaint: boolean;
+    skillTraining: boolean; networkInvest: boolean;
+    dcaAmount: number; insurances: string[]; totalCost: number;
+  };
+  const [paydayCards, setPaydayCards] = useState<Map<string, PaydayCard>>(new Map());
+  const [showPaydayOverlay, setShowPaydayOverlay] = useState(false);
+  const paydayDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 本回合玩家行動標記
+  const [playerRoundActions, setPlayerRoundActions] = useState<Map<string, string>>(new Map());
+  const prevTurnIdRef = useRef<string | null>(null);
 
   const addTicker = (msg: string) => setTicker((prev) => [msg, ...prev].slice(0, 6));
 
@@ -71,7 +86,11 @@ export default function DisplayScreen() {
     s.on('joinDisplaySuccess', () => { setJoined(true); setJoining(false); });
     s.on('joinDisplayFail', (p: { message: string }) => { setJoinError(p.message); setJoining(false); });
     // 若後端尚未支援 joinDisplay，收到 gameStateUpdate 也視為成功
-    s.on('gameStateUpdate', (gs: GameState) => { setGameState(gs); setJoined(true); setJoining(false); });
+    s.on('gameStateUpdate', (gs: GameState) => {
+      setGameState(gs);
+      setJoined(true);
+      setJoining(false);
+    });
     s.on('gameClock', (p: { currentAge: number }) => {
       setGameState((gs) => gs ? { ...gs, currentAge: p.currentAge } : gs);
     });
@@ -81,14 +100,60 @@ export default function DisplayScreen() {
     });
     s.on('marriageAnnouncement', (p: { playerName: string }) => addTicker(`💑 ${p.playerName} 結婚了！`));
 
+    // 發薪日決策小卡
+    type PlanResult = { fqUpgrade?: { executed: boolean }; healthBoost?: { executed: boolean }; healthMaintenance?: { executed: boolean }; skillTraining?: { executed: boolean }; networkInvest?: { executed: boolean } };
+    s.on('paydayPlanResult', (p: {
+      playerId: string; playerName: string;
+      planResult: { investments: PlanResult; stockDCA: { executed: boolean; amount: number }; insurancePurchases: Array<{ type: string; success: boolean }>; totalCostDeducted: number };
+    }) => {
+      setPaydayCards((prev) => {
+        const colorIdx = Array.from(prev.keys()).indexOf(p.playerId) % 6;
+        const inv = p.planResult.investments;
+        const card: PaydayCard = {
+          playerName: p.playerName,
+          colorIndex: colorIdx >= 0 ? colorIdx : prev.size % 6,
+          fqUpgrade: inv.fqUpgrade?.executed ?? false,
+          healthBoost: inv.healthBoost?.executed ?? false,
+          healthMaint: inv.healthMaintenance?.executed ?? false,
+          skillTraining: inv.skillTraining?.executed ?? false,
+          networkInvest: inv.networkInvest?.executed ?? false,
+          dcaAmount: p.planResult.stockDCA.executed ? p.planResult.stockDCA.amount : 0,
+          insurances: p.planResult.insurancePurchases.filter((i) => i.success).map((i) => i.type),
+          totalCost: p.planResult.totalCostDeducted,
+        };
+        const next = new Map(prev);
+        next.set(p.playerId, card);
+        return next;
+      });
+      setShowPaydayOverlay(true);
+      if (paydayDismissTimer.current) clearTimeout(paydayDismissTimer.current);
+      paydayDismissTimer.current = setTimeout(() => {
+        setShowPaydayOverlay(false);
+        setPaydayCards(new Map());
+      }, 12000);
+    });
+    s.on('gameResumed', () => {
+      if (paydayDismissTimer.current) clearTimeout(paydayDismissTimer.current);
+      paydayDismissTimer.current = setTimeout(() => {
+        setShowPaydayOverlay(false);
+        setPaydayCards(new Map());
+      }, 2000);
+    });
+
     const showCenterEvent = (evt: CellEvent, durationMs: number) => {
       setCenterEvent(evt);
       if (centerEventTimer.current) clearTimeout(centerEventTimer.current);
       centerEventTimer.current = setTimeout(() => setCenterEvent(null), durationMs);
     };
 
-    s.on('cellEventBroadcast', (p: { playerName: string; cellName: string; message: string }) => {
+    s.on('cellEventBroadcast', (p: { playerId: string; playerName: string; cellName: string; message: string }) => {
       showCenterEvent({ playerName: p.playerName, cellName: p.cellName, message: p.message }, 4000);
+      // 記錄本回合行動
+      setPlayerRoundActions((prev) => {
+        const next = new Map(prev);
+        next.set(p.playerId, p.message.replace(/^[^\s]*\s/, '').substring(0, 30));
+        return next;
+      });
     });
     s.on('milestoneAnnounced', (p: { playerName: string; milestone: string; description: string }) => {
       addTicker(`🏆 ${p.description}`);
@@ -116,6 +181,16 @@ export default function DisplayScreen() {
     }, 1000);
     return () => clearInterval(timer);
   }, [gameState?.isPaused]);
+
+  // 換人行動時清除本回合行動標記
+  useEffect(() => {
+    if (!gameState) return;
+    const newTurnId = gameState.currentPlayerTurnId;
+    if (prevTurnIdRef.current && prevTurnIdRef.current !== newTurnId) {
+      setPlayerRoundActions(new Map());
+    }
+    prevTurnIdRef.current = newTurnId ?? null;
+  }, [gameState?.currentPlayerTurnId]);
 
   const emit = (ev: string, ...args: unknown[]) => socketRef.current?.emit(ev, ...args);
 
@@ -235,17 +310,31 @@ export default function DisplayScreen() {
 
         {/* 右：控制按鈕 + 連線狀態 */}
         <div className="flex items-center gap-2 min-w-0 justify-end">
+          <button
+            className={`text-sm px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${view === 'intro' ? 'bg-emerald-700 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
+            onClick={() => setView(view === 'intro' ? 'game' : 'intro')}
+          >
+            策略指南
+          </button>
           {gameState.gamePhase === 'GameOver' && (
-            <button
-              className="text-sm px-4 py-1.5 rounded-lg bg-purple-800 hover:bg-purple-700 transition-colors whitespace-nowrap"
-              onClick={() => emit('requestRoomAnalysis')}
-            >
-              顯示分析
-            </button>
+            <>
+              <button
+                className="text-sm px-3 py-1.5 rounded-lg bg-purple-800 hover:bg-purple-700 transition-colors whitespace-nowrap"
+                onClick={() => { emit('requestRoomAnalysis'); }}
+              >
+                顯示分析
+              </button>
+              <button
+                className={`text-sm px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${view === 'history' ? 'bg-blue-700 text-white' : 'bg-blue-900 hover:bg-blue-800 text-blue-200'}`}
+                onClick={() => setView(view === 'history' ? 'game' : 'history')}
+              >
+                決策歷程
+              </button>
+            </>
           )}
-          {view === 'analysis' && (
+          {(view === 'analysis' || view === 'history') && (
             <button
-              className="text-sm px-4 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors whitespace-nowrap"
+              className="text-sm px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors whitespace-nowrap"
               onClick={() => setView('game')}
             >
               返回棋盤
@@ -256,7 +345,15 @@ export default function DisplayScreen() {
       </div>
 
       {/* 主體 */}
-      {view === 'analysis' && roomAnalysis ? (
+      {view === 'intro' ? (
+        <div className="flex-1 overflow-hidden">
+          <IntroSheet mode="fullscreen" />
+        </div>
+      ) : view === 'history' && roomAnalysis ? (
+        <div className="flex-1 overflow-y-auto p-4">
+          <DecisionHistoryView analysis={roomAnalysis} />
+        </div>
+      ) : view === 'analysis' && roomAnalysis ? (
         <div className="flex-1 overflow-y-auto p-4">
           <RoomAnalysisView analysis={roomAnalysis} />
         </div>
@@ -306,6 +403,11 @@ export default function DisplayScreen() {
                         {p.isMarried && <span className="text-pink-400">已婚</span>}
                         {!p.isAlive && <span className="text-gray-500">結束</span>}
                       </div>
+                      {playerRoundActions.get(p.id) && (
+                        <p className="text-xs text-sky-400 italic pl-4 mt-0.5 truncate">
+                          {playerRoundActions.get(p.id)}
+                        </p>
+                      )}
                     </div>
                   );
                 })}
@@ -328,6 +430,50 @@ export default function DisplayScreen() {
             style={{ maxHeight: 'calc(100vh - 90px)' }}
           >
             <GameBoard players={boardPlayers} currentTurnPlayerId={gameState.currentPlayerTurnId} />
+
+            {/* 發薪日決策小卡 overlay */}
+            {showPaydayOverlay && paydayCards.size > 0 && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center z-40 bg-black/60 backdrop-blur-sm pointer-events-none">
+                <p className="text-yellow-300 font-bold text-lg mb-4 tracking-wide">💵 本次發薪日決策</p>
+                <div className="flex flex-wrap justify-center gap-3 max-w-5xl px-4">
+                  {Array.from(paydayCards.values()).map((card, i) => {
+                    const dotC = ['bg-amber-400','bg-blue-400','bg-pink-400','bg-emerald-400','bg-purple-400','bg-orange-400'];
+                    const insLabel: Record<string, string> = { medical: '醫', life: '壽', property: '財' };
+                    const anyAction = card.fqUpgrade || card.healthBoost || card.healthMaint || card.skillTraining || card.networkInvest || card.dcaAmount > 0 || card.insurances.length > 0;
+                    return (
+                      <div key={i} className="bg-gray-900 border border-gray-700 rounded-xl p-3 min-w-[130px] text-center">
+                        <div className="flex items-center justify-center gap-1.5 mb-2">
+                          <span className={`w-2 h-2 rounded-full ${dotC[card.colorIndex % 6]}`} />
+                          <span className="text-sm font-bold text-white">{card.playerName}</span>
+                        </div>
+                        {anyAction ? (
+                          <>
+                            <div className="flex flex-wrap justify-center gap-1 mb-2">
+                              <span className={`text-lg ${card.fqUpgrade ? '' : 'opacity-20'}`} title="FQ">🧠</span>
+                              <span className={`text-lg ${card.healthBoost ? '' : 'opacity-20'}`} title="HP強化">💪</span>
+                              <span className={`text-lg ${card.healthMaint ? '' : 'opacity-20'}`} title="HP維護">🩺</span>
+                              <span className={`text-lg ${card.skillTraining ? '' : 'opacity-20'}`} title="SK">🛠️</span>
+                              <span className={`text-lg ${card.networkInvest ? '' : 'opacity-20'}`} title="NT">🌐</span>
+                            </div>
+                            {card.dcaAmount > 0 && (
+                              <p className="text-xs text-emerald-400 mb-1">📈 DCA ${fmt(card.dcaAmount)}</p>
+                            )}
+                            {card.insurances.length > 0 && (
+                              <p className="text-xs text-blue-300 mb-1">
+                                🛡️ {card.insurances.map((t) => insLabel[t] ?? t).join('、')}險
+                              </p>
+                            )}
+                            <p className="text-xs text-gray-500">支出 ${fmt(card.totalCost)}</p>
+                          </>
+                        ) : (
+                          <p className="text-xs text-gray-500 mt-1">本次略過</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* 置中大字幕 overlay */}
             {centerEvent && (
