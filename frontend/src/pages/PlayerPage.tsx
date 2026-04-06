@@ -220,7 +220,8 @@ export default function PlayerPage() {
         setCongratulatableEvent({ targetId: p.playerId ?? '', targetName: p.playerName, event: '結婚' });
       }
     });
-    s.on('dealAuctionStarted', (p: { auctionId: string; triggeredByName: string; endsAt: number; card?: { id: string; name: string; description?: string; minBid: number; monthlyCashflow?: number }; }) => {
+    s.on('dealAuctionStarted', (p: { auctionId: string; triggeredBy: string; triggeredByName: string; endsAt: number; card?: { id: string; name: string; description?: string; minBid: number; monthlyCashflow?: number }; }) => {
+      if (p.triggeredBy === s.id) return;
       const minBid = p.card?.minBid ?? 0;
       addNotification(`🔔 ${p.triggeredByName} 放棄交易！20 秒內可出價搶標（起標 $${minBid.toLocaleString()}）`);
       setActiveAuction({ ...p, minBid, highestBid: 0 });

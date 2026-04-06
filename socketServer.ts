@@ -47,6 +47,7 @@ import {
   E_PROFESSION_POOLS, S_PROFESSION_POOLS, FRANCHISE_CASH_THRESHOLD, PROFESSIONS,
   SECOND_LIFE_CELL,
   STOCK_DCA_MONTHLY_RETURN_RATE,
+  SKILL_CAREER_CHANGE_THRESHOLD,
 } from './gameConfig';
 import { ADMIN_GLOBAL_EVENT_MAP } from './adminEvents';
 import {
@@ -651,7 +652,7 @@ io.on('connection', (socket: Socket) => {
 
       // --- 3–4. 每個發薪日：暫停時鐘 → 全員規劃 → 發薪 → 繳稅 ---
       if (requiresPaydayPlanning) {
-        for (const paydayPos of passedPaydays) {
+        for (const [paydayIdx, paydayPos] of passedPaydays.entries()) {
           pauseGameClock(gs);
           gs.paydayPlanningConfirmed.clear();
           emitToRoom(roomId, 'gamePaused', { reason: '發薪日規劃', currentAge: Math.round(getCurrentAge(gs) * 10) / 10 });
@@ -669,6 +670,8 @@ io.on('connection', (socket: Socket) => {
 
           socket.emit('paydayPlanningRequired', {
             paydayPosition: paydayPos,
+            paydayIndex: paydayIdx + 1,
+            totalPaydays: passedPaydays.length,
             currentStats: player.stats,
             currentCash: player.cash,
             affordableOptions,
@@ -694,17 +697,19 @@ io.on('connection', (socket: Socket) => {
             planResult,
           });
 
-          if (planResult.careerChangeUnlocked) {
+          if (player.stats.careerSkill >= SKILL_CAREER_CHANGE_THRESHOLD) {
             socket.emit('careerChangeUnlocked', {
               message: '恭喜！你的第二專長已達到頂峰，可以轉職了！',
               availableProfessions: buildAvailableProfessions(player),
             });
-            emitToRoom(roomId, 'milestoneAnnounced', {
-              playerId: player.id,
-              playerName: player.name,
-              milestone: '轉職解鎖',
-              description: `${player.name} 的技能值達到頂峰，可以轉職了！`,
-            });
+            if (planResult.careerChangeUnlocked) {
+              emitToRoom(roomId, 'milestoneAnnounced', {
+                playerId: player.id,
+                playerName: player.name,
+                milestone: '轉職解鎖',
+                description: `${player.name} 的技能值達到頂峰，可以轉職了！`,
+              });
+            }
           }
 
           // NT 里程碑廣播
@@ -2990,6 +2995,7 @@ function buildAffordableOptions(player: Player): object {
     HP_BOOST_COST: boostCost,
     SKILL_TRAINING_COST: skillCost,
     NETWORK_INVEST_COST: ntCost,
+    SKILL_CAREER_CHANGE_THRESHOLD,
   } = require('./gameConfig');
 
   const fqCost = getFQUpgradeCost(player.stats.financialIQ);
@@ -3003,7 +3009,7 @@ function buildAffordableOptions(player: Player): object {
     },
     healthMaintenance: { available: player.cash >= maintCost, cost: maintCost },
     healthBoost: { available: player.cash >= boostCost, cost: boostCost },
-    skillTraining: { available: player.cash >= skillCost, cost: skillCost, currentSK: player.stats.careerSkill },
+    skillTraining: { available: player.cash >= skillCost && player.stats.careerSkill < SKILL_CAREER_CHANGE_THRESHOLD, cost: skillCost, currentSK: player.stats.careerSkill },
     networkInvest: { available: player.cash >= ntCost && player.stats.network < 10, cost: ntCost, currentNT: player.stats.network },
   };
 }

@@ -309,6 +309,8 @@ export interface AffordableOptions {
 /** paydayPlanningRequired 的完整 payload（前端收到後存入 paydayForm state）*/
 export interface PaydayFormData {
   paydayPosition: number;
+  paydayIndex?: number;
+  totalPaydays?: number;
   currentCash: number;
   currentStats: { financialIQ: number; health: number; careerSkill: number; network: number };
   affordableOptions: AffordableOptions;

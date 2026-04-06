@@ -125,8 +125,8 @@ export default function DisplayScreen() {
           healthMaint: inv.healthMaintenance?.executed ?? false,
           skillTraining: inv.skillTraining?.executed ?? false,
           networkInvest: inv.networkInvest?.executed ?? false,
-          dcaAmount: p.planResult.stockDCA.executed ? p.planResult.stockDCA.amount : 0,
-          insurances: p.planResult.insurancePurchases.filter((i) => i.success).map((i) => i.type),
+          dcaAmount: p.planResult.stockDCA?.executed ? p.planResult.stockDCA.amount : 0,
+          insurances: (p.planResult.insurancePurchases ?? []).filter((i) => i.success).map((i) => i.type),
           totalCost: p.planResult.totalCostDeducted,
         };
         const next = new Map(prev);
@@ -145,17 +145,19 @@ export default function DisplayScreen() {
       paydayDismissTimer.current = setTimeout(() => {
         setShowPaydayOverlay(false);
         setPaydayCards(new Map());
-      }, 2000);
+      }, 5000);
     });
 
-    const showCenterEvent = (evt: CellEvent, durationMs: number) => {
+    const showCenterEvent = (evt: CellEvent, autoDismissMs?: number) => {
       setCenterEvent(evt);
       if (centerEventTimer.current) clearTimeout(centerEventTimer.current);
-      centerEventTimer.current = setTimeout(() => setCenterEvent(null), durationMs);
+      if (autoDismissMs) {
+        centerEventTimer.current = setTimeout(() => setCenterEvent(null), autoDismissMs);
+      }
     };
 
     s.on('cellEventBroadcast', (p: { playerId: string; playerName: string; cellName: string; message: string }) => {
-      showCenterEvent({ playerName: p.playerName, cellName: p.cellName, message: p.message }, 4000);
+      showCenterEvent({ playerName: p.playerName, cellName: p.cellName, message: p.message });
       // 記錄本回合行動
       setPlayerRoundActions((prev) => {
         const next = new Map(prev);
@@ -165,7 +167,7 @@ export default function DisplayScreen() {
     });
     s.on('milestoneAnnounced', (p: { playerName: string; milestone: string; description: string }) => {
       addTicker(`🏆 ${p.description}`);
-      showCenterEvent({ playerName: p.playerName, cellName: `🏆 ${p.milestone}`, message: p.description, isMilestone: true }, 6000);
+      showCenterEvent({ playerName: p.playerName, cellName: `🏆 ${p.milestone}`, message: p.description, isMilestone: true });
     });
     s.on('playerFinalScore', (p: { playerName: string; deathAge: number; score: { total: number } }) => {
       addTicker(`⚰️ ${p.playerName} 在 ${p.deathAge} 歲結束人生，得 ${Math.round(p.score.total)} 分`);
@@ -179,7 +181,7 @@ export default function DisplayScreen() {
     s.on('dealAuctionStarted', (p: { auctionId: string; triggeredByName: string; endsAt: number; card?: { name: string; minBid: number; monthlyCashflow?: number } }) => {
       const cardName = p.card?.name ?? '交易';
       const minBid = p.card?.minBid ?? 0;
-      showCenterEvent({ playerName: p.triggeredByName, cellName: '🔔 開放競標！', message: `${p.triggeredByName} 放棄交易，${cardName} 開放競標！起標 $${minBid.toLocaleString()}` }, 5000);
+      showCenterEvent({ playerName: p.triggeredByName, cellName: '🔔 開放競標！', message: `${p.triggeredByName} 放棄交易，${cardName} 開放競標！起標 $${minBid.toLocaleString()}` });
       addTicker(`🔔 ${p.triggeredByName} 放棄「${cardName}」，開放競標（起標 $${minBid.toLocaleString()}）`);
       const secondsLeft = Math.max(0, Math.round((p.endsAt - Date.now()) / 1000));
       setAuctionPanel({ auctionId: p.auctionId, triggeredByName: p.triggeredByName, cardName, minBid, highestBid: 0, endsAt: p.endsAt, secondsLeft });
@@ -194,17 +196,16 @@ export default function DisplayScreen() {
       }, 1000);
     });
     s.on('dealBidUpdated', (p: { bidderName: string; bidAmount: number; newHighest: number }) => {
-      showCenterEvent({ playerName: p.bidderName, cellName: `💰 出價 $${fmt(p.newHighest)}`, message: `${p.bidderName} 出價 $${fmt(p.bidAmount)}（目前最高）` }, 2000);
-      setAuctionPanel((prev) => prev ? { ...prev, highestBid: p.newHighest, highestBidderName: p.bidderName } : prev);
+      showCenterEvent({ playerName: p.bidderName, cellName: `💰 出價 $${fmt(p.newHighest)}`, message: `${p.bidderName} 出價 $${fmt(p.bidAmount)}（目前最高）` }, 2000);      setAuctionPanel((prev) => prev ? { ...prev, highestBid: p.newHighest, highestBidderName: p.bidderName } : prev);
     });
     s.on('dealAuctionEnded', (p: { auctionId: string; winnerId?: string | null; winnerName?: string | null; winningBid: number; cardName?: string; hadBids?: boolean }) => {
       if (auctionCountdownRef.current) clearInterval(auctionCountdownRef.current);
       setAuctionPanel(null);
       if (p.hadBids && p.winnerName) {
-        showCenterEvent({ playerName: p.winnerName, cellName: `🏆 得標！`, message: `${p.winnerName} 以 $${fmt(p.winningBid)} 競標到「${p.cardName ?? '資產'}」！` }, 6000);
+        showCenterEvent({ playerName: p.winnerName, cellName: `🏆 得標！`, message: `${p.winnerName} 以 $${fmt(p.winningBid)} 競標到「${p.cardName ?? '資產'}」！` });
         addTicker(`🏆 ${p.winnerName} 以 $${fmt(p.winningBid)} 得標「${p.cardName ?? '資產'}」`);
       } else {
-        showCenterEvent({ playerName: '', cellName: '🔔 競標結束', message: `無人出價，${p.cardName ?? '交易'} 流標` }, 3000);
+        showCenterEvent({ playerName: '', cellName: '🔔 競標結束', message: `無人出價，${p.cardName ?? '交易'} 流標` });
         addTicker(`🔔 ${p.cardName ?? '交易'} 競標流標，無人出價`);
       }
     });
@@ -231,6 +232,16 @@ export default function DisplayScreen() {
     }
     prevTurnIdRef.current = newTurnId ?? null;
   }, [gameState?.currentPlayerTurnId]);
+
+  // Enter 鍵手動關閉置中事件 overlay
+  useEffect(() => {
+    if (!centerEvent) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') setCenterEvent(null);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [centerEvent]);
 
   const emit = (ev: string, ...args: unknown[]) => socketRef.current?.emit(ev, ...args);
 
@@ -539,8 +550,9 @@ export default function DisplayScreen() {
             {/* 置中大字幕 overlay */}
             {centerEvent && (
               <div
-                className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none"
+                className="absolute inset-0 flex items-center justify-center z-50 pointer-events-auto cursor-pointer"
                 style={{ animation: 'fadeInOut 0.3s ease' }}
+                onClick={() => setCenterEvent(null)}
               >
                 <div className={`rounded-2xl px-10 py-8 text-center shadow-2xl max-w-xl w-full mx-4 ${
                   centerEvent.isMilestone
@@ -558,6 +570,7 @@ export default function DisplayScreen() {
                   <p className={`text-lg leading-snug ${centerEvent.isMilestone ? 'text-yellow-200' : 'text-gray-200'}`}>
                     {centerEvent.message}
                   </p>
+                  <p className="text-xs text-gray-500 mt-4">點擊或按 Enter 繼續</p>
                 </div>
               </div>
             )}

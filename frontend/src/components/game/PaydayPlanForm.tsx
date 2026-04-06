@@ -102,7 +102,9 @@ export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPla
       {/* 標題列 */}
       <div className="bg-gray-800 px-4 py-3 flex items-center justify-between border-b border-gray-700">
         <div>
-          <div className="text-yellow-400 font-bold text-base">💰 發薪日！</div>
+          <div className="text-yellow-400 font-bold text-base">
+            💰 發薪日！{data.totalPaydays && data.totalPaydays > 1 ? `（第 ${data.paydayIndex ?? 1}/${data.totalPaydays} 次）` : ''}
+          </div>
           <div className="text-xs text-gray-400">現金：${playerCash.toLocaleString()}</div>
         </div>
         <div className="text-right">
