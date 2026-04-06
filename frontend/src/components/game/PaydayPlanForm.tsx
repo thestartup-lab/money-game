@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PaydayFormData, PaydayPlanPayload, LifeChoice } from '../../types/game';
 
 interface PaydayPlanFormProps {
@@ -29,12 +29,15 @@ export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPla
   const [showTravelList, setShowTravelList] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(Math.ceil((data.timeoutMs ?? 30000) / 1000));
 
+  // 使用 ref 保存最新的 handleSubmit，避免計時器閉包過期
+  const handleSubmitRef = useRef<() => void>(() => {});
+
   useEffect(() => {
     const interval = setInterval(() => {
       setSecondsLeft((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
-          handleSubmit();
+          handleSubmitRef.current();
           return 0;
         }
         return prev - 1;
@@ -89,6 +92,8 @@ export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPla
     };
     onSubmit(plan, lifeChoice);
   }
+  // 每次 render 都更新 ref，確保計時器用最新狀態
+  handleSubmitRef.current = handleSubmit;
 
   const ins = data.currentInsurance;
 

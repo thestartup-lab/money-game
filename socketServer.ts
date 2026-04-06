@@ -726,10 +726,6 @@ io.on('connection', (socket: Socket) => {
 
           await waitForAllPlanningDone(gs, PAYDAY_PLANNING_TIMEOUT_MS);
 
-          // #region agent log
-          fetch('http://127.0.0.1:7470/ingest/7fa87a60-2288-4996-82e8-42825f0ef04e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b98e21'},body:JSON.stringify({sessionId:'b98e21',location:'socketServer.ts:689',message:'waitForAllPlanningDone resolved',data:{confirmedCount:gs.paydayPlanningConfirmed.size,alive:countAlivePlayers(gs),confirmedIds:Array.from(gs.paydayPlanningConfirmed),playerOrder:gs.playerOrder},timestamp:Date.now(),hypothesisId:'H-B'})}).catch(()=>{});
-          // #endregion
-
           resumeGameClock(gs);
           emitToRoom(roomId, 'gameResumed', {
             resumedAt: new Date(),
@@ -838,12 +834,7 @@ io.on('connection', (socket: Socket) => {
       }
 
       // --- 6. 廣播最終遊戲狀態 & 推進回合 ---
-      // #region agent log
-      const _beforeTurnId = gs.currentPlayerTurnId;
       gs.advanceToNextTurn();
-      const _afterTurnId = gs.currentPlayerTurnId;
-      fetch('http://127.0.0.1:7470/ingest/7fa87a60-2288-4996-82e8-42825f0ef04e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b98e21'},body:JSON.stringify({sessionId:'b98e21',location:'socketServer.ts:793',message:'advanceToNextTurn called',data:{before:_beforeTurnId,after:_afterTurnId,playerOrder:gs.playerOrder,playerName:player.name},timestamp:Date.now(),hypothesisId:'H-A'})}).catch(()=>{});
-      // #endregion
       emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
     } catch (err) {
       console.error(`[playerRoll] 未預期錯誤：`, err);
@@ -2304,6 +2295,22 @@ async function handleLandingSquare(
           deal,
           isFastTrack: true,
         });
+        // 等待玩家決策（30 秒逾時自動略過）
+        const ftDealDecision = await waitForCardDecision(socket, 30000);
+        resumeGameClock(gs);
+        emitToRoom(roomId, 'gameResumed', { resumedAt: new Date() });
+        const ftCost = deal.asset.downPayment ?? deal.asset.cost;
+        if (ftDealDecision?.accept === true && player.cash >= ftCost) {
+          acceptDealCard(player, deal);
+          emitCellEvent(socket, roomId, player.name, 'FT 大交易', `✅ 成交！${deal.title} 月現金流 +$${deal.asset.monthlyCashflow.toLocaleString()}`);
+          emitToRoom(roomId, 'cardApplied', {
+            playerId: player.id,
+            squareType: ftSqType,
+            effect: { type: 'dealAccepted', card: deal },
+          });
+        } else if (ftDealDecision?.accept === true) {
+          socket.emit('error', { message: `現金不足，無法購買 ${deal.title}（需 $${ftCost.toLocaleString()}）。` });
+        }
         break;
       }
       case FastTrackSquareType.NetworkSummit: {

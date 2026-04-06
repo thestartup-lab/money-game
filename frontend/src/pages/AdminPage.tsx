@@ -87,7 +87,7 @@ export default function AdminPage() {
         pendingLoginPasswordRef.current = '';
       }
     });
-    s.on('roomsList', (p: { rooms: AdminRoom[] }) => setRoomList(p.rooms));
+    s.on('roomList', (p: { rooms: AdminRoom[] }) => setRoomList(p.rooms));
 
     s.on('gameStateUpdate', (gs: GameState) => setGameState(gs));
     s.on('gameClock', (p: { currentAge: number }) => {

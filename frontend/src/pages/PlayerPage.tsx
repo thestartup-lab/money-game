@@ -138,10 +138,6 @@ export default function PlayerPage() {
       else if (amIInGame && ['RatRace', 'FastTrack'].includes(gs.gamePhase)) setView((v) => (v === 'pre20' || v === 'join') ? 'game' : v);
       // 輪到自己時解除擲骰鎖定（以防 rollResult 沒有正確觸發）
       if (gs.currentPlayerTurnId === s.id) setRollingLocked(false);
-      // #region agent log
-      const _me = gs.players.find((p) => p.id === s.id);
-      fetch('http://127.0.0.1:7470/ingest/7fa87a60-2288-4996-82e8-42825f0ef04e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b98e21'},body:JSON.stringify({sessionId:'b98e21',location:'PlayerPage.tsx:gameStateUpdate',message:'state received',data:{currentPlayerTurnId:gs.currentPlayerTurnId,myId:s.id,isMyTurn:gs.currentPlayerTurnId===s.id,currentAge:gs.currentAge,myStartAge:_me?.startAge,personalAge:(_me?.startAge??20)+(gs.currentAge-20)},timestamp:Date.now(),hypothesisId:'H-A/H-D'})}).catch(()=>{});
-      // #endregion
     });
 
     s.on('socialClassRolled', (p: { socialClass: string; label: string; growthPoints: number; startingCashBonus: number }) => {
@@ -177,6 +173,11 @@ export default function PlayerPage() {
     });
     s.on('paydaySkipped', (_p: { playerId?: string; reason?: string }) => {
       addNotification('📚 進修中，本次發薪日跳過。');
+    });
+    s.on('turnSkipped', (p: { reason?: string; turnsRemaining?: number }) => {
+      const reason = p.reason === 'bedridden' ? '臥床中' : p.reason === 'turnsToSkip' ? '行動跳過' : '回合跳過';
+      const remaining = (p.turnsRemaining ?? 0) > 0 ? `（剩餘 ${p.turnsRemaining} 回）` : '';
+      addNotification(`⏭️ ${reason}，本回合跳過${remaining}。`);
     });
     s.on('ratRaceEscaped', (p: { playerName: string; canCongratulate?: boolean; playerId?: string }) => {
       addNotification(`🎉 ${p.playerName} 脫出老鼠賽跑！`);
@@ -289,8 +290,8 @@ export default function PlayerPage() {
     });
 
     // 格子事件監聽
-    s.on('crisisNTSkipAvailable', (p: { crisis: { title: string; description: string; baseCost: number }; network: number; timeoutMs: number }) => {
-      setActiveEvent({ kind: 'crisis_nt_skip', title: p.crisis.title, description: p.crisis.description, baseCost: p.crisis.baseCost, network: p.network, timeoutMs: p.timeoutMs });
+    s.on('crisisNTSkipAvailable', (p: { card: { title: string; description: string; baseCost: number }; network?: number; timeoutMs: number }) => {
+      setActiveEvent({ kind: 'crisis_nt_skip', title: p.card.title, description: p.card.description, baseCost: p.card.baseCost, network: p.network ?? 0, timeoutMs: p.timeoutMs });
     });
     s.on('dealCardsDrawn', (p: { cards: Array<{ id: string; name: string; description?: string; downPayment: number; monthlyCashflow: number }>; playerCash: number }) => {
       setActiveEvent({ kind: 'deal_pick', cards: p.cards, playerCash: p.playerCash ?? 0 });
