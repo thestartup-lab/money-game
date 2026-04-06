@@ -135,17 +135,17 @@ export default function DisplayScreen() {
       });
       setShowPaydayOverlay(true);
       if (paydayDismissTimer.current) clearTimeout(paydayDismissTimer.current);
-      paydayDismissTimer.current = setTimeout(() => {
-        setShowPaydayOverlay(false);
-        setPaydayCards(new Map());
-      }, 12000);
     });
     s.on('gameResumed', () => {
-      if (paydayDismissTimer.current) clearTimeout(paydayDismissTimer.current);
-      paydayDismissTimer.current = setTimeout(() => {
-        setShowPaydayOverlay(false);
-        setPaydayCards(new Map());
-      }, 5000);
+      // 不強制關閉 payday overlay — 由使用者手動點擊關閉
+    });
+
+    s.on('playerTraveled', (p: { playerId: string; playerName: string; destinationName?: string; lifeExperienceGained: number }) => {
+      setPlayerRoundActions((prev) => {
+        const next = new Map(prev);
+        next.set(p.playerId, `前往「${p.destinationName ?? '旅遊地'}」體驗 +${p.lifeExperienceGained}`);
+        return next;
+      });
     });
 
     const showCenterEvent = (evt: CellEvent, autoDismissMs?: number) => {
@@ -242,6 +242,16 @@ export default function DisplayScreen() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [centerEvent]);
+
+  // Enter 鍵手動關閉發薪日 overlay
+  useEffect(() => {
+    if (!showPaydayOverlay) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') { setShowPaydayOverlay(false); setPaydayCards(new Map()); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [showPaydayOverlay]);
 
   const emit = (ev: string, ...args: unknown[]) => socketRef.current?.emit(ev, ...args);
 
@@ -505,7 +515,10 @@ export default function DisplayScreen() {
 
             {/* 發薪日決策小卡 overlay */}
             {showPaydayOverlay && paydayCards.size > 0 && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center z-40 bg-black/60 backdrop-blur-sm pointer-events-none">
+              <div
+                className="absolute inset-0 flex flex-col items-center justify-center z-40 bg-black/60 backdrop-blur-sm pointer-events-auto cursor-pointer"
+                onClick={() => { setShowPaydayOverlay(false); setPaydayCards(new Map()); }}
+              >
                 <p className="text-yellow-300 font-bold text-lg mb-4 tracking-wide">💵 本次發薪日決策</p>
                 <div className="flex flex-wrap justify-center gap-3 max-w-5xl px-4">
                   {Array.from(paydayCards.values()).map((card, i) => {
@@ -544,6 +557,7 @@ export default function DisplayScreen() {
                     );
                   })}
                 </div>
+                <p className="text-xs text-gray-500 mt-5">點擊或按 Enter 繼續</p>
               </div>
             )}
 

@@ -752,15 +752,17 @@ io.on('connection', (socket: Socket) => {
           triggerPayday(player, gs, maintenanceDone);
           logPlayerEvent(player, gs, 'payday', `發薪日（第 ${player.paydayCount} 次）`, _pdCashBefore, _pdFlowBefore, _pdNWBefore);
 
-          // 股票定期定額：每次發薪日 stock-dca 資產複利增長
+          // 股票定期定額：每次發薪日 stock-dca 資產複利增長並進帳
           const dcaAsset = player.assets.find((a) => a.id === 'stock-dca');
           if (dcaAsset) {
             const prevVal = dcaAsset.currentValue ?? dcaAsset.cost;
             dcaAsset.currentValue = Math.round(prevVal * (1 + STOCK_DCA_MONTHLY_RETURN_RATE));
             const growth = dcaAsset.currentValue - prevVal;
             if (growth > 0) {
+              player.cash += growth;
+              dcaAsset.monthlyCashflow = growth;
               emitCellEvent(socket, roomId, player.name, '股票增值',
-                `📈 指數基金月複利 +$${growth.toLocaleString()}，目前總值 $${dcaAsset.currentValue.toLocaleString()}`);
+                `📈 指數基金月複利 +$${growth.toLocaleString()}（已進帳），總值 $${dcaAsset.currentValue.toLocaleString()}`);
             }
           }
 
@@ -988,6 +990,10 @@ io.on('connection', (socket: Socket) => {
       activationFee: result.activationFee,
       newMonthlyExpenses: player.totalExpenses,
     });
+
+    const INSURANCE_LABEL: Record<string, string> = { medical: '醫療險', life: '壽險', property: '財產險' };
+    emitCellEvent(socket, gs.gameId, player.name, '購買保險',
+      `${player.name} 購買了 ${INSURANCE_LABEL[payload.insuranceType] ?? payload.insuranceType}`);
 
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
