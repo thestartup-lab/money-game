@@ -66,6 +66,14 @@ export default function DisplayScreen() {
   // 本回合玩家行動標記
   const [playerRoundActions, setPlayerRoundActions] = useState<Map<string, string>>(new Map());
   const prevTurnIdRef = useRef<string | null>(null);
+  // 競標面板
+  type AuctionPanel = {
+    auctionId: string; triggeredByName: string; cardName: string;
+    minBid: number; highestBid: number; highestBidderName?: string;
+    endsAt: number; secondsLeft: number;
+  };
+  const [auctionPanel, setAuctionPanel] = useState<AuctionPanel | null>(null);
+  const auctionCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const addTicker = (msg: string) => setTicker((prev) => [msg, ...prev].slice(0, 6));
 
@@ -167,6 +175,38 @@ export default function DisplayScreen() {
     });
     s.on('annualTaxResult', (p: { playerName: string; taxAmount: number }) => {
       addTicker(`🧾 ${p.playerName} 繳稅 $${fmt(p.taxAmount)}`);
+    });
+    s.on('dealAuctionStarted', (p: { auctionId: string; triggeredByName: string; endsAt: number; card?: { name: string; minBid: number; monthlyCashflow?: number } }) => {
+      const cardName = p.card?.name ?? '交易';
+      const minBid = p.card?.minBid ?? 0;
+      showCenterEvent({ playerName: p.triggeredByName, cellName: '🔔 開放競標！', message: `${p.triggeredByName} 放棄交易，${cardName} 開放競標！起標 $${minBid.toLocaleString()}` }, 5000);
+      addTicker(`🔔 ${p.triggeredByName} 放棄「${cardName}」，開放競標（起標 $${minBid.toLocaleString()}）`);
+      const secondsLeft = Math.max(0, Math.round((p.endsAt - Date.now()) / 1000));
+      setAuctionPanel({ auctionId: p.auctionId, triggeredByName: p.triggeredByName, cardName, minBid, highestBid: 0, endsAt: p.endsAt, secondsLeft });
+      if (auctionCountdownRef.current) clearInterval(auctionCountdownRef.current);
+      auctionCountdownRef.current = setInterval(() => {
+        setAuctionPanel((prev) => {
+          if (!prev) return null;
+          const s = Math.max(0, Math.round((prev.endsAt - Date.now()) / 1000));
+          if (s <= 0) { clearInterval(auctionCountdownRef.current!); return { ...prev, secondsLeft: 0 }; }
+          return { ...prev, secondsLeft: s };
+        });
+      }, 1000);
+    });
+    s.on('dealBidUpdated', (p: { bidderName: string; bidAmount: number; newHighest: number }) => {
+      showCenterEvent({ playerName: p.bidderName, cellName: `💰 出價 $${fmt(p.newHighest)}`, message: `${p.bidderName} 出價 $${fmt(p.bidAmount)}（目前最高）` }, 2000);
+      setAuctionPanel((prev) => prev ? { ...prev, highestBid: p.newHighest, highestBidderName: p.bidderName } : prev);
+    });
+    s.on('dealAuctionEnded', (p: { auctionId: string; winnerId?: string | null; winnerName?: string | null; winningBid: number; cardName?: string; hadBids?: boolean }) => {
+      if (auctionCountdownRef.current) clearInterval(auctionCountdownRef.current);
+      setAuctionPanel(null);
+      if (p.hadBids && p.winnerName) {
+        showCenterEvent({ playerName: p.winnerName, cellName: `🏆 得標！`, message: `${p.winnerName} 以 $${fmt(p.winningBid)} 競標到「${p.cardName ?? '資產'}」！` }, 6000);
+        addTicker(`🏆 ${p.winnerName} 以 $${fmt(p.winningBid)} 得標「${p.cardName ?? '資產'}」`);
+      } else {
+        showCenterEvent({ playerName: '', cellName: '🔔 競標結束', message: `無人出價，${p.cardName ?? '交易'} 流標` }, 3000);
+        addTicker(`🔔 ${p.cardName ?? '交易'} 競標流標，無人出價`);
+      }
     });
     return () => { s.disconnect(); };
   }, []);
@@ -412,6 +452,27 @@ export default function DisplayScreen() {
                   );
                 })}
             </div>
+
+            {/* 競標面板 */}
+            {auctionPanel && (
+              <div className="bg-blue-950 border border-blue-500 rounded-xl p-3 space-y-1.5 animate-pulse-once">
+                <div className="flex items-center justify-between">
+                  <p className="text-blue-200 font-bold text-xs">🔔 競標進行中</p>
+                  <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-full ${auctionPanel.secondsLeft <= 5 ? 'bg-red-700 text-white' : 'bg-blue-700 text-blue-100'}`}>
+                    {auctionPanel.secondsLeft}s
+                  </span>
+                </div>
+                <p className="text-white text-sm font-semibold truncate">{auctionPanel.cardName}</p>
+                <p className="text-blue-300 text-xs">起標：<span className="text-yellow-300 font-bold">${auctionPanel.minBid.toLocaleString()}</span></p>
+                {auctionPanel.highestBid > 0 ? (
+                  <p className="text-xs text-blue-300">最高標：<span className="text-yellow-300 font-bold">${auctionPanel.highestBid.toLocaleString()}</span>
+                    {auctionPanel.highestBidderName && <span className="text-gray-400">（{auctionPanel.highestBidderName}）</span>}
+                  </p>
+                ) : (
+                  <p className="text-xs text-gray-500">尚無出價</p>
+                )}
+              </div>
+            )}
 
             {/* 最新動態 */}
             {ticker.length > 0 && (

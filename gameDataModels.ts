@@ -570,6 +570,8 @@ export class GameState {
   activeAuctions?: Record<string, {
     dealCardId: string; startTime: number; endTime: number;
     highestBid: number; highestBidderId?: string; highestBidderName?: string;
+    minBid: number; triggeredBy: string; triggeredByName: string;
+    cardInfo?: { name: string; monthlyCashflow: number; downPayment: number };
   }>;
 
   // ── 時鐘驅動年齡系統 ────────────────────────────────────────

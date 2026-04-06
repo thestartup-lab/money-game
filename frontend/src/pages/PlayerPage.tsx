@@ -54,7 +54,11 @@ export default function PlayerPage() {
 
   // 互動機制 state
   type CongratulatableEvent = { targetId: string; targetName: string; event: string };
-  type ActiveAuction = { auctionId: string; triggeredByName: string; endsAt: number };
+  type ActiveAuction = {
+    auctionId: string; triggeredByName: string; endsAt: number;
+    card?: { id: string; name: string; description?: string; minBid: number; monthlyCashflow?: number };
+    minBid: number; highestBid: number; highestBidderName?: string;
+  };
   type PartnershipOffer = { offerId: string; offerorName: string; targetId: string };
   type LoanOffer = { offerId: string; lenderName: string; borrowerId: string; amount: number; monthlyRate: number };
   const [congratulatableEvent, setCongratulatableEvent] = useState<CongratulatableEvent | null>(null);
@@ -216,16 +220,26 @@ export default function PlayerPage() {
         setCongratulatableEvent({ targetId: p.playerId ?? '', targetName: p.playerName, event: '結婚' });
       }
     });
-    s.on('dealAuctionStarted', (p: { auctionId: string; triggeredByName: string; endsAt: number }) => {
-      addNotification(`🔔 ${p.triggeredByName} 觸發競標！20 秒內可出價`);
-      setActiveAuction(p);
+    s.on('dealAuctionStarted', (p: { auctionId: string; triggeredByName: string; endsAt: number; card?: { id: string; name: string; description?: string; minBid: number; monthlyCashflow?: number }; }) => {
+      const minBid = p.card?.minBid ?? 0;
+      addNotification(`🔔 ${p.triggeredByName} 放棄交易！20 秒內可出價搶標（起標 $${minBid.toLocaleString()}）`);
+      setActiveAuction({ ...p, minBid, highestBid: 0 });
     });
-    s.on('dealAuctionEnded', (p: { auctionId: string; winnerName?: string; winningBid: number }) => {
+    s.on('dealAuctionEnded', (p: { auctionId: string; winnerId?: string | null; winnerName?: string | null; winningBid: number; cardName?: string; hadBids?: boolean }) => {
       setActiveAuction(null);
-      if (p.winnerName) addNotification(`🏆 競標結果：${p.winnerName} 以 $${fmt(p.winningBid)} 得標`);
+      if (p.hadBids && p.winnerName) {
+        addNotification(`🏆 競標結束：${p.winnerName} 以 $${fmt(p.winningBid)} 得標 ${p.cardName ?? ''}`);
+        // 自己得標的話額外提示
+        if (p.winnerId === s.id) {
+          addNotification(`🎉 恭喜！你以 $${fmt(p.winningBid)} 競標到 ${p.cardName ?? '資產'}！`);
+        }
+      } else {
+        addNotification(`🔔 競標結束，無人出價（${p.cardName ?? ''}）`);
+      }
     });
-    s.on('dealBidUpdated', (p: { bidderName: string; bidAmount: number }) => {
+    s.on('dealBidUpdated', (p: { bidderName: string; bidAmount: number; newHighest: number }) => {
       addNotification(`💰 ${p.bidderName} 出價 $${fmt(p.bidAmount)}`);
+      setActiveAuction((prev) => prev ? { ...prev, highestBid: p.newHighest, highestBidderName: p.bidderName } : prev);
     });
     s.on('partnershipOfferReceived', (p: { offerId: string; offerorName: string; targetId: string }) => {
       if (p.targetId === s.id) {
@@ -686,21 +700,32 @@ export default function PlayerPage() {
 
         {activeAuction && (
           <div className="card border border-blue-600 bg-blue-900 space-y-2">
-            <p className="text-blue-200 font-semibold text-sm">🔔 {activeAuction.triggeredByName} 觸發競標</p>
-            <p className="text-blue-400 text-xs">20 秒內可出價搶標此筆交易</p>
+            <p className="text-blue-200 font-semibold text-sm">🔔 {activeAuction.triggeredByName} 放棄交易，開放競標！</p>
+            {activeAuction.card && (
+              <div className="bg-blue-950 rounded-lg px-3 py-2 text-xs space-y-0.5">
+                <p className="text-blue-100 font-semibold">{activeAuction.card.name}</p>
+                {activeAuction.card.monthlyCashflow !== undefined && (
+                  <p className="text-emerald-400">月現金流 +${(activeAuction.card.monthlyCashflow ?? 0).toLocaleString()}</p>
+                )}
+                <p className="text-blue-300">起標金額：<span className="text-yellow-300 font-bold">${activeAuction.minBid.toLocaleString()}</span></p>
+              </div>
+            )}
+            {activeAuction.highestBid > 0 && (
+              <p className="text-xs text-blue-300">目前最高標：<span className="text-yellow-300 font-bold">${activeAuction.highestBid.toLocaleString()}</span>（{activeAuction.highestBidderName}）</p>
+            )}
             <div className="flex gap-2">
               <input
                 type="number"
                 value={auctionBid}
                 onChange={(e) => setAuctionBid(e.target.value)}
-                placeholder="出價金額"
+                placeholder={`起標 $${activeAuction.minBid.toLocaleString()}`}
                 className="input-field flex-1 text-sm"
               />
               <button className="btn-primary text-sm" onClick={() => {
                 emit('bidDeal', { auctionId: activeAuction.auctionId, bidAmount: Number(auctionBid) });
                 setAuctionBid('');
               }}>出價</button>
-              <button className="btn-secondary text-sm" onClick={() => setActiveAuction(null)}>放棄</button>
+              <button className="btn-secondary text-sm" onClick={() => setActiveAuction(null)}>略過</button>
             </div>
           </div>
         )}
@@ -928,11 +953,20 @@ export default function PlayerPage() {
           )}
           {activeAuction && (
             <div className="mx-4 my-2 rounded-xl border border-blue-600 bg-blue-900 p-3 space-y-2">
-              <p className="text-blue-200 font-semibold text-sm">🔔 {activeAuction.triggeredByName} 觸發競標</p>
+              <p className="text-blue-200 font-semibold text-sm">🔔 {activeAuction.triggeredByName} 放棄交易，開放競標！</p>
+              {activeAuction.card && (
+                <div className="bg-blue-950 rounded-lg px-2 py-1 text-xs flex justify-between">
+                  <span className="text-blue-100">{activeAuction.card.name}</span>
+                  <span className="text-yellow-300">起標 ${activeAuction.minBid.toLocaleString()}</span>
+                </div>
+              )}
+              {activeAuction.highestBid > 0 && (
+                <p className="text-xs text-blue-300">最高標 <span className="text-yellow-300 font-bold">${activeAuction.highestBid.toLocaleString()}</span>（{activeAuction.highestBidderName}）</p>
+              )}
               <div className="flex gap-2">
-                <input type="number" value={auctionBid} onChange={(e) => setAuctionBid(e.target.value)} placeholder="出價金額" className="input-field flex-1 text-sm" />
+                <input type="number" value={auctionBid} onChange={(e) => setAuctionBid(e.target.value)} placeholder={`起標 $${activeAuction.minBid.toLocaleString()}`} className="input-field flex-1 text-sm" />
                 <button className="btn-primary text-sm" onClick={() => { emit('bidDeal', { auctionId: activeAuction.auctionId, bidAmount: Number(auctionBid) }); setAuctionBid(''); }}>出價</button>
-                <button className="btn-secondary text-sm" onClick={() => setActiveAuction(null)}>放棄</button>
+                <button className="btn-secondary text-sm" onClick={() => setActiveAuction(null)}>略過</button>
               </div>
             </div>
           )}

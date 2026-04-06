@@ -1565,6 +1565,7 @@ io.on('connection', (socket: Socket) => {
     const auction = gs.activeAuctions[payload.auctionId];
     if (!auction) { socket.emit('error', { message: '競標已結束或不存在。' }); return; }
     if (bidder.cash < payload.bidAmount) { socket.emit('error', { message: '現金不足。' }); return; }
+    if (payload.bidAmount < (auction.minBid ?? 0)) { socket.emit('error', { message: `出價不得低於起標金額 $${(auction.minBid ?? 0).toLocaleString()}。` }); return; }
     if (payload.bidAmount <= (auction.highestBid ?? 0)) { socket.emit('error', { message: '出價需高於目前最高標。' }); return; }
 
     auction.highestBid = payload.bidAmount;
@@ -1573,7 +1574,7 @@ io.on('connection', (socket: Socket) => {
 
     emitToRoom(roomId, 'dealBidUpdated', {
       auctionId: payload.auctionId, bidderId: socket.id, bidderName: bidder.name,
-      bidAmount: payload.bidAmount,
+      bidAmount: payload.bidAmount, newHighest: payload.bidAmount,
     });
   });
 
@@ -2644,47 +2645,7 @@ async function handleLandingSquare(
         break;
       }
 
-      // 廣播競標機會給同圈玩家（20秒）
-      const auctionId = `auction-${Date.now()}`;
-      const auctionEndTime = Date.now() + 20000;
-      if (!gs.activeAuctions) gs.activeAuctions = {};
-      gs.activeAuctions[auctionId] = {
-        dealCardId: drawnCards[0].id,
-        startTime: Date.now(), endTime: auctionEndTime,
-        highestBid: 0,
-      };
-      const otherTrackPlayers = [...gs.players.values()].filter(
-        (p) => p.id !== player.id && p.isAlive && p.isInFastTrack === player.isInFastTrack
-      );
-      if (otherTrackPlayers.length > 0) {
-        emitToRoom(roomId, 'dealAuctionStarted', {
-          auctionId, triggeredBy: player.id, triggeredByName: player.name,
-          cards: drawnCards, endsAt: auctionEndTime,
-        });
-        // 20秒後結算競標
-        setTimeout(() => {
-          const auction = gs.activeAuctions?.[auctionId];
-          if (auction) {
-            delete gs.activeAuctions![auctionId];
-            emitToRoom(roomId, 'dealAuctionEnded', {
-              auctionId,
-              winnerId: auction.highestBidderId,
-              winnerName: auction.highestBidderName,
-              winningBid: auction.highestBid,
-            });
-            if (auction.highestBidderId && auction.highestBid > 0) {
-              const winner = gs.players.get(auction.highestBidderId);
-              if (winner && winner.cash >= auction.highestBid) {
-                winner.cash -= auction.highestBid;
-                player.cash += auction.highestBid;
-                emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
-              }
-            }
-          }
-        }, 20000);
-      }
-
-      // 將 DealCard 結構轉換成前端 EventCard 預期的扁平格式
+      // 步驟1：先讓玩家A決定（再決定是否開拍）
       const cardsForClient = drawnCards.map((c) => ({
         id: c.id,
         name: c.title,
@@ -2696,6 +2657,7 @@ async function handleLandingSquare(
       const decision = await waitForCardDecision(socket);
 
       if (decision && decision.accepted) {
+        // 玩家A接受 → 正常交易流程
         const selectedId = decision.selectedCardId as string | undefined;
         const chosen = selectedId
           ? drawnCards.find((c) => c.id === selectedId) ?? drawnCards[0]
@@ -2725,12 +2687,70 @@ async function handleLandingSquare(
           effect: { type: 'dealAccepted', card: chosen },
         });
       } else {
+        // 玩家A放棄 → 廣播競標給所有玩家（20 秒）
         drawnCards.forEach((c) => deck.discard(c));
         emitToRoom(roomId, 'cardApplied', {
           playerId: player.id,
           squareType,
           effect: { type: 'dealDeclined' },
         });
+
+        const auctionCard = drawnCards[0];
+        const minBid = auctionCard.asset.downPayment ?? auctionCard.asset.cost ?? 0;
+        const auctionId = `auction-${Date.now()}`;
+        const auctionEndTime = Date.now() + 20000;
+        if (!gs.activeAuctions) gs.activeAuctions = {};
+        gs.activeAuctions[auctionId] = {
+          dealCardId: auctionCard.id,
+          startTime: Date.now(), endTime: auctionEndTime,
+          highestBid: 0, minBid,
+          triggeredBy: player.id, triggeredByName: player.name,
+          cardInfo: { name: auctionCard.title, monthlyCashflow: auctionCard.asset.monthlyCashflow ?? 0, downPayment: minBid },
+        };
+
+        emitToRoom(roomId, 'dealAuctionStarted', {
+          auctionId, triggeredBy: player.id, triggeredByName: player.name,
+          card: {
+            id: auctionCard.id,
+            name: auctionCard.title,
+            description: auctionCard.description,
+            minBid,
+            monthlyCashflow: auctionCard.asset.monthlyCashflow,
+          },
+          endsAt: auctionEndTime,
+        });
+
+        // 20 秒後結算
+        setTimeout(() => {
+          const auction = gs.activeAuctions?.[auctionId];
+          if (!auction) return;
+          delete gs.activeAuctions![auctionId];
+
+          if (auction.highestBidderId && auction.highestBid >= minBid) {
+            const winner = gs.players.get(auction.highestBidderId);
+            if (winner && winner.cash >= auction.highestBid) {
+              const _wCB = winner.cash; const _wFB = winner.monthlyCashflow; const _wNWB = calcNetWorth(winner);
+              winner.cash -= auction.highestBid;
+              player.cash += auction.highestBid;
+              acceptDealCard(winner, auctionCard);
+              logPlayerEvent(winner, gs, 'asset_buy', `競標得標：${auctionCard.title}（月現金流 ${(auctionCard.asset.monthlyCashflow ?? 0) >= 0 ? '+' : ''}$${auctionCard.asset.monthlyCashflow ?? 0}）`, _wCB, _wFB, _wNWB, { cardId: auctionCard.id, cardTitle: auctionCard.title });
+              emitToRoom(roomId, 'dealAuctionEnded', {
+                auctionId,
+                winnerId: auction.highestBidderId,
+                winnerName: auction.highestBidderName,
+                winningBid: auction.highestBid,
+                cardName: auctionCard.title,
+                hadBids: true,
+              });
+              emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+            }
+          } else {
+            emitToRoom(roomId, 'dealAuctionEnded', {
+              auctionId, winnerId: null, winnerName: null,
+              winningBid: 0, cardName: auctionCard.title, hadBids: false,
+            });
+          }
+        }, 20000);
       }
       break;
     }
