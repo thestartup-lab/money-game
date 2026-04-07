@@ -2719,7 +2719,7 @@ async function handleLandingSquare(
           cardInfo: { name: auctionCard.title, monthlyCashflow: auctionCard.asset.monthlyCashflow ?? 0, downPayment: minBid },
         };
 
-        emitToRoom(roomId, 'dealAuctionStarted', {
+        socket.to(roomId).emit('dealAuctionStarted', {
           auctionId, triggeredBy: player.id, triggeredByName: player.name,
           card: {
             id: auctionCard.id,
