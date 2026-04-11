@@ -74,6 +74,11 @@ export default function PlayerPage() {
     message: string;
     availableProfessions: AvailableProfession[];
   } | null>(null);
+  const [careerChangeCelebration, setCareerChangeCelebration] = useState<{
+    previousProfession: string;
+    newProfession: string;
+    salaryChange?: number;
+  } | null>(null);
   const [showIntro, setShowIntro] = useState(false);
 
   // Join form state — pre-fill room code from URL ?room=XXX
@@ -352,9 +357,16 @@ export default function PlayerPage() {
       setCareerChangeData(p);
       addNotification('🎯 技能值達到頂峰！現在可以轉職了，請在行動面板中選擇新職業。');
     });
-    s.on('careerChangeResult', (p: { success: boolean; message: string; newProfession?: string }) => {
-      if (p.success) addNotification(`🎉 轉職成功！新職業：${p.newProfession}`);
-      else addNotification(`❌ 轉職失敗：${p.message}`);
+    s.on('careerChangeResult', (p: { success: boolean; message: string; newProfession?: string; previousProfession?: string; salaryChange?: number }) => {
+      if (p.success) {
+        setCareerChangeCelebration({
+          previousProfession: p.previousProfession ?? '',
+          newProfession: p.newProfession ?? '',
+          salaryChange: p.salaryChange,
+        });
+      } else {
+        addNotification(`❌ 轉職失敗：${p.message}`);
+      }
       setCareerChangeData(null);
     });
     s.on('careerChangeAnnouncement', (p: { playerName: string; previousProfession: string; newProfession: string }) => {
@@ -801,6 +813,33 @@ export default function PlayerPage() {
             playerCash={myPlayer.cash}
             onSubmit={handlePaydaySubmit}
           />
+        )}
+
+        {/* ── 轉職成功慶祝彈窗 ── */}
+        {careerChangeCelebration && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <div className="bg-gradient-to-b from-yellow-950 to-gray-900 border-2 border-yellow-500 rounded-2xl px-8 py-10 text-center max-w-sm w-full shadow-2xl space-y-4">
+              <div className="text-6xl">🎯</div>
+              <h2 className="text-2xl font-black text-yellow-300">恭喜轉職成功！</h2>
+              <div className="space-y-2">
+                <p className="text-gray-400 text-sm">從</p>
+                <p className="text-white font-semibold text-lg">「{careerChangeCelebration.previousProfession}」</p>
+                <p className="text-gray-400 text-sm">轉職為</p>
+                <p className="text-yellow-300 font-black text-2xl">「{careerChangeCelebration.newProfession}」</p>
+              </div>
+              {careerChangeCelebration.salaryChange != null && (
+                <p className={`text-lg font-bold ${careerChangeCelebration.salaryChange >= 0 ? 'text-emerald-400' : 'text-orange-400'}`}>
+                  月薪{careerChangeCelebration.salaryChange >= 0 ? '增加' : '變動'} ${Math.abs(careerChangeCelebration.salaryChange).toLocaleString()}
+                </p>
+              )}
+              <button
+                className="mt-4 w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 rounded-xl text-lg transition-colors"
+                onClick={() => setCareerChangeCelebration(null)}
+              >
+                太棒了！繼續前進 🚀
+              </button>
+            </div>
+          </div>
         )}
 
         {/* ── TopBar ── */}

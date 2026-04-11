@@ -189,6 +189,18 @@ export default function DisplayScreen() {
       addTicker(`🏆 ${p.description}`);
       showCenterEvent({ playerName: p.playerName, cellName: `🏆 ${p.milestone}`, message: p.description, isMilestone: true });
     });
+    s.on('careerChangeAnnouncement', (p: { playerName: string; previousProfession: string; newProfession: string; salaryChange?: number }) => {
+      const salaryText = p.salaryChange != null
+        ? `  薪資${p.salaryChange >= 0 ? '增加' : '變動'} $${Math.abs(p.salaryChange).toLocaleString()}/月`
+        : '';
+      showCenterEvent({
+        playerName: p.playerName,
+        cellName: '🎯 恭喜轉職！',
+        message: `${p.playerName} 從「${p.previousProfession}」\n轉職為「${p.newProfession}」！${salaryText}`,
+        isMilestone: true,
+      });
+      addTicker(`🎯 ${p.playerName} 轉職：${p.previousProfession} → ${p.newProfession}`);
+    });
     s.on('playerFinalScore', (p: { playerName: string; deathAge: number; score: { total: number } }) => {
       addTicker(`⚰️ ${p.playerName} 在 ${p.deathAge} 歲結束人生，得 ${Math.round(p.score.total)} 分`);
     });
@@ -216,7 +228,7 @@ export default function DisplayScreen() {
       }, 1000);
     });
     s.on('dealBidUpdated', (p: { bidderName: string; bidAmount: number; newHighest: number }) => {
-      showCenterEvent({ playerName: p.bidderName, cellName: `💰 出價 $${fmt(p.newHighest)}`, message: `${p.bidderName} 出價 $${fmt(p.bidAmount)}（目前最高）` }, 2000);      setAuctionPanel((prev) => prev ? { ...prev, highestBid: p.newHighest, highestBidderName: p.bidderName } : prev);
+      showCenterEvent({ playerName: p.bidderName, cellName: `💰 出價 $${fmt(p.newHighest)}`, message: `${p.bidderName} 出價 $${fmt(p.bidAmount)}（目前最高）` });      setAuctionPanel((prev) => prev ? { ...prev, highestBid: p.newHighest, highestBidderName: p.bidderName } : prev);
     });
     s.on('dealAuctionEnded', (p: { auctionId: string; winnerId?: string | null; winnerName?: string | null; winningBid: number; cardName?: string; hadBids?: boolean }) => {
       if (auctionCountdownRef.current) clearInterval(auctionCountdownRef.current);
