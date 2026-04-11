@@ -33,6 +33,7 @@ const COLORS = ['#10b981', '#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6'
 
 export default function DisplayScreen() {
   const socketRef = useRef<Socket | null>(null);
+  const joinedRoomRef = useRef<string>(''); // 記錄已成功加入的房間代碼，供重連使用
   const [connected, setConnected] = useState(false);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [roomAnalysis, setRoomAnalysis] = useState<{ roomId: string; players: RoomPlayerSummary[]; currentAge: number } | null>(null);
@@ -82,22 +83,41 @@ export default function DisplayScreen() {
     socketRef.current = s;
     s.on('connect', () => {
       setConnected(true);
-      // 若 URL 已帶入房間代碼（從後台直接跳轉），自動加入展示
+      // 優先用已記錄的房間代碼（斷線重連情境），其次用 URL 參數（首次連線）
+      const reconnectRoom = joinedRoomRef.current;
       const params = new URLSearchParams(window.location.search);
       const urlRoom = params.get('room')?.toUpperCase();
-      if (urlRoom && urlRoom.length >= 4) {
+      const targetRoom = reconnectRoom || urlRoom;
+      if (targetRoom && targetRoom.length >= 4) {
         setJoining(true);
-        s.emit('joinDisplay', { roomId: urlRoom });
+        s.emit('joinDisplay', { roomId: targetRoom });
       }
     });
     s.on('disconnect', () => setConnected(false));
-    s.on('joinDisplaySuccess', () => { setJoined(true); setJoining(false); });
-    s.on('joinDisplayFail', (p: { message: string }) => { setJoinError(p.message); setJoining(false); });
+    s.on('joinDisplaySuccess', (p: { roomId?: string }) => {
+      setJoined(true);
+      setJoining(false);
+      // 記錄成功加入的房間代碼，供斷線重連使用
+      if (p?.roomId) joinedRoomRef.current = p.roomId;
+    });
+    s.on('joinDisplayFail', (p: { message: string }) => {
+      setJoinError(p.message);
+      setJoining(false);
+      // 若重連失敗（例如伺服器重啟後房間消失），回到加入畫面讓用戶重新輸入
+      if (joinedRoomRef.current) {
+        setJoined(false);
+        joinedRoomRef.current = '';
+      }
+    });
     // 若後端尚未支援 joinDisplay，收到 gameStateUpdate 也視為成功
     s.on('gameStateUpdate', (gs: GameState) => {
       setGameState(gs);
       setJoined(true);
       setJoining(false);
+      // 若尚未記錄房間代碼（例如 gameStateUpdate 先於 joinDisplaySuccess 到達），從 gs 補記
+      if (!joinedRoomRef.current && gs.roomId) {
+        joinedRoomRef.current = gs.roomId;
+      }
     });
     s.on('gameClock', (p: { currentAge: number }) => {
       setGameState((gs) => gs ? { ...gs, currentAge: p.currentAge } : gs);
