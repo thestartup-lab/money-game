@@ -33,6 +33,8 @@ interface StatsEdit {
 export default function AdminPage() {
   const socketRef = useRef<Socket | null>(null);
   const pendingLoginPasswordRef = useRef<string>(''); // 建立房間後自動登入用
+  const autoReloginPasswordRef = useRef<string>('');  // 斷線重連自動登入用
+  const autoReloginRoomIdRef = useRef<string>('');    // 斷線重連自動登入用
   const [connected, setConnected] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
   const [roomId, setRoomId] = useState('');
@@ -64,14 +66,28 @@ export default function AdminPage() {
     s.on('connect', () => {
       setConnected(true);
       s.emit('listRooms');
+      // 若有儲存的登入資訊，自動重新登入（斷線重連情境）
+      if (autoReloginPasswordRef.current && autoReloginRoomIdRef.current) {
+        s.emit('adminLogin', {
+          password: autoReloginPasswordRef.current,
+          roomId: autoReloginRoomIdRef.current,
+        });
+      }
     });
-    s.on('disconnect', () => { setConnected(false); setLoggedIn(false); });
+    s.on('disconnect', () => { setConnected(false); });
 
     s.on('adminLoginSuccess', (p: { roomId: string; message: string }) => {
       setLoggedIn(true);
       setRoomId(p.roomId);
       addLog(`登入成功：房間 ${p.roomId}`);
       setLoginError('');
+      // 儲存登入資訊供斷線重連使用
+      if (p.roomId) {
+        autoReloginRoomIdRef.current = p.roomId;
+        if (pendingLoginPasswordRef.current) {
+          autoReloginPasswordRef.current = pendingLoginPasswordRef.current;
+        }
+      }
     });
     s.on('adminLoginFail', (p: { message: string }) => {
       setLoginError(p.message ?? '登入失敗');
@@ -97,6 +113,7 @@ export default function AdminPage() {
     s.on('gamePaused', (p: { reason?: string }) => addLog(`遊戲暫停${p.reason ? `：${p.reason}` : ''}`));
     s.on('gameResumed', () => addLog('遊戲繼續'));
     s.on('gameStarted', (p: { durationMinutes: number }) => addLog(`遊戲開始，時長 ${p.durationMinutes} 分鐘`));
+    s.on('gameRestarted', (p: { playerCount: number }) => addLog(`遊戲重啟，${p.playerCount} 位玩家回到投胎`));
     s.on('globalEventAnnouncement', (p: { event: { title: string; description: string } }) => addLog(`全局事件：${p.event?.title ?? '未知事件'}`));
     s.on('playerStatUpdated', (p: { playerName: string }) => addLog(`玩家數值已更新：${p.playerName}`));
     s.on('error', (p: { message: string }) => addLog(`錯誤：${p.message}`));
@@ -143,6 +160,7 @@ export default function AdminPage() {
             onClick={() => {
               setLoginError('');
               pendingLoginPasswordRef.current = password;
+              autoReloginPasswordRef.current = password;
               emit('createRoom', { password, roomId: loginRoomId.toUpperCase() || undefined });
             }}
           >
@@ -156,6 +174,7 @@ export default function AdminPage() {
               disabled={!connected || !password}
               onClick={() => {
                 setLoginError('');
+                autoReloginPasswordRef.current = password;
                 emit('adminLogin', { password, roomId: loginRoomId.toUpperCase() });
               }}
             >
@@ -319,6 +338,19 @@ export default function AdminPage() {
                   : <button className="bg-orange-700 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-xl flex-1 transition-colors" onClick={() => emit('pauseGame', { reason: '主持人手動暫停' })}>⏸ 暫停</button>
                 }
               </div>
+            )}
+            {players.length > 0 && (
+              <button
+                className="w-full bg-red-900 hover:bg-red-800 text-red-200 text-sm font-bold py-2 px-4 rounded-xl transition-colors border border-red-700"
+                onClick={() => {
+                  if (window.confirm(`確定要重啟遊戲？\n所有玩家（${players.length} 人）將回到重新投胎，財務與職業全部清空。`)) {
+                    emit('restartGame');
+                    addLog('遊戲重啟');
+                  }
+                }}
+              >
+                ↺ 重啟遊戲（全員回到投胎）
+              </button>
             )}
           </div>
 

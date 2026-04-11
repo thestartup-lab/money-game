@@ -70,6 +70,10 @@ import {
   CRISIS_EVENTS,
   RELATIONSHIP_EVENTS,
   SMALL_DEALS,
+  Deck,
+  BIG_DEALS,
+  DOODADS,
+  MARKET_CARDS,
 } from './gameCards';
 import {
   applyDoodadCard,
@@ -1682,6 +1686,7 @@ io.on('connection', (socket: Socket) => {
       pausedAt: gs.pausedAt,
       currentAge: Math.round(getCurrentAge(gs) * 10) / 10,
     });
+    emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
   });
 
   socket.on('resumeGame', () => {
@@ -1707,6 +1712,64 @@ io.on('connection', (socket: Socket) => {
       currentAge: Math.round(currentAge * 10) / 10,
     });
 
+    emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
+  // ----------------------------------------------------------
+  // 重啟遊戲 (restartGame) — 主持人專用
+  // ----------------------------------------------------------
+  /**
+   * 將遊戲重置到 Pre20 階段，所有玩家回到重新投胎狀態。
+   * 保留同一房間內的玩家名單（socket ID 與姓名），讓大家重新分配成長點數、選職業。
+   */
+  socket.on('restartGame', () => {
+    const gs = getRoomState(socket);
+    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    const roomId = gs.gameId;
+
+    if (socket.id !== gs.adminSocketId) {
+      socket.emit('error', { message: '只有管理員可以重啟遊戲。' });
+      return;
+    }
+
+    // 保存現有玩家名單（ID + 姓名）
+    const playerInfos = gs.playerOrder.map((id) => {
+      const p = gs.players.get(id)!;
+      return { id, name: p.name };
+    });
+
+    // 重置玩家狀態（保留 socket ID 與名字，其他全清空重新投胎）
+    gs.players.clear();
+    gs.playerOrder = [];
+    for (const { id, name } of playerInfos) {
+      const freshPlayer = createPlayer(id, name);
+      gs.players.set(id, freshPlayer);
+      gs.playerOrder.push(id);
+    }
+
+    // 重置遊戲狀態
+    gs.gamePhase = playerInfos.length > 0 ? GamePhase.Pre20 : GamePhase.WaitingForPlayers;
+    gs.turnNumber = 0;
+    gs.currentPlayerTurnId = gs.playerOrder[0] ?? '';
+    gs.gameStartTime = null;
+    gs.pausedAt = null;
+    gs.totalPausedMs = 0;
+    gs.marketEvents = [];
+    gs.paydayPlanningConfirmed = new Set();
+    gs.pendingPartnershipOffers = {};
+    gs.pendingLoanOffers = {};
+    gs.activeAuctions = {};
+
+    // 重置牌組
+    gs.smallDealDeck = new Deck(SMALL_DEALS);
+    gs.bigDealDeck   = new Deck(BIG_DEALS);
+    gs.doodadDeck    = new Deck(DOODADS);
+    gs.crisisDeck    = new Deck(CRISIS_EVENTS);
+    gs.marketDeck    = new Deck(MARKET_CARDS);
+
+    console.log(`[restartGame] 房間 ${roomId} 重啟，${playerInfos.length} 位玩家回到投胎`);
+
+    emitToRoom(roomId, 'gameRestarted', { roomId, playerCount: playerInfos.length });
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
   });
 
