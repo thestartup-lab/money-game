@@ -1004,7 +1004,8 @@ export function goTravel(player: Player, destinationId: string): GoTravelResult 
   // 特殊屬性加成
   const fx = dest.statEffect;
   if (fx) {
-    if (fx.nt)  player.stats.network      = Math.min(10, player.stats.network      + fx.nt);
+    const ntCap = player.profession.salaryType === 'nt_driven' ? Infinity : 10;
+    if (fx.nt)  player.stats.network      = Math.min(ntCap, player.stats.network      + fx.nt);
     if (fx.fq)  player.stats.financialIQ  = Math.min(10, player.stats.financialIQ  + fx.fq);
     if (fx.sk)  player.stats.careerSkill  = Math.min(100, player.stats.careerSkill + fx.sk);
     if (fx.hp)  player.stats.health       = Math.min(100, player.stats.health      + fx.hp);

@@ -173,10 +173,12 @@ export function applyPaydayPlan(player: Player, plan: PaydayPlanPayload): Payday
     cost: NETWORK_INVEST_COST,
     description: `主動拓展人脈（+${NETWORK_INVEST_GAIN} NT）`,
   };
-  if (plan.investInNetwork && player.stats.network < 10) {
+  // nt_driven 職業（無底薪業務員等）：NT 無上限，薪資 = NT × salaryPerNT，可無限成長
+  const ntCap = player.profession.salaryType === 'nt_driven' ? Infinity : 10;
+  if (plan.investInNetwork && player.stats.network < ntCap) {
     networkOutcome.executed = tryInvest(NETWORK_INVEST_COST);
     if (networkOutcome.executed) {
-      player.stats.network = Math.min(10, player.stats.network + NETWORK_INVEST_GAIN);
+      player.stats.network = Math.min(ntCap, player.stats.network + NETWORK_INVEST_GAIN);
     }
   }
   const ntMilestonesUnlocked = [3, 5, 8].filter(
@@ -283,18 +285,20 @@ export function checkBedriddenStatus(player: Player): boolean {
 /**
  * 套用 NT 自然成長。
  *
- * 每當 paydayCount 為 NETWORK_AUTO_GAIN_INTERVAL 的倍數時，NT +1（上限 10）。
+ * 每當 paydayCount 為 NETWORK_AUTO_GAIN_INTERVAL 的倍數時，NT +1。
+ * nt_driven 職業（無底薪業務員等）無上限；其他職業上限為 10。
  * 應在 triggerPayday 遞增 paydayCount 之後呼叫。
  *
  * @param player 玩家物件（直接修改 stats.network）
  */
 export function applyNTAutoGrowth(player: Player): void {
+  const ntCap = player.profession.salaryType === 'nt_driven' ? Infinity : 10;
   if (
     player.paydayCount > 0 &&
     player.paydayCount % NETWORK_AUTO_GAIN_INTERVAL === 0 &&
-    player.stats.network < 10
+    player.stats.network < ntCap
   ) {
-    player.stats.network = Math.min(10, player.stats.network + 1);
+    player.stats.network = Math.min(ntCap, player.stats.network + 1);
   }
 }
 

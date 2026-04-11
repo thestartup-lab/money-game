@@ -1608,7 +1608,7 @@ io.on('connection', (socket: Socket) => {
 
     sender.cash -= 500;
     target.cash += 500;
-    target.stats.network = Math.min(10, target.stats.network + 0.2);
+    target.stats.network = Math.min(target.profession.salaryType === 'nt_driven' ? Infinity : 10, target.stats.network + 0.2);
 
     emitToRoom(roomId, 'congratulationSent', {
       senderId: socket.id, senderName: sender.name,
@@ -3079,7 +3079,7 @@ function buildAffordableOptions(player: Player): object {
     healthMaintenance: { available: player.cash >= maintCost, cost: maintCost },
     healthBoost: { available: player.cash >= boostCost, cost: boostCost },
     skillTraining: { available: player.cash >= skillCost && player.stats.careerSkill < SKILL_CAREER_CHANGE_THRESHOLD, cost: skillCost, currentSK: player.stats.careerSkill },
-    networkInvest: { available: player.cash >= ntCost && player.stats.network < 10, cost: ntCost, currentNT: player.stats.network },
+    networkInvest: { available: player.cash >= ntCost && player.stats.network < (player.profession.salaryType === 'nt_driven' ? Infinity : 10), cost: ntCost, currentNT: player.stats.network },
   };
 }
 

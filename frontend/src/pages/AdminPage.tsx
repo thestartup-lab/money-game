@@ -548,7 +548,7 @@ function PlayerRow({ player: p, expanded, statsEdit, onToggleExpand, onStatsChan
       {expanded && (
         <div className="px-3 pb-3 space-y-3 border-t border-gray-700 pt-3">
           <div className="grid grid-cols-2 gap-3">
-            {([ ['fq', '財商 FQ', 0, 10], ['hp', '健康 HP', 0, 100], ['sk', '技能 SK', 0, 100], ['nt', '人脈 NT', 0, 10] ] as [keyof StatsEdit, string, number, number][]).map(
+            {([ ['fq', '財商 FQ', 0, 10], ['hp', '健康 HP', 0, 100], ['sk', '技能 SK', 0, 100], ['nt', '人脈 NT', 0, p.profession?.salaryType === 'nt_driven' ? 50 : 10] ] as [keyof StatsEdit, string, number, number][]).map(
               ([field, label, min, max]) => (
                 <div key={field} className="space-y-1">
                   <div className="flex justify-between text-xs text-gray-400">

@@ -314,9 +314,10 @@ export function applyRelationshipCard(
     cashChange  -= actual;
   }
 
-  // NT 人脈值變化（邊界：0 ~ 10）
+  // NT 人脈值變化（nt_driven 職業無上限；其他職業上限 10）
   if (networkDelta !== 0) {
-    player.stats.network = Math.max(0, Math.min(10, player.stats.network + networkDelta));
+    const ntCap = player.profession.salaryType === 'nt_driven' ? Infinity : 10;
+    player.stats.network = Math.max(0, Math.min(ntCap, player.stats.network + networkDelta));
   }
 
   // 生命體驗值
