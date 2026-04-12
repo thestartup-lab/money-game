@@ -31,7 +31,7 @@ export const FAST_TRACK_PAYDAY_BONUS_RATE = 0.01;
 export const STOCK_DCA_MONTHLY_RETURN_RATE = 0.005;
 
 /** 股票定期定額可選投入金額選項 */
-export const STOCK_DCA_AMOUNTS = [1000, 2000, 5000] as const;
+export const STOCK_DCA_AMOUNTS = [15_000, 30_000, 75_000] as const;
 
 /** 「第二人生」格的索引（內圈第 25 格，路過後才能進入外圈）*/
 export const SECOND_LIFE_CELL = 24;
@@ -54,15 +54,15 @@ export const PAYDAY_LOCATIONS: readonly number[] = [0, 6, 12, 18];
  * 共 9 個元素（FQ 1→2 到 FQ 9→10），FQ 10 已滿級無法繼續升級。
  */
 export const FQ_UPGRADE_COSTS: readonly number[] = [
-  500,   // 1 → 2
-  800,   // 2 → 3
-  1200,  // 3 → 4
-  1800,  // 4 → 5
-  2500,  // 5 → 6
-  3200,  // 6 → 7
-  4000,  // 7 → 8
-  5000,  // 8 → 9
-  6500,  // 9 → 10
+  8_000,   // 1 → 2
+  12_000,  // 2 → 3
+  18_000,  // 3 → 4
+  27_000,  // 4 → 5
+  38_000,  // 5 → 6
+  48_000,  // 6 → 7
+  60_000,  // 7 → 8
+  75_000,  // 8 → 9
+  98_000,  // 9 → 10
 ];
 
 // FQ_MULTIPLIERS 已移至 gameConstants.ts，從那裡 re-export
@@ -72,9 +72,9 @@ export const FQ_UPGRADE_COSTS: readonly number[] = [
 /** 每個發薪日未做任何健康投資時的自然衰退量 */
 export const HP_DECAY_PER_PAYDAY = 5;
 /** 「維護健康」費用：阻止本次衰退，HP 不變 */
-export const HP_MAINTENANCE_COST = 200;
+export const HP_MAINTENANCE_COST = 3_000;
 /** 「積極投資健康」費用：阻止衰退並提升 HP */
-export const HP_BOOST_COST = 500;
+export const HP_BOOST_COST = 7_500;
 /** 「積極投資健康」每次獲得的 HP 增量 */
 export const HP_BOOST_AMOUNT = 20;
 /** HP 危險閾值：低於此值遇到疾病危機時效果加重 */
@@ -85,7 +85,7 @@ export const HP_STRONG_THRESHOLD = 70;
 // --- 第二專長值 SK (Career Skill, 0–100) ---
 
 /** 每個發薪日選擇「進修培訓」所需現金 */
-export const SKILL_TRAINING_COST = 600;
+export const SKILL_TRAINING_COST = 9_000;
 /** 每次進修培訓獲得的 SK 增量 */
 export const SKILL_TRAINING_GAIN = 20;
 /** SK 達到此值解鎖轉職機會 */
@@ -96,7 +96,7 @@ export const SKILL_CAREER_CHANGE_THRESHOLD = 100;
 /** NT 每隔幾個發薪日自動 +1（paydayCount 為此值的倍數時觸發） */
 export const NETWORK_AUTO_GAIN_INTERVAL = 2;
 /** 主動投資人脈的費用（每個發薪日可選一次） */
-export const NETWORK_INVEST_COST = 400;
+export const NETWORK_INVEST_COST = 6_000;
 /** 主動投資人脈每次獲得的 NT 增量 */
 export const NETWORK_INVEST_GAIN = 1;
 
@@ -121,24 +121,24 @@ export interface TaxBracket {
 }
 
 export const TAX_BRACKETS: TaxBracket[] = [
-  { minIncome: 0,       maxIncome: 50000,  rate: 0.05, label: '$0 – $50,000 × 5%'      },
-  { minIncome: 50001,   maxIncome: 120000, rate: 0.12, label: '$50,001 – $120,000 × 12%' },
-  { minIncome: 120001,  maxIncome: 250000, rate: 0.20, label: '$120,001 – $250,000 × 20%' },
-  { minIncome: 250001,  maxIncome: 500000, rate: 0.30, label: '$250,001 – $500,000 × 30%' },
-  { minIncome: 500001,  maxIncome: null,   rate: 0.40, label: '$500,001 以上 × 40%'      },
+  { minIncome: 0,         maxIncome: 750_000,   rate: 0.05, label: '$0 – $750,000 × 5%'           },
+  { minIncome: 750_001,   maxIncome: 1_800_000, rate: 0.12, label: '$750,001 – $1,800,000 × 12%'   },
+  { minIncome: 1_800_001, maxIncome: 3_750_000, rate: 0.20, label: '$1,800,001 – $3,750,000 × 20%' },
+  { minIncome: 3_750_001, maxIncome: 7_500_000, rate: 0.30, label: '$3,750,001 – $7,500,000 × 30%' },
+  { minIncome: 7_500_001, maxIncome: null,       rate: 0.40, label: '$7,500,001 以上 × 40%'         },
 ];
 
 /** 每位撫養子女的年度扣除額 */
-export const DEPENDENT_DEDUCTION_PER_CHILD = 15000;
+export const DEPENDENT_DEDUCTION_PER_CHILD = 225_000;
 
-/** 醫療保險年度扣除額（$200/月 × 12） */
-export const MEDICAL_INSURANCE_DEDUCTION = 2400;
+/** 醫療保險年度扣除額（$3,000/月 × 12） */
+export const MEDICAL_INSURANCE_DEDUCTION = 36_000;
 
-/** 壽險年度扣除額（$100/月 × 12） */
-export const LIFE_INSURANCE_DEDUCTION = 1200;
+/** 壽險年度扣除額（$1,500/月 × 12） */
+export const LIFE_INSURANCE_DEDUCTION = 18_000;
 
-/** 財產/企業險年度扣除額（$300/月 × 12） */
-export const PROPERTY_INSURANCE_DEDUCTION = 3600;
+/** 財產/企業險年度扣除額（$4,500/月 × 12） */
+export const PROPERTY_INSURANCE_DEDUCTION = 54_000;
 
 // ============================================================
 // 管理員設定
@@ -174,13 +174,13 @@ export const PROFESSIONS: Profession[] = [
     name: '醫生',
     quadrant: 'E',
     salaryType: 'fixed',
-    startingSalary: 13200,
+    startingSalary: 198_000,
     startingTaxes: 0,
-    startingHomeMortgage: 1900,
-    startingCarLoan: 380,
-    startingCreditCard: 270,
-    startingOtherExpenses: 2880,
-    startingCash: 400,
+    startingHomeMortgage: 28_500,
+    startingCarLoan: 5_700,
+    startingCreditCard: 4_000,
+    startingOtherExpenses: 43_000,
+    startingCash: 6_000,
     hasFlexibleSchedule: false,
   },
   {
@@ -188,13 +188,13 @@ export const PROFESSIONS: Profession[] = [
     name: '工程師',
     quadrant: 'E',
     salaryType: 'fixed',
-    startingSalary: 7500,
+    startingSalary: 112_000,
     startingTaxes: 0,
-    startingHomeMortgage: 500,
-    startingCarLoan: 300,
-    startingCreditCard: 90,
-    startingOtherExpenses: 1790,
-    startingCash: 2560,
+    startingHomeMortgage: 7_500,
+    startingCarLoan: 4_500,
+    startingCreditCard: 1_300,
+    startingOtherExpenses: 27_000,
+    startingCash: 38_000,
     hasFlexibleSchedule: false,
   },
   {
@@ -202,13 +202,13 @@ export const PROFESSIONS: Profession[] = [
     name: '老師',
     quadrant: 'E',
     salaryType: 'fixed',
-    startingSalary: 3300,
+    startingSalary: 49_000,
     startingTaxes: 0,
-    startingHomeMortgage: 400,
-    startingCarLoan: 100,
-    startingCreditCard: 60,
-    startingOtherExpenses: 760,
-    startingCash: 400,
+    startingHomeMortgage: 6_000,
+    startingCarLoan: 1_500,
+    startingCreditCard: 900,
+    startingOtherExpenses: 11_000,
+    startingCash: 6_000,
     hasFlexibleSchedule: false,
   },
   {
@@ -216,13 +216,13 @@ export const PROFESSIONS: Profession[] = [
     name: '清潔工',
     quadrant: 'E',
     salaryType: 'fixed',
-    startingSalary: 1600,
+    startingSalary: 24_000,
     startingTaxes: 0,
-    startingHomeMortgage: 200,
-    startingCarLoan: 50,
-    startingCreditCard: 30,
-    startingOtherExpenses: 330,
-    startingCash: 360,
+    startingHomeMortgage: 3_000,
+    startingCarLoan: 800,
+    startingCreditCard: 450,
+    startingOtherExpenses: 5_000,
+    startingCash: 5_000,
     hasFlexibleSchedule: false,
   },
   {
@@ -230,13 +230,13 @@ export const PROFESSIONS: Profession[] = [
     name: '廚師',
     quadrant: 'E',
     salaryType: 'fixed',
-    startingSalary: 2400,
+    startingSalary: 36_000,
     startingTaxes: 0,
-    startingHomeMortgage: 250,
-    startingCarLoan: 80,
-    startingCreditCard: 40,
-    startingOtherExpenses: 500,
-    startingCash: 500,
+    startingHomeMortgage: 3_800,
+    startingCarLoan: 1_200,
+    startingCreditCard: 600,
+    startingOtherExpenses: 7_500,
+    startingCash: 7_500,
     hasFlexibleSchedule: false,
   },
   {
@@ -244,13 +244,13 @@ export const PROFESSIONS: Profession[] = [
     name: '警察',
     quadrant: 'E',
     salaryType: 'fixed',
-    startingSalary: 3000,
+    startingSalary: 45_000,
     startingTaxes: 0,
-    startingHomeMortgage: 300,
-    startingCarLoan: 100,
-    startingCreditCard: 50,
-    startingOtherExpenses: 600,
-    startingCash: 600,
+    startingHomeMortgage: 4_500,
+    startingCarLoan: 1_500,
+    startingCreditCard: 750,
+    startingOtherExpenses: 9_000,
+    startingCash: 9_000,
     hasFlexibleSchedule: false,
   },
   {
@@ -258,13 +258,13 @@ export const PROFESSIONS: Profession[] = [
     name: '護理師',
     quadrant: 'E',
     salaryType: 'fixed',
-    startingSalary: 4200,
+    startingSalary: 63_000,
     startingTaxes: 0,
-    startingHomeMortgage: 400,
-    startingCarLoan: 120,
-    startingCreditCard: 70,
-    startingOtherExpenses: 900,
-    startingCash: 800,
+    startingHomeMortgage: 6_000,
+    startingCarLoan: 1_800,
+    startingCreditCard: 1_000,
+    startingOtherExpenses: 13_500,
+    startingCash: 12_000,
     hasFlexibleSchedule: false,
   },
   {
@@ -272,13 +272,13 @@ export const PROFESSIONS: Profession[] = [
     name: '業務主管',
     quadrant: 'E',
     salaryType: 'fixed',
-    startingSalary: 6500,
+    startingSalary: 97_000,
     startingTaxes: 0,
-    startingHomeMortgage: 600,
-    startingCarLoan: 250,
-    startingCreditCard: 120,
-    startingOtherExpenses: 1400,
-    startingCash: 1500,
+    startingHomeMortgage: 9_000,
+    startingCarLoan: 3_800,
+    startingCreditCard: 1_800,
+    startingOtherExpenses: 21_000,
+    startingCash: 22_500,
     hasFlexibleSchedule: false,
   },
   {
@@ -286,13 +286,13 @@ export const PROFESSIONS: Profession[] = [
     name: '會計師',
     quadrant: 'E',
     salaryType: 'fixed',
-    startingSalary: 5500,
+    startingSalary: 82_000,
     startingTaxes: 0,
-    startingHomeMortgage: 500,
-    startingCarLoan: 180,
-    startingCreditCard: 100,
-    startingOtherExpenses: 1100,
-    startingCash: 1000,
+    startingHomeMortgage: 7_500,
+    startingCarLoan: 2_700,
+    startingCreditCard: 1_500,
+    startingOtherExpenses: 16_500,
+    startingCash: 15_000,
     hasFlexibleSchedule: false,
   },
   {
@@ -300,13 +300,13 @@ export const PROFESSIONS: Profession[] = [
     name: 'IT 工程師',
     quadrant: 'E',
     salaryType: 'fixed',
-    startingSalary: 8500,
+    startingSalary: 128_000,
     startingTaxes: 0,
-    startingHomeMortgage: 800,
-    startingCarLoan: 300,
-    startingCreditCard: 150,
-    startingOtherExpenses: 1800,
-    startingCash: 2000,
+    startingHomeMortgage: 12_000,
+    startingCarLoan: 4_500,
+    startingCreditCard: 2_200,
+    startingOtherExpenses: 27_000,
+    startingCash: 30_000,
     hasFlexibleSchedule: false,
   },
   {
@@ -314,13 +314,13 @@ export const PROFESSIONS: Profession[] = [
     name: '門市人員',
     quadrant: 'E',
     salaryType: 'fixed',
-    startingSalary: 2200,
+    startingSalary: 33_000,
     startingTaxes: 0,
-    startingHomeMortgage: 200,
-    startingCarLoan: 60,
-    startingCreditCard: 30,
-    startingOtherExpenses: 450,
-    startingCash: 400,
+    startingHomeMortgage: 3_000,
+    startingCarLoan: 900,
+    startingCreditCard: 450,
+    startingOtherExpenses: 6_800,
+    startingCash: 6_000,
     hasFlexibleSchedule: false,
   },
   {
@@ -328,13 +328,13 @@ export const PROFESSIONS: Profession[] = [
     name: '店長',
     quadrant: 'E',
     salaryType: 'fixed',
-    startingSalary: 4800,
+    startingSalary: 72_000,
     startingTaxes: 0,
-    startingHomeMortgage: 450,
-    startingCarLoan: 150,
-    startingCreditCard: 80,
-    startingOtherExpenses: 1000,
-    startingCash: 900,
+    startingHomeMortgage: 6_800,
+    startingCarLoan: 2_200,
+    startingCreditCard: 1_200,
+    startingOtherExpenses: 15_000,
+    startingCash: 13_500,
     hasFlexibleSchedule: false,
   },
   {
@@ -342,13 +342,13 @@ export const PROFESSIONS: Profession[] = [
     name: '公職人員',
     quadrant: 'E',
     salaryType: 'fixed',
-    startingSalary: 4500,
+    startingSalary: 67_000,
     startingTaxes: 0,
-    startingHomeMortgage: 400,
-    startingCarLoan: 120,
-    startingCreditCard: 70,
-    startingOtherExpenses: 900,
-    startingCash: 1000,
+    startingHomeMortgage: 6_000,
+    startingCarLoan: 1_800,
+    startingCreditCard: 1_000,
+    startingOtherExpenses: 13_500,
+    startingCash: 15_000,
     hasFlexibleSchedule: false,
   },
 
@@ -362,13 +362,13 @@ export const PROFESSIONS: Profession[] = [
     quadrant: 'S',
     salaryType: 'nt_driven',
     startingSalary: 0,          // 展示用基準；實際每發薪日 = NT × salaryPerNT
-    salaryPerNT: 400,           // NT=1→$400; NT=5→$2,000; NT=10→$4,000
+    salaryPerNT: 6_000,         // NT=1→$6,000; NT=5→$30,000; NT=10→$60,000
     startingTaxes: 0,
-    startingHomeMortgage: 300,
-    startingCarLoan: 150,
-    startingCreditCard: 50,
-    startingOtherExpenses: 400,
-    startingCash: 1800,         // 需要備用金應對低收入月份
+    startingHomeMortgage: 4_500,
+    startingCarLoan: 2_200,
+    startingCreditCard: 750,
+    startingOtherExpenses: 6_000,
+    startingCash: 27_000,       // 需要備用金應對低收入月份
     hasFlexibleSchedule: true,
   },
   {
@@ -376,15 +376,15 @@ export const PROFESSIONS: Profession[] = [
     name: '自由接案設計師',
     quadrant: 'S',
     salaryType: 'random',
-    startingSalary: 2500,       // 展示用估算值（實際每月隨機）
-    minSalary: 500,
-    maxSalary: 4500,
+    startingSalary: 37_000,     // 展示用估算值（實際每月隨機）
+    minSalary: 7_500,
+    maxSalary: 67_000,
     startingTaxes: 0,
-    startingHomeMortgage: 400,
-    startingCarLoan: 100,
-    startingCreditCard: 60,
-    startingOtherExpenses: 600,
-    startingCash: 3000,         // 高備用金，收入不穩定
+    startingHomeMortgage: 6_000,
+    startingCarLoan: 1_500,
+    startingCreditCard: 900,
+    startingOtherExpenses: 9_000,
+    startingCash: 45_000,       // 高備用金，收入不穩定
     hasFlexibleSchedule: false,
   },
   {
@@ -392,14 +392,14 @@ export const PROFESSIONS: Profession[] = [
     name: '個人執業律師',
     quadrant: 'S',
     salaryType: 'sk_driven',
-    startingSalary: 3000,
-    salaryPerSK: 50,
+    startingSalary: 45_000,
+    salaryPerSK: 750,
     startingTaxes: 0,
-    startingHomeMortgage: 600,
-    startingCarLoan: 200,
-    startingCreditCard: 100,
-    startingOtherExpenses: 900,
-    startingCash: 2000,
+    startingHomeMortgage: 9_000,
+    startingCarLoan: 3_000,
+    startingCreditCard: 1_500,
+    startingOtherExpenses: 13_500,
+    startingCash: 30_000,
     hasFlexibleSchedule: false,
   },
 
@@ -409,15 +409,15 @@ export const PROFESSIONS: Profession[] = [
     name: '計程車司機',
     quadrant: 'S',
     salaryType: 'random',
-    startingSalary: 2000,
-    minSalary: 800,
-    maxSalary: 3500,
+    startingSalary: 30_000,
+    minSalary: 12_000,
+    maxSalary: 52_000,
     startingTaxes: 0,
-    startingHomeMortgage: 200,
-    startingCarLoan: 200,   // 車貸（自有車）
-    startingCreditCard: 40,
-    startingOtherExpenses: 500,
-    startingCash: 800,
+    startingHomeMortgage: 3_000,
+    startingCarLoan: 3_000,   // 車貸（自有車）
+    startingCreditCard: 600,
+    startingOtherExpenses: 7_500,
+    startingCash: 12_000,
     hasFlexibleSchedule: true,
   },
   {
@@ -425,15 +425,15 @@ export const PROFESSIONS: Profession[] = [
     name: '外送員',
     quadrant: 'S',
     salaryType: 'random',
-    startingSalary: 1800,
-    minSalary: 600,
-    maxSalary: 3200,
+    startingSalary: 27_000,
+    minSalary: 9_000,
+    maxSalary: 48_000,
     startingTaxes: 0,
-    startingHomeMortgage: 150,
-    startingCarLoan: 100,
-    startingCreditCard: 30,
-    startingOtherExpenses: 400,
-    startingCash: 600,
+    startingHomeMortgage: 2_200,
+    startingCarLoan: 1_500,
+    startingCreditCard: 450,
+    startingOtherExpenses: 6_000,
+    startingCash: 9_000,
     hasFlexibleSchedule: true,
   },
   {
@@ -441,15 +441,15 @@ export const PROFESSIONS: Profession[] = [
     name: '派遣工',
     quadrant: 'S',
     salaryType: 'random',
-    startingSalary: 1600,
-    minSalary: 600,
-    maxSalary: 2800,
+    startingSalary: 24_000,
+    minSalary: 9_000,
+    maxSalary: 42_000,
     startingTaxes: 0,
-    startingHomeMortgage: 150,
-    startingCarLoan: 50,
-    startingCreditCard: 30,
-    startingOtherExpenses: 350,
-    startingCash: 500,
+    startingHomeMortgage: 2_200,
+    startingCarLoan: 750,
+    startingCreditCard: 450,
+    startingOtherExpenses: 5_200,
+    startingCash: 7_500,
     hasFlexibleSchedule: true,
   },
   {
@@ -458,13 +458,13 @@ export const PROFESSIONS: Profession[] = [
     quadrant: 'S',
     salaryType: 'nt_driven',
     startingSalary: 0,
-    salaryPerNT: 450,
+    salaryPerNT: 6_800,
     startingTaxes: 0,
-    startingHomeMortgage: 250,
-    startingCarLoan: 100,
-    startingCreditCard: 40,
-    startingOtherExpenses: 350,
-    startingCash: 1500,
+    startingHomeMortgage: 3_800,
+    startingCarLoan: 1_500,
+    startingCreditCard: 600,
+    startingOtherExpenses: 5_200,
+    startingCash: 22_000,
     hasFlexibleSchedule: true,
   },
   {
@@ -473,13 +473,13 @@ export const PROFESSIONS: Profession[] = [
     quadrant: 'S',
     salaryType: 'nt_driven',
     startingSalary: 0,
-    salaryPerNT: 500,
+    salaryPerNT: 7_500,
     startingTaxes: 0,
-    startingHomeMortgage: 300,
-    startingCarLoan: 120,
-    startingCreditCard: 50,
-    startingOtherExpenses: 400,
-    startingCash: 1800,
+    startingHomeMortgage: 4_500,
+    startingCarLoan: 1_800,
+    startingCreditCard: 750,
+    startingOtherExpenses: 6_000,
+    startingCash: 27_000,
     hasFlexibleSchedule: true,
   },
   {
@@ -488,13 +488,13 @@ export const PROFESSIONS: Profession[] = [
     quadrant: 'S',
     salaryType: 'nt_driven',
     startingSalary: 0,
-    salaryPerNT: 380,
+    salaryPerNT: 5_700,
     startingTaxes: 0,
-    startingHomeMortgage: 200,
-    startingCarLoan: 80,
-    startingCreditCard: 40,
-    startingOtherExpenses: 300,
-    startingCash: 1200,
+    startingHomeMortgage: 3_000,
+    startingCarLoan: 1_200,
+    startingCreditCard: 600,
+    startingOtherExpenses: 4_500,
+    startingCash: 18_000,
     hasFlexibleSchedule: true,
   },
   {
@@ -502,15 +502,15 @@ export const PROFESSIONS: Profession[] = [
     name: '市集攤販',
     quadrant: 'S',
     salaryType: 'random',
-    startingSalary: 1500,
-    minSalary: 400,
-    maxSalary: 3000,
+    startingSalary: 22_000,
+    minSalary: 6_000,
+    maxSalary: 45_000,
     startingTaxes: 0,
-    startingHomeMortgage: 150,
-    startingCarLoan: 50,
-    startingCreditCard: 30,
-    startingOtherExpenses: 400,
-    startingCash: 700,
+    startingHomeMortgage: 2_200,
+    startingCarLoan: 750,
+    startingCreditCard: 450,
+    startingOtherExpenses: 6_000,
+    startingCash: 10_000,
     hasFlexibleSchedule: true,
   },
 
@@ -520,15 +520,15 @@ export const PROFESSIONS: Profession[] = [
     name: '補教老師',
     quadrant: 'S',
     salaryType: 'random',
-    startingSalary: 2800,
-    minSalary: 1000,
-    maxSalary: 5000,
+    startingSalary: 42_000,
+    minSalary: 15_000,
+    maxSalary: 75_000,
     startingTaxes: 0,
-    startingHomeMortgage: 300,
-    startingCarLoan: 80,
-    startingCreditCard: 50,
-    startingOtherExpenses: 600,
-    startingCash: 1200,
+    startingHomeMortgage: 4_500,
+    startingCarLoan: 1_200,
+    startingCreditCard: 750,
+    startingOtherExpenses: 9_000,
+    startingCash: 18_000,
     hasFlexibleSchedule: true,
   },
   {
@@ -536,14 +536,14 @@ export const PROFESSIONS: Profession[] = [
     name: '講師／培訓師',
     quadrant: 'S',
     salaryType: 'sk_driven',
-    startingSalary: 2000,
-    salaryPerSK: 30,
+    startingSalary: 30_000,
+    salaryPerSK: 450,
     startingTaxes: 0,
-    startingHomeMortgage: 300,
-    startingCarLoan: 80,
-    startingCreditCard: 50,
-    startingOtherExpenses: 500,
-    startingCash: 1500,
+    startingHomeMortgage: 4_500,
+    startingCarLoan: 1_200,
+    startingCreditCard: 750,
+    startingOtherExpenses: 7_500,
+    startingCash: 22_000,
     hasFlexibleSchedule: true,
   },
   {
@@ -551,15 +551,15 @@ export const PROFESSIONS: Profession[] = [
     name: '自由攝影師',
     quadrant: 'S',
     salaryType: 'random',
-    startingSalary: 2200,
-    minSalary: 500,
-    maxSalary: 4000,
+    startingSalary: 33_000,
+    minSalary: 7_500,
+    maxSalary: 60_000,
     startingTaxes: 0,
-    startingHomeMortgage: 250,
-    startingCarLoan: 60,
-    startingCreditCard: 50,
-    startingOtherExpenses: 500,
-    startingCash: 1500,
+    startingHomeMortgage: 3_800,
+    startingCarLoan: 900,
+    startingCreditCard: 750,
+    startingOtherExpenses: 7_500,
+    startingCash: 22_000,
     hasFlexibleSchedule: true,
   },
   {
@@ -567,14 +567,14 @@ export const PROFESSIONS: Profession[] = [
     name: '美容師／造型師',
     quadrant: 'S',
     salaryType: 'sk_driven',
-    startingSalary: 1800,
-    salaryPerSK: 20,
+    startingSalary: 27_000,
+    salaryPerSK: 300,
     startingTaxes: 0,
-    startingHomeMortgage: 200,
-    startingCarLoan: 60,
-    startingCreditCard: 40,
-    startingOtherExpenses: 450,
-    startingCash: 1000,
+    startingHomeMortgage: 3_000,
+    startingCarLoan: 900,
+    startingCreditCard: 600,
+    startingOtherExpenses: 6_800,
+    startingCash: 15_000,
     hasFlexibleSchedule: true,
   },
   {
@@ -582,15 +582,15 @@ export const PROFESSIONS: Profession[] = [
     name: '水電裝修師傅',
     quadrant: 'S',
     salaryType: 'random',
-    startingSalary: 3000,
-    minSalary: 800,
-    maxSalary: 5500,
+    startingSalary: 45_000,
+    minSalary: 12_000,
+    maxSalary: 82_000,
     startingTaxes: 0,
-    startingHomeMortgage: 300,
-    startingCarLoan: 150,
-    startingCreditCard: 60,
-    startingOtherExpenses: 600,
-    startingCash: 1500,
+    startingHomeMortgage: 4_500,
+    startingCarLoan: 2_200,
+    startingCreditCard: 900,
+    startingOtherExpenses: 9_000,
+    startingCash: 22_000,
     hasFlexibleSchedule: true,
   },
 
@@ -600,14 +600,14 @@ export const PROFESSIONS: Profession[] = [
     name: '管理顧問',
     quadrant: 'S',
     salaryType: 'sk_driven',
-    startingSalary: 4000,
-    salaryPerSK: 60,
+    startingSalary: 60_000,
+    salaryPerSK: 900,
     startingTaxes: 0,
-    startingHomeMortgage: 700,
-    startingCarLoan: 200,
-    startingCreditCard: 120,
-    startingOtherExpenses: 1200,
-    startingCash: 2500,
+    startingHomeMortgage: 10_500,
+    startingCarLoan: 3_000,
+    startingCreditCard: 1_800,
+    startingOtherExpenses: 18_000,
+    startingCash: 37_000,
     hasFlexibleSchedule: true,
   },
   {
@@ -616,13 +616,13 @@ export const PROFESSIONS: Profession[] = [
     quadrant: 'S',
     salaryType: 'nt_driven',
     startingSalary: 0,
-    salaryPerNT: 700,
+    salaryPerNT: 10_500,
     startingTaxes: 0,
-    startingHomeMortgage: 600,
-    startingCarLoan: 180,
-    startingCreditCard: 100,
-    startingOtherExpenses: 1000,
-    startingCash: 2000,
+    startingHomeMortgage: 9_000,
+    startingCarLoan: 2_700,
+    startingCreditCard: 1_500,
+    startingOtherExpenses: 15_000,
+    startingCash: 30_000,
     hasFlexibleSchedule: true,
   },
   {
@@ -630,14 +630,14 @@ export const PROFESSIONS: Profession[] = [
     name: '心理諮商師',
     quadrant: 'S',
     salaryType: 'sk_driven',
-    startingSalary: 2500,
-    salaryPerSK: 40,
+    startingSalary: 37_000,
+    salaryPerSK: 600,
     startingTaxes: 0,
-    startingHomeMortgage: 400,
-    startingCarLoan: 100,
-    startingCreditCard: 80,
-    startingOtherExpenses: 700,
-    startingCash: 1500,
+    startingHomeMortgage: 6_000,
+    startingCarLoan: 1_500,
+    startingCreditCard: 1_200,
+    startingOtherExpenses: 10_500,
+    startingCash: 22_000,
     hasFlexibleSchedule: true,
   },
 
@@ -652,21 +652,21 @@ export const PROFESSIONS: Profession[] = [
     salaryType: 'fixed',
     startingSalary: 0,           // 收入完全來自事業現金流
     startingTaxes: 0,
-    startingHomeMortgage: 400,
-    startingCarLoan: 150,
-    startingCreditCard: 80,
-    startingOtherExpenses: 500,
-    startingCash: 1200,
+    startingHomeMortgage: 6_000,
+    startingCarLoan: 2_200,
+    startingCreditCard: 1_200,
+    startingOtherExpenses: 7_500,
+    startingCash: 18_000,
     startingAssets: [
       {
         name: '小型餐廳事業',
         type: AssetType.Business,
-        cost: 80000,
-        monthlyCashflow: 800,    // 月淨收入（已扣貸款月付 $400）
-        currentValue: 80000,
+        cost: 1_200_000,
+        monthlyCashflow: 12_000,  // 月淨收入（已扣貸款月付 $6,000）
+        currentValue: 1_200_000,
         liabilityName: '事業創業貸款',
-        liabilityAmount: 65000,
-        liabilityMonthlyPayment: 400,
+        liabilityAmount: 975_000,
+        liabilityMonthlyPayment: 6_000,
       },
     ],
     hasFlexibleSchedule: true,
@@ -676,23 +676,23 @@ export const PROFESSIONS: Profession[] = [
     name: '加盟主',
     quadrant: 'B',
     salaryType: 'fixed',
-    startingSalary: 500,         // 小額管理費薪資
+    startingSalary: 7_500,       // 小額管理費薪資
     startingTaxes: 0,
-    startingHomeMortgage: 350,
-    startingCarLoan: 120,
-    startingCreditCard: 60,
-    startingOtherExpenses: 400,
-    startingCash: 800,
+    startingHomeMortgage: 5_200,
+    startingCarLoan: 1_800,
+    startingCreditCard: 900,
+    startingOtherExpenses: 6_000,
+    startingCash: 12_000,
     startingAssets: [
       {
         name: '連鎖加盟店',
         type: AssetType.Business,
-        cost: 50000,
-        monthlyCashflow: 600,    // 月淨收入（已扣貸款月付 $250）
-        currentValue: 50000,
+        cost: 750_000,
+        monthlyCashflow: 9_000,   // 月淨收入（已扣貸款月付 $3,800）
+        currentValue: 750_000,
         liabilityName: '加盟貸款',
-        liabilityAmount: 40000,
-        liabilityMonthlyPayment: 250,
+        liabilityAmount: 600_000,
+        liabilityMonthlyPayment: 3_800,
       },
     ],
     hasFlexibleSchedule: true,
@@ -709,19 +709,19 @@ export const PROFESSIONS: Profession[] = [
     salaryType: 'fixed',
     startingSalary: 0,           // 收入來自資產配息，無工資
     startingTaxes: 0,
-    startingHomeMortgage: 200,
+    startingHomeMortgage: 3_000,
     startingCarLoan: 0,          // 不開車，極簡生活
-    startingCreditCard: 30,
-    startingOtherExpenses: 200,
-    startingCash: 200,           // 幾乎全部資金已投入市場
+    startingCreditCard: 450,
+    startingOtherExpenses: 3_000,
+    startingCash: 3_000,         // 幾乎全部資金已投入市場
     startingFQ: 5,               // 財商值起始為 5（比其他職業高）
     startingAssets: [
       {
         name: '多元股票投資組合',
         type: AssetType.Stock,
-        cost: 30000,
-        monthlyCashflow: 500,    // 股息收入
-        currentValue: 30000,
+        cost: 450_000,
+        monthlyCashflow: 7_500,  // 股息收入
+        currentValue: 450_000,
         // 無負債：資產全額持有
       },
     ],
@@ -769,10 +769,10 @@ export const LOAN_RATE_BY_TIER: { minScore: number; rate: number }[] = [
  * 單次借款上限區間表（依信用值由高到低排列）。
  */
 export const LOAN_LIMIT_BY_TIER: { minScore: number; limit: number }[] = [
-  { minScore: 750, limit: 80000 },
-  { minScore: 650, limit: 50000 },
-  { minScore: 550, limit: 30000 },
-  { minScore: 300, limit: 10000 },
+  { minScore: 750, limit: 1_200_000 },
+  { minScore: 650, limit: 750_000  },
+  { minScore: 550, limit: 450_000  },
+  { minScore: 300, limit: 150_000  },
 ];
 
 /**
@@ -799,9 +799,9 @@ export function getLoanLimit(creditScore: number): number {
 // ============================================================
 
 export const INSURANCE_ACTIVATION_FEE: Readonly<Record<string, number>> = {
-  medical:  MEDICAL_INSURANCE_PREMIUM  * 2,   // $400
-  life:     LIFE_INSURANCE_PREMIUM     * 2,   // $200
-  property: PROPERTY_INSURANCE_PREMIUM * 2,   // $600
+  medical:  MEDICAL_INSURANCE_PREMIUM  * 2,   // $6,000
+  life:     LIFE_INSURANCE_PREMIUM     * 2,   // $3,000
+  property: PROPERTY_INSURANCE_PREMIUM * 2,   // $9,000
 };
 
 // ============================================================
@@ -818,10 +818,10 @@ export const SOCIAL_CLASS_CONFIG: Readonly<Record<SocialClass, {
   growthPoints: number;
   startingCashBonus: number;
 }>> = {
-  [SocialClass.Rich]:         { label: '富裕', growthPoints: 20, startingCashBonus: 5000 },
-  [SocialClass.Middle]:       { label: '中等', growthPoints: 15, startingCashBonus: 2000 },
-  [SocialClass.WorkingClass]: { label: '小康', growthPoints: 10, startingCashBonus: 800  },
-  [SocialClass.Poor]:         { label: '貧窮', growthPoints: 7,  startingCashBonus: 200  },
+  [SocialClass.Rich]:         { label: '富裕', growthPoints: 20, startingCashBonus: 75_000 },
+  [SocialClass.Middle]:       { label: '中等', growthPoints: 15, startingCashBonus: 30_000 },
+  [SocialClass.WorkingClass]: { label: '小康', growthPoints: 10, startingCashBonus: 12_000 },
+  [SocialClass.Poor]:         { label: '貧窮', growthPoints: 7,  startingCashBonus: 3_000  },
 };
 
 /**
@@ -876,9 +876,9 @@ export const PROFESSION_THRESHOLDS: Readonly<Record<string, {
 // ============================================================
 
 /** 選擇「繼續進修」時產生的學生貸款總額 */
-export const EDUCATION_LOAN_AMOUNT = 30000;
+export const EDUCATION_LOAN_AMOUNT = 450_000;
 /** 學生貸款每月還款金額 */
-export const EDUCATION_LOAN_MONTHLY = 600;
+export const EDUCATION_LOAN_MONTHLY = 9_000;
 /** 選擇「繼續進修」後初始 FQ 加成（在成長點數映射基礎上額外加） */
 export const EDUCATION_FQ_BONUS = 1;
 
@@ -907,7 +907,7 @@ export const LIFE_EXP = {
 // ============================================================
 
 /** 每次參加聯誼活動的費用 */
-export const SOCIAL_EVENT_COST = 500;
+export const SOCIAL_EVENT_COST = 7_500;
 /** 每次聯誼活動獲得的 DRS 最小值 */
 export const SOCIAL_EVENT_DRS_MIN = 10;
 /** 每次聯誼活動獲得的 DRS 最大值 */
@@ -923,15 +923,15 @@ export const HOST_ACTIVATION_DRS_BONUS = 40;
  * 買賣婚姻費用（隨年齡遞增）。
  * 費用 = BASE_COST + (currentAge - 20) * COST_STEP，上限 MAX_COST。
  */
-export const ARRANGED_MARRIAGE_BASE_COST = 5000;
-export const ARRANGED_MARRIAGE_COST_STEP = 200;   // 每歲增加 $200
-export const ARRANGED_MARRIAGE_MAX_COST = 30000;
+export const ARRANGED_MARRIAGE_BASE_COST = 75_000;
+export const ARRANGED_MARRIAGE_COST_STEP = 3_000;   // 每歲增加 $3,000
+export const ARRANGED_MARRIAGE_MAX_COST = 450_000;
 
 /** 各婚姻類型帶來的月收入加成（婚姻紅利） */
 export const MARRIAGE_BONUS_BY_TYPE: Record<'love' | 'matchmaker' | 'arranged', number> = {
-  love:        1000,   // 愛情婚姻：最高加成
-  matchmaker:   600,   // 媒合婚姻：中等加成
-  arranged:     200,   // 買賣婚姻：最低加成
+  love:        15_000,  // 愛情婚姻：最高加成
+  matchmaker:   9_000,  // 媒合婚姻：中等加成
+  arranged:     3_000,  // 買賣婚姻：最低加成
 };
 
 // ============================================================
@@ -1034,7 +1034,7 @@ export const LIFE_SCORE_WEIGHTS = {
  * 遺產淨值達此金額時傳承分為滿分 100 分。
  * 淨值越高代表留給後代越多；負值（留下負債）則得 0 分。
  */
-export const LEGACY_FULL_SCORE_AMOUNT = 100_000;
+export const LEGACY_FULL_SCORE_AMOUNT = 1_500_000;
 
 // =============================================================================
 // HP 老化與旅遊系統
@@ -1070,7 +1070,7 @@ export const HP_ACTIVITY_THRESHOLDS = {
 } as const;
 
 /** 旅遊費用（扣除現金） */
-export const TRAVEL_COST = 2000;
+export const TRAVEL_COST = 30_000;
 
 /** 旅遊後下次薪水乘以此倍率（0.7 = 七折） */
 export const TRAVEL_SALARY_PENALTY = 0.7;
@@ -1098,7 +1098,7 @@ export const S_PROFESSION_POOLS = {
 };
 
 /** 加盟主申請最低現金門檻 */
-export const FRANCHISE_CASH_THRESHOLD = 50000;
+export const FRANCHISE_CASH_THRESHOLD = 750_000;
 
 // ============================================================
 // 旅遊目的地系統
@@ -1136,7 +1136,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '台灣環島',
     region: '亞太',
     tier: 'inner',
-    cost: 1000,
+    cost: 15_000,
     lifeExpGained: 8,
     salaryPenalty: 0.9,
     hpCost: 5,
@@ -1147,7 +1147,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '日本東京',
     region: '亞太',
     tier: 'inner',
-    cost: 2500,
+    cost: 38_000,
     lifeExpGained: 12,
     salaryPenalty: 0.7,
     hpCost: 8,
@@ -1159,7 +1159,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '泰國曼谷',
     region: '亞太',
     tier: 'inner',
-    cost: 1500,
+    cost: 22_000,
     lifeExpGained: 10,
     salaryPenalty: 0.8,
     hpCost: 6,
@@ -1170,7 +1170,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '韓國首爾',
     region: '亞太',
     tier: 'inner',
-    cost: 2000,
+    cost: 30_000,
     lifeExpGained: 10,
     salaryPenalty: 0.75,
     hpCost: 7,
@@ -1181,7 +1181,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '馬來西亞',
     region: '亞太',
     tier: 'inner',
-    cost: 1500,
+    cost: 22_000,
     lifeExpGained: 9,
     salaryPenalty: 0.8,
     hpCost: 5,
@@ -1192,7 +1192,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '香港',
     region: '亞太',
     tier: 'inner',
-    cost: 1200,
+    cost: 18_000,
     lifeExpGained: 8,
     salaryPenalty: 0.85,
     hpCost: 4,
@@ -1204,7 +1204,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '越南河內',
     region: '亞太',
     tier: 'inner',
-    cost: 1000,
+    cost: 15_000,
     lifeExpGained: 8,
     salaryPenalty: 0.9,
     hpCost: 4,
@@ -1215,7 +1215,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '峇里島',
     region: '亞太',
     tier: 'inner',
-    cost: 2000,
+    cost: 30_000,
     lifeExpGained: 11,
     salaryPenalty: 0.75,
     hpCost: 3,
@@ -1227,7 +1227,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '新加坡',
     region: '亞太',
     tier: 'inner',
-    cost: 2500,
+    cost: 38_000,
     lifeExpGained: 10,
     salaryPenalty: 0.75,
     hpCost: 5,
@@ -1239,7 +1239,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '澳洲雪梨',
     region: '亞太',
     tier: 'inner',
-    cost: 4000,
+    cost: 60_000,
     lifeExpGained: 14,
     salaryPenalty: 0.7,
     hpCost: 8,
@@ -1252,7 +1252,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '法國巴黎',
     region: '歐洲',
     tier: 'outer',
-    cost: 8000,
+    cost: 120_000,
     lifeExpGained: 20,
     salaryPenalty: 0.85,
     hpCost: 8,
@@ -1264,7 +1264,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '美國紐約',
     region: '北美',
     tier: 'outer',
-    cost: 9000,
+    cost: 135_000,
     lifeExpGained: 20,
     salaryPenalty: 0.8,
     hpCost: 9,
@@ -1276,7 +1276,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '非洲獵遊',
     region: '非洲',
     tier: 'outer',
-    cost: 15000,
+    cost: 225_000,
     lifeExpGained: 30,
     salaryPenalty: 0.7,
     hpCost: 12,
@@ -1288,7 +1288,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '南極探險',
     region: '極地',
     tier: 'outer',
-    cost: 30000,
+    cost: 450_000,
     lifeExpGained: 50,
     salaryPenalty: 0.6,
     hpCost: 15,
@@ -1300,7 +1300,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '義大利文化之旅',
     region: '歐洲',
     tier: 'outer',
-    cost: 10000,
+    cost: 150_000,
     lifeExpGained: 22,
     salaryPenalty: 0.8,
     hpCost: 7,
@@ -1312,7 +1312,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '中東杜拜',
     region: '中東',
     tier: 'outer',
-    cost: 12000,
+    cost: 180_000,
     lifeExpGained: 22,
     salaryPenalty: 0.8,
     hpCost: 8,
@@ -1324,7 +1324,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '南美洲秘魯',
     region: '南美',
     tier: 'outer',
-    cost: 12000,
+    cost: 180_000,
     lifeExpGained: 25,
     salaryPenalty: 0.7,
     hpCost: 12,
@@ -1335,7 +1335,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '環遊世界（郵輪）',
     region: '全球',
     tier: 'outer',
-    cost: 50000,
+    cost: 750_000,
     lifeExpGained: 80,
     salaryPenalty: 1.0, // 外圈無薪水懲罰
     hpCost: 10,
@@ -1347,7 +1347,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '日本富士山朝聖',
     region: '亞太',
     tier: 'outer',
-    cost: 5000,
+    cost: 75_000,
     lifeExpGained: 18,
     salaryPenalty: 0.85,
     hpCost: 5,
@@ -1359,7 +1359,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     name: '矽谷創業考察',
     region: '北美',
     tier: 'outer',
-    cost: 10000,
+    cost: 150_000,
     lifeExpGained: 20,
     salaryPenalty: 0.85,
     hpCost: 6,

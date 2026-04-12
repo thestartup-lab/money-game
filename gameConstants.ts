@@ -46,13 +46,13 @@ export enum MarketEventType {
 
 // ---- 保險保費常量（月繳） ----
 
-export const MEDICAL_INSURANCE_PREMIUM = 200;
-export const LIFE_INSURANCE_PREMIUM = 100;
-export const PROPERTY_INSURANCE_PREMIUM = 300;
+export const MEDICAL_INSURANCE_PREMIUM = 3_000;
+export const LIFE_INSURANCE_PREMIUM = 1_500;
+export const PROPERTY_INSURANCE_PREMIUM = 4_500;
 
 // ---- 孩子費用常量 ----
 
-export const PER_CHILD_EXPENSE = 500;
+export const PER_CHILD_EXPENSE = 7_500;
 
 // ---- FQ 乘數 ----
 
