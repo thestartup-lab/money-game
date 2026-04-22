@@ -1642,6 +1642,36 @@ io.on('connection', (socket: Socket) => {
   // 時鐘控制事件（主持人專用）
   // ----------------------------------------------------------
 
+  // ----------------------------------------------------------
+  // 主持人踢出玩家 (kickPlayer) — 主要用於清除卡在設定階段或長期斷線的玩家
+  // ----------------------------------------------------------
+  socket.on('kickPlayer', (payload: { playerId: string }) => {
+    const gs = getRoomState(socket);
+    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    const roomId = gs.gameId;
+
+    if (socket.id !== gs.adminSocketId) {
+      socket.emit('error', { message: '只有管理員可以踢出玩家。' });
+      return;
+    }
+
+    const target = gs.players.get(payload.playerId);
+    if (!target) {
+      socket.emit('error', { message: '找不到該玩家。' });
+      return;
+    }
+
+    const wasCurrentTurn = gs.currentPlayerTurnId === payload.playerId;
+    gs.removePlayer(payload.playerId);
+    if (wasCurrentTurn && gs.playerOrder.length > 0) {
+      gs.advanceToNextTurn();
+    }
+
+    console.log(`[kickPlayer] 主持人移除玩家 ${target.name}（${roomId}）`);
+    emitToRoom(roomId, 'playerKicked', { playerId: payload.playerId, playerName: target.name });
+    emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
   socket.on('startGame', (payload?: { durationMinutes?: number; force?: boolean }) => {
     const gs = getRoomState(socket);
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
@@ -1653,11 +1683,12 @@ io.on('connection', (socket: Socket) => {
     }
 
     if (!payload?.force) {
-      const notReady = [...gs.players.values()].filter((p) => !p.pre20Done);
+      // 斷線中的玩家不擋開始（他們已不在現場，重連會自動恢復；若 10 分鐘未回來會自動移除）
+      const notReady = [...gs.players.values()].filter((p) => !p.pre20Done && !p.isDisconnected);
       if (notReady.length > 0) {
         const names = notReady.map((p) => p.name).join('、');
         socket.emit('error', {
-          message: `以下玩家尚未完成職業選擇：${names}。若要強制啟動，請傳入 { force: true }。`,
+          message: `以下玩家尚未完成職業選擇：${names}。請等他們完成，或按「強制」按鈕忽略。`,
         });
         return;
       }

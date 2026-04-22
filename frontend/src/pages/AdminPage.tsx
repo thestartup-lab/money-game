@@ -211,6 +211,7 @@ export default function AdminPage() {
   const isPaused = gameState?.isPaused ?? false;
   const isRunning = phase === 'RatRace' || phase === 'FastTrack';
   const isStartable = phase === 'Pre20' || phase === 'WaitingForPlayers';
+  const notReadyPlayers = players.filter((p: Player) => !p.pre20Done && !p.isDisconnected);
 
   // 展示頁 URL（讓展示頁自動帶房間代碼）
   const displayUrl = `${window.location.protocol}//${window.location.host}/?display&room=${roomId}`;
@@ -295,14 +296,44 @@ export default function AdminPage() {
               const cfColor = p.monthlyCashflow >= 0 ? 'text-emerald-400' : 'text-red-400';
               const dotColors = ['bg-amber-400','bg-blue-400','bg-pink-400','bg-emerald-400','bg-purple-400','bg-orange-400'];
               return (
-                <div key={p.id} className={`flex items-center gap-2 text-sm ${p.isAlive ? '' : 'opacity-40'}`}>
-                  <span className={`w-3 h-3 rounded-full flex-shrink-0 ${dotColors[idx % 6]}`} />
-                  <span className={`font-semibold truncate ${p.isAlive ? 'text-white' : 'line-through text-gray-500'}`}>{p.name}</span>
-                  <span className="text-gray-400 text-xs truncate hidden sm:block">{p.profession?.name}</span>
-                  <span className={`ml-auto text-xs font-mono ${hpColor}`}>{p.stats.health}hp</span>
-                  <span className={`text-xs font-mono ${cfColor}`}>${(p.monthlyCashflow/1000).toFixed(1)}k</span>
-                  {p.isInFastTrack && <span className="text-xs text-emerald-400">外圈</span>}
-                  {p.isBedridden && <span className="text-xs text-orange-400">臥床</span>}
+                <div key={p.id} className={`flex flex-col gap-1 text-sm ${p.isAlive ? '' : 'opacity-40'} border-b border-gray-800 last:border-b-0 pb-1.5`}>
+                  <div className="flex items-center gap-2">
+                    <span className={`w-3 h-3 rounded-full flex-shrink-0 ${dotColors[idx % 6]}`} />
+                    <span className={`font-semibold truncate ${p.isAlive ? 'text-white' : 'line-through text-gray-500'}`}>{p.name}</span>
+                    <span className="text-gray-400 text-xs truncate hidden sm:block">{p.profession?.name}</span>
+                    <span className={`ml-auto text-xs font-mono ${hpColor}`}>{p.stats.health}hp</span>
+                    <span className={`text-xs font-mono ${cfColor}`}>${(p.monthlyCashflow/1000).toFixed(1)}k</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap pl-5">
+                    {/* 設定階段才顯示就緒狀態 */}
+                    {isStartable && (
+                      p.isDisconnected ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700 text-gray-300">📵 離線</span>
+                      ) : p.pre20Done ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-700 text-emerald-100">✓ 就緒</span>
+                      ) : (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-700 text-yellow-100 animate-pulse">⏳ 設定中</span>
+                      )
+                    )}
+                    {p.isDisconnected && !isStartable && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700 text-gray-300">📵 離線</span>
+                    )}
+                    {p.isInFastTrack && <span className="text-xs text-emerald-400">外圈</span>}
+                    {p.isBedridden && <span className="text-xs text-orange-400">臥床</span>}
+                    {/* 踢出按鈕（離線或卡關設定階段才顯示） */}
+                    {(p.isDisconnected || (isStartable && !p.pre20Done)) && (
+                      <button
+                        className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-red-900 hover:bg-red-800 text-red-200"
+                        title="移除此玩家"
+                        onClick={() => {
+                          if (window.confirm(`確定要移除玩家「${p.name}」？\n（如他斷線重連會視為新玩家）`)) {
+                            emit('kickPlayer', { playerId: p.id });
+                            addLog(`已移除玩家：${p.name}`);
+                          }
+                        }}
+                      >移除</button>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -311,6 +342,13 @@ export default function AdminPage() {
           {/* 遊戲控制 */}
           <div className="card space-y-3">
             <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">遊戲控制</p>
+            {isStartable && notReadyPlayers.length > 0 && (
+              <div className="bg-yellow-950 border border-yellow-700 rounded-xl p-2 text-xs text-yellow-200">
+                ⏳ 等待 {notReadyPlayers.length} 位玩家完成設定：
+                <span className="font-semibold">{notReadyPlayers.map((p: Player) => p.name).join('、')}</span>
+                <p className="text-[11px] text-yellow-400 mt-0.5">如玩家已離開可在上方點「移除」清掉，或直接按「強制」啟動。</p>
+              </div>
+            )}
             {isStartable && (
               <div className="flex items-center gap-2">
                 <label className="text-sm text-gray-300 whitespace-nowrap">時長（分）</label>
