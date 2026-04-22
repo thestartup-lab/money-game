@@ -75,9 +75,9 @@ export const ADMIN_GLOBAL_EVENTS: AdminGlobalEvent[] = [
   {
     id: 'inflation',
     title: '通貨膨脹',
-    description: '物價全面上漲，每位玩家每月生活支出增加 $300。',
+    description: '物價全面上漲，每位玩家每月生活支出增加 $4,500。',
     effects: [
-      { type: 'ExpenseChange', flatAmount: 300 },
+      { type: 'ExpenseChange', flatAmount: 4_500 },
     ],
   },
   {
@@ -92,10 +92,10 @@ export const ADMIN_GLOBAL_EVENTS: AdminGlobalEvent[] = [
   {
     id: 'natural_disaster',
     title: '大型自然災害',
-    description: '強震重創城市，房產估值大跌，重建費用也讓所有人每月多支出 $500。',
+    description: '強震重創城市，房產估值大跌，重建費用也讓所有人每月多支出 $7,500。',
     effects: [
       { type: 'AssetValueChange', targetAssetType: AssetType.RealEstate, multiplier: 0.7 },
-      { type: 'ExpenseChange', flatAmount: 500 },
+      { type: 'ExpenseChange', flatAmount: 7_500 },
     ],
   },
   {
@@ -104,7 +104,7 @@ export const ADMIN_GLOBAL_EVENTS: AdminGlobalEvent[] = [
     description: '封城措施重創實體商業，企業現金流大幅萎縮，全民醫療支出也大增。',
     effects: [
       { type: 'CashflowChange', targetAssetType: AssetType.Business, multiplier: 0.4 },
-      { type: 'ExpenseChange', flatAmount: 400 },
+      { type: 'ExpenseChange', flatAmount: 6_000 },
     ],
   },
 ];

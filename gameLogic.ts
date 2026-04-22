@@ -889,10 +889,10 @@ export function calculateLifeScore(player: Player, deathAge: number): LifeScoreB
   if ((player.visitedDestinations?.length ?? 0) >= 5) achievements.push('世界旅人');
   if (player.isMarried && player.numberOfChildren >= 2) achievements.push('家庭至上');
   if (player.stats.health >= 80)                     achievements.push('鐵打身體');
-  if (netWorth >= 50000)                             achievements.push('智慧投資');
-  if (player.totalPassiveIncome >= 3000)             achievements.push('被動收入王');
+  if (netWorth >= 750_000)                           achievements.push('智慧投資');
+  if (player.totalPassiveIncome >= 45_000)           achievements.push('被動收入王');
   if (totalDebt === 0)                               achievements.push('無債一身輕');
-  if (netEstate >= 100000)                           achievements.push('傳承者');
+  if (netEstate >= 1_500_000)                        achievements.push('傳承者');
   if (player.stats.network >= 8)                     achievements.push('人脈大師');
 
   return {

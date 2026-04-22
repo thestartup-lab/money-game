@@ -201,15 +201,15 @@ export interface PlayerStats {
 export interface PaydayPlanPayload {
   /** 升級財商值（費用依當前 FQ 等級而定，見 FQ_UPGRADE_COSTS） */
   investInFQUpgrade: boolean;
-  /** 維護健康：阻止本次 HP 自然衰退（費用 $200） */
+  /** 維護健康：阻止本次 HP 自然衰退（費用 $3,000） */
   investInHealthMaintenance: boolean;
-  /** 積極投資健康：+20 HP 並阻止衰退（費用 $500，包含維護） */
+  /** 積極投資健康：+20 HP 並阻止衰退（費用 $7,500，包含維護） */
   investInHealthBoost: boolean;
-  /** 進修培訓：+20 SK（費用 $600） */
+  /** 進修培訓：+20 SK（費用 $9,000） */
   investInSkillTraining: boolean;
-  /** 主動拓展人脈：+1 NT（費用 $400） */
+  /** 主動拓展人脈：+1 NT（費用 $6,000） */
   investInNetwork: boolean;
-  /** 股票定期定額投入金額（0 = 不投入；可選 1000 / 2000 / 5000）*/
+  /** 股票定期定額投入金額（0 = 不投入；可選 15000 / 30000 / 75000）*/
   stockDCAAmount: number;
   /** 本次購買的保險類型（已持有的將被跳過）*/
   buyInsuranceTypes: Array<'medical' | 'life' | 'property'>;

@@ -186,10 +186,10 @@ export function applyCharityDonation(
  * HP > HP_STRONG_THRESHOLD (70)  → ×0.5，extra skip 0
  * HP 31–70                       → ×1.0，extra skip 0
  * HP ≤ HP_DANGER_THRESHOLD (30)  → ×1.5，extra skip +1
- * HP = 0                         → ×2.0 + $5,000，extra skip +2
+ * HP = 0                         → ×2.0 + $75,000，extra skip +2
  */
 function calcHPModifier(hp: number): { costMultiplier: number; flatBonus: number; extraTurns: number } {
-  if (hp <= 0)                          return { costMultiplier: 2.0, flatBonus: 5000, extraTurns: 2 };
+  if (hp <= 0)                          return { costMultiplier: 2.0, flatBonus: 75_000, extraTurns: 2 };
   if (hp <= HP_DANGER_THRESHOLD)        return { costMultiplier: 1.5, flatBonus: 0,    extraTurns: 1 };
   if (hp <= HP_STRONG_THRESHOLD)        return { costMultiplier: 1.0, flatBonus: 0,    extraTurns: 0 };
   return                                       { costMultiplier: 0.5, flatBonus: 0,    extraTurns: 0 };
@@ -339,13 +339,18 @@ export function applyRelationshipCard(
     if (roll >= e.gambleSuccess.threshold) {
       gambleOutcome = 'success';
       // 成功：新增月被動收入（以新資產形式加入）
+      // 啟動資金 = 失敗時會損失的現金；成功時亦扣除作為入股
+      const investAmount = e.gambleSuccess.failureCashLoss;
+      const actualInvest = Math.min(investAmount, player.cash);
+      player.cash -= actualInvest;
+      cashChange  -= actualInvest;
       const newAsset: Asset = {
         id:               `rel-gamble-${Date.now()}`,
         name:             '創業股份',
         type:             AssetType.Business,
-        cost:             10000,
-        currentValue:     10000,
-        downPayment:      10000,
+        cost:             investAmount,
+        currentValue:     investAmount,
+        downPayment:      investAmount,
         monthlyCashflow:  e.gambleSuccess.successCashflow,
       };
       player.assets.push(newAsset);

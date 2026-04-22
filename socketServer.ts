@@ -672,6 +672,24 @@ io.on('connection', (socket: Socket) => {
             timeoutMs: PAYDAY_PLANNING_TIMEOUT_MS,
           });
 
+          // 取出符合玩家當前圈別與 HP 門檻的旅遊目的地，提供給發薪日表單顯示
+          const { TRAVEL_DESTINATIONS } = require('./gameConfig');
+          const eligibleDestinations = (TRAVEL_DESTINATIONS as Array<{
+            id: string; name: string; region: string; tier: 'inner' | 'outer' | 'both';
+            cost: number; lifeExpGained: number; salaryPenalty: number;
+          }>)
+            .filter((d) => {
+              if (d.tier === 'both') return true;
+              if (d.tier === 'inner') return !player.isInFastTrack;
+              if (d.tier === 'outer') return player.isInFastTrack;
+              return false;
+            })
+            .filter((d) => player.stats.health >= HP_ACTIVITY_THRESHOLDS.travel)
+            .map((d) => ({
+              id: d.id, name: d.name, region: d.region,
+              cost: d.cost, lifeExpGained: d.lifeExpGained, salaryPenalty: d.salaryPenalty,
+            }));
+
           socket.emit('paydayPlanningRequired', {
             paydayPosition: paydayPos,
             paydayIndex: paydayIdx + 1,
@@ -681,6 +699,7 @@ io.on('connection', (socket: Socket) => {
             affordableOptions,
             currentInsurance: player.insurance,
             stockDCAPortfolioValue: player.assets.find((a) => a.id === 'stock-dca')?.currentValue ?? 0,
+            travelDestinations: eligibleDestinations,
             timeoutMs: PAYDAY_PLANNING_TIMEOUT_MS,
           });
 
@@ -1604,16 +1623,17 @@ io.on('connection', (socket: Socket) => {
     const sender = gs.players.get(socket.id);
     const target = gs.players.get(payload.targetPlayerId);
     if (!sender || !target) return;
-    if (sender.cash < 500) { socket.emit('error', { message: '現金不足（需 $500）。' }); return; }
+    const CONGRATS_AMOUNT = 7_500;
+    if (sender.cash < CONGRATS_AMOUNT) { socket.emit('error', { message: `現金不足（需 $${CONGRATS_AMOUNT.toLocaleString()}）。` }); return; }
 
-    sender.cash -= 500;
-    target.cash += 500;
+    sender.cash -= CONGRATS_AMOUNT;
+    target.cash += CONGRATS_AMOUNT;
     target.stats.network = Math.min(target.profession.salaryType === 'nt_driven' ? Infinity : 10, target.stats.network + 0.2);
 
     emitToRoom(roomId, 'congratulationSent', {
       senderId: socket.id, senderName: sender.name,
       targetId: payload.targetPlayerId, targetName: target.name,
-      event: payload.event, amount: 500,
+      event: payload.event, amount: CONGRATS_AMOUNT,
     });
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
   });
@@ -2402,10 +2422,11 @@ async function handleLandingSquare(
         break;
       }
       case FastTrackSquareType.NetworkSummit: {
-        const ntBonus = player.stats.network * 5000;
+        const ntPerLevel = 75_000;
+        const ntBonus = player.stats.network * ntPerLevel;
         player.cash += ntBonus;
         player.lifeExperience += 8;
-        emitCellEvent(socket, roomId, player.name, 'FT 人際關係', `🤝 人脈高峰！人脈值 ${player.stats.network} × $5,000 = +$${ntBonus.toLocaleString()}。`);
+        emitCellEvent(socket, roomId, player.name, 'FT 人際關係', `🤝 人脈高峰！人脈值 ${player.stats.network} × $${ntPerLevel.toLocaleString()} = +$${ntBonus.toLocaleString()}。`);
         emitToRoom(roomId, 'fastTrackNetworkSummit', {
           playerId: player.id, playerName: player.name,
           ntLevel: player.stats.network, cashBonus: ntBonus,
@@ -2439,7 +2460,7 @@ async function handleLandingSquare(
       }
       case FastTrackSquareType.TechStartup: {
         // 科技新創：隨機投資金額，擲骰決定成敗
-        const amounts = [20000, 50000, 100000];
+        const amounts = [300_000, 750_000, 1_500_000];
         const investmentAmount = amounts[Math.floor(Math.random() * amounts.length)];
         emitCellEvent(socket, roomId, player.name, 'FT 科技新創', `💡 科技新創機會！投入 $${investmentAmount.toLocaleString()} 擲骰決定成敗（≥4 成功）。`);
         pauseGameClock(gs);
@@ -2551,7 +2572,7 @@ async function handleLandingSquare(
       }
       case FastTrackSquareType.AssetLeverage: {
         // 資產槓桿：自動給予被動收入 × 3 的現金獎勵
-        const bonus = Math.max(player.totalPassiveIncome * 3, 10000);
+        const bonus = Math.max(player.totalPassiveIncome * 3, 150_000);
         player.cash += bonus;
         emitCellEvent(socket, roomId, player.name, 'FT 資產槓桿', `🚀 資產槓桿！獲得 +$${bonus.toLocaleString()} 現金獎勵。`);
         socket.emit('assetLeverageBonus', {

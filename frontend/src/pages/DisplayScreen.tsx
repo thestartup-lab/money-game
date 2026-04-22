@@ -75,6 +75,7 @@ export default function DisplayScreen() {
   };
   const [auctionPanel, setAuctionPanel] = useState<AuctionPanel | null>(null);
   const auctionCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const addTicker = (msg: string) => setTicker((prev) => [msg, ...prev].slice(0, 6));
 
@@ -451,10 +452,21 @@ export default function DisplayScreen() {
           <RoomAnalysisView analysis={roomAnalysis} />
         </div>
       ) : (
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 overflow-hidden relative">
 
-          {/* ══ 左欄：QR + 玩家名單 ══ */}
-          <div className="w-52 xl:w-60 flex-shrink-0 flex flex-col gap-3 p-3 overflow-y-auto border-r border-gray-800">
+          {/* 摺疊／展開按鈕（無論摺疊與否都顯示） */}
+          <button
+            onClick={() => setSidebarCollapsed((v) => !v)}
+            className="absolute top-2 left-2 z-30 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-200 rounded-lg w-8 h-8 flex items-center justify-center text-sm shadow-lg transition-colors"
+            style={{ left: sidebarCollapsed ? 8 : undefined, right: sidebarCollapsed ? undefined : undefined }}
+            title={sidebarCollapsed ? '展開側欄' : '收起側欄（讓棋盤更大）'}
+          >
+            {sidebarCollapsed ? '▶' : '◀'}
+          </button>
+
+          {/* ══ 左欄：QR + 玩家名單（可摺疊） ══ */}
+          {!sidebarCollapsed && (
+          <div className="w-52 xl:w-60 flex-shrink-0 flex flex-col gap-3 p-3 pt-12 overflow-y-auto border-r border-gray-800">
 
             {/* QR Code */}
             <div className="flex flex-col items-center gap-2 bg-gray-900 rounded-xl p-3">
@@ -537,6 +549,7 @@ export default function DisplayScreen() {
               </div>
             )}
           </div>
+          )}
 
           {/* ══ 右欄：棋盤 + 置中大字幕 ══ */}
           <div

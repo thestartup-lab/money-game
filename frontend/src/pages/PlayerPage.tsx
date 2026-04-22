@@ -608,7 +608,7 @@ export default function PlayerPage() {
                 </div>
                 <div className="bg-red-950 border border-red-800 rounded-lg p-2 space-y-1">
                   <p className="text-red-400 font-semibold">進修代價</p>
-                  <p className="text-gray-300">$30,000 學貸（每月 -$600）</p>
+                  <p className="text-gray-300">$450,000 學貸（每月 -$9,000）</p>
                   <p className="text-gray-300">跳過第一個發薪日</p>
                 </div>
               </div>
@@ -679,7 +679,7 @@ export default function PlayerPage() {
             <div className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 space-y-1">
               <p className="text-xs text-gray-400 font-semibold">B / I 象限說明（非初始選項）</p>
               <p className="text-xs text-gray-500">B（企業主）：遊戲中現金達門檻後可申請加盟，或透過特殊事件創業取得。</p>
-              <p className="text-xs text-gray-500">I（投資者）：被動收入 &gt; 總支出時，自動達到 FastTrack 狀態。</p>
+              <p className="text-xs text-gray-500">I（投資者）：被動收入 ≥ 總支出時，自動達到 FastTrack 狀態。</p>
             </div>
 
             {error && <p className="text-red-400 text-sm text-center">{error}</p>}
@@ -700,12 +700,12 @@ export default function PlayerPage() {
         {congratulatableEvent && (
           <div className="card border border-yellow-600 bg-yellow-900 space-y-2">
             <p className="text-yellow-200 font-semibold text-sm">🎉 {congratulatableEvent.targetName} {congratulatableEvent.event}！</p>
-            <p className="text-yellow-400 text-xs">花費 $500 送上祝賀（對方 +$500，NT+0.2）</p>
+            <p className="text-yellow-400 text-xs">花費 $7,500 送上祝賀（對方 +$7,500，NT+0.2）</p>
             <div className="flex gap-2">
               <button className="btn-primary text-sm flex-1" onClick={() => {
                 emit('congratulate', { targetPlayerId: congratulatableEvent.targetId, event: congratulatableEvent.event });
                 setCongratulatableEvent(null);
-              }}>🎊 恭喜（$500）</button>
+              }}>🎊 恭喜（$7,500）</button>
               <button className="btn-secondary text-sm" onClick={() => setCongratulatableEvent(null)}>略過</button>
             </div>
           </div>
@@ -924,7 +924,7 @@ export default function PlayerPage() {
             if (hp < 40) { hint = '❤️ 健康警告！少旅遊多休養，維護生命體驗指數'; hintColor = 'text-red-400'; }
             else if (cf < 0) { hint = '📉 現金流為負，賣掉負現金流資產讓錢幫你工作'; hintColor = 'text-red-400'; }
             else if (!myPlayer.isMarried && nt < 3) { hint = '🤝 NT 人脈偏低，多社交事件可提升人際關係指數'; hintColor = 'text-pink-400'; }
-            else if (cf < 500) { hint = '💡 持續投資小交易，增加被動收入'; hintColor = 'text-yellow-400'; }
+            else if (cf < 7_500) { hint = '💡 持續投資小交易，增加被動收入'; hintColor = 'text-yellow-400'; }
             else if (travels < 3) { hint = '✈️ 多出去走走！旅遊可提升生命體驗指數'; hintColor = 'text-teal-400'; }
             else if (cf >= exp && !myPlayer.isInFastTrack) { hint = '🚀 被動收入已超越支出，快準備脫出老鼠賽跑！'; hintColor = 'text-emerald-400'; }
             return hint ? (
@@ -984,9 +984,9 @@ export default function PlayerPage() {
           {congratulatableEvent && (
             <div className="mx-4 my-2 rounded-xl border border-yellow-600 bg-yellow-900 p-3 space-y-2">
               <p className="text-yellow-200 font-semibold text-sm">🎉 {congratulatableEvent.targetName} {congratulatableEvent.event}！</p>
-              <p className="text-yellow-400 text-xs">花費 $500 送上祝賀（對方 +$500，NT+0.2）</p>
+              <p className="text-yellow-400 text-xs">花費 $7,500 送上祝賀（對方 +$7,500，NT+0.2）</p>
               <div className="flex gap-2">
-                <button className="btn-primary text-sm flex-1" onClick={() => { emit('congratulate', { targetPlayerId: congratulatableEvent.targetId, event: congratulatableEvent.event }); setCongratulatableEvent(null); }}>🎊 恭喜（$500）</button>
+                <button className="btn-primary text-sm flex-1" onClick={() => { emit('congratulate', { targetPlayerId: congratulatableEvent.targetId, event: congratulatableEvent.event }); setCongratulatableEvent(null); }}>🎊 恭喜（$7,500）</button>
                 <button className="btn-secondary text-sm" onClick={() => setCongratulatableEvent(null)}>略過</button>
               </div>
             </div>

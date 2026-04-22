@@ -8,12 +8,12 @@ interface PaydayPlanFormProps {
 }
 
 const INSURANCE_CONFIG = {
-  medical:  { label: '醫療險', monthlyPremium: 200, activationFee: 400, icon: '🏥', key: 'hasMedicalInsurance' as const },
-  life:     { label: '壽險',   monthlyPremium: 100, activationFee: 200, icon: '🛡️', key: 'hasLifeInsurance' as const },
-  property: { label: '財產險', monthlyPremium: 300, activationFee: 600, icon: '🏠', key: 'hasPropertyInsurance' as const },
+  medical:  { label: '醫療險', monthlyPremium: 3_000, activationFee: 6_000, icon: '🏥', key: 'hasMedicalInsurance' as const },
+  life:     { label: '壽險',   monthlyPremium: 1_500, activationFee: 3_000, icon: '🛡️', key: 'hasLifeInsurance' as const },
+  property: { label: '財產險', monthlyPremium: 4_500, activationFee: 9_000, icon: '🏠', key: 'hasPropertyInsurance' as const },
 };
 
-const DCA_AMOUNTS = [1000, 2000, 5000] as const;
+const DCA_AMOUNTS = [15_000, 30_000, 75_000] as const;
 
 export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPlanFormProps) {
   const [checks, setChecks] = useState({
@@ -189,7 +189,7 @@ export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPla
                         ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                         : 'bg-gray-700 text-gray-300 hover:bg-blue-700'
                   }`}
-                >${(amt / 1000).toFixed(0)}k</button>
+                >${amt >= 1000 ? `${(amt / 1000).toFixed(0)}k` : amt}</button>
               ))}
             </div>
           </div>

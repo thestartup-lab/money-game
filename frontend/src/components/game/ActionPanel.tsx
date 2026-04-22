@@ -2,32 +2,32 @@ import { useState } from 'react';
 import type { Player } from '../../types/game';
 
 const DESTINATIONS = [
-  { id: 'taiwan_cycling',   name: '台灣環島',   tier: 'inner', cost: 1000,  lifeExp: 8,  region: '亞太', desc: '騎單車環島',            special: '' },
-  { id: 'japan_tokyo',      name: '日本東京',   tier: 'inner', cost: 2500,  lifeExp: 12, region: '亞太', desc: 'NT+1',                   special: '人脈+1' },
-  { id: 'thailand_bangkok', name: '泰國曼谷',   tier: 'inner', cost: 1500,  lifeExp: 10, region: '亞太', desc: '東南亞文化',              special: '' },
-  { id: 'korea_seoul',      name: '韓國首爾',   tier: 'inner', cost: 2000,  lifeExp: 10, region: '亞太', desc: '韓流體驗',               special: '' },
-  { id: 'malaysia_kl',      name: '馬來西亞',   tier: 'inner', cost: 1500,  lifeExp: 9,  region: '亞太', desc: '美食天堂',               special: '' },
-  { id: 'hong_kong',        name: '香港',       tier: 'inner', cost: 1200,  lifeExp: 8,  region: '亞太', desc: 'FQ+1',                   special: '財商+1' },
-  { id: 'vietnam_hanoi',    name: '越南河內',   tier: 'inner', cost: 1000,  lifeExp: 8,  region: '亞太', desc: '歷史古城',               special: '' },
-  { id: 'bali',             name: '峇里島',     tier: 'inner', cost: 2000,  lifeExp: 11, region: '亞太', desc: 'HP+5 療癒之旅',          special: 'HP+5' },
-  { id: 'singapore',        name: '新加坡',     tier: 'inner', cost: 2500,  lifeExp: 10, region: '亞太', desc: 'FQ+1',                   special: '財商+1' },
-  { id: 'australia_sydney', name: '澳洲雪梨',   tier: 'inner', cost: 4000,  lifeExp: 14, region: '亞太', desc: '南半球大都市',            special: '' },
-  { id: 'france_paris',     name: '法國巴黎',   tier: 'outer', cost: 8000,  lifeExp: 20, region: '歐洲', desc: 'NT+2',                   special: '人脈+2' },
-  { id: 'usa_newyork',      name: '美國紐約',   tier: 'outer', cost: 9000,  lifeExp: 20, region: '北美', desc: 'FQ+2 金融洞察',          special: '財商+2' },
-  { id: 'africa_safari',    name: '非洲獵遊',   tier: 'outer', cost: 15000, lifeExp: 30, region: '非洲', desc: 'SK+1 視野拓展',          special: '技能+1' },
-  { id: 'antarctica',       name: '南極探險',   tier: 'outer', cost: 30000, lifeExp: 50, region: '極地', desc: '傳承分+10（稀有）',      special: '傳承+10' },
-  { id: 'italy_culture',    name: '義大利文化', tier: 'outer', cost: 10000, lifeExp: 22, region: '歐洲', desc: 'NT+2',                   special: '人脈+2' },
-  { id: 'uae_dubai',        name: '中東杜拜',   tier: 'outer', cost: 12000, lifeExp: 22, region: '中東', desc: 'FQ+1',                   special: '財商+1' },
-  { id: 'peru_machu',       name: '南美洲秘魯', tier: 'outer', cost: 12000, lifeExp: 25, region: '南美', desc: '印加古文明',              special: '' },
-  { id: 'world_cruise',     name: '環遊世界',   tier: 'outer', cost: 50000, lifeExp: 80, region: '全球', desc: '全屬性+1（人生夢想）',   special: '全屬性+1' },
-  { id: 'japan_fuji',       name: '富士山朝聖', tier: 'outer', cost: 5000,  lifeExp: 18, region: '亞太', desc: 'HP+10 精神修復',         special: 'HP+10' },
-  { id: 'silicon_valley',   name: '矽谷考察',   tier: 'outer', cost: 10000, lifeExp: 20, region: '北美', desc: 'FQ+3，可觸發創業事件',  special: '財商+3' },
+  { id: 'taiwan_cycling',   name: '台灣環島',   tier: 'inner', cost: 15_000,  lifeExp: 8,  region: '亞太', desc: '騎單車環島',            special: '' },
+  { id: 'japan_tokyo',      name: '日本東京',   tier: 'inner', cost: 38_000,  lifeExp: 12, region: '亞太', desc: 'NT+1',                   special: '人脈+1' },
+  { id: 'thailand_bangkok', name: '泰國曼谷',   tier: 'inner', cost: 22_000,  lifeExp: 10, region: '亞太', desc: '東南亞文化',              special: '' },
+  { id: 'korea_seoul',      name: '韓國首爾',   tier: 'inner', cost: 30_000,  lifeExp: 10, region: '亞太', desc: '韓流體驗',               special: '' },
+  { id: 'malaysia_kl',      name: '馬來西亞',   tier: 'inner', cost: 22_000,  lifeExp: 9,  region: '亞太', desc: '美食天堂',               special: '' },
+  { id: 'hong_kong',        name: '香港',       tier: 'inner', cost: 18_000,  lifeExp: 8,  region: '亞太', desc: 'FQ+1',                   special: '財商+1' },
+  { id: 'vietnam_hanoi',    name: '越南河內',   tier: 'inner', cost: 15_000,  lifeExp: 8,  region: '亞太', desc: '歷史古城',               special: '' },
+  { id: 'bali',             name: '峇里島',     tier: 'inner', cost: 30_000,  lifeExp: 11, region: '亞太', desc: 'HP+5 療癒之旅',          special: 'HP+5' },
+  { id: 'singapore',        name: '新加坡',     tier: 'inner', cost: 38_000,  lifeExp: 10, region: '亞太', desc: 'FQ+1',                   special: '財商+1' },
+  { id: 'australia_sydney', name: '澳洲雪梨',   tier: 'inner', cost: 60_000,  lifeExp: 14, region: '亞太', desc: '南半球大都市',            special: '' },
+  { id: 'france_paris',     name: '法國巴黎',   tier: 'outer', cost: 120_000, lifeExp: 20, region: '歐洲', desc: 'NT+2',                   special: '人脈+2' },
+  { id: 'usa_newyork',      name: '美國紐約',   tier: 'outer', cost: 135_000, lifeExp: 20, region: '北美', desc: 'FQ+2 金融洞察',          special: '財商+2' },
+  { id: 'africa_safari',    name: '非洲獵遊',   tier: 'outer', cost: 225_000, lifeExp: 30, region: '非洲', desc: 'SK+1 視野拓展',          special: '技能+1' },
+  { id: 'antarctica',       name: '南極探險',   tier: 'outer', cost: 450_000, lifeExp: 50, region: '極地', desc: '傳承分+10（稀有）',      special: '傳承+10' },
+  { id: 'italy_culture',    name: '義大利文化', tier: 'outer', cost: 150_000, lifeExp: 22, region: '歐洲', desc: 'NT+2',                   special: '人脈+2' },
+  { id: 'uae_dubai',        name: '中東杜拜',   tier: 'outer', cost: 180_000, lifeExp: 22, region: '中東', desc: 'FQ+1',                   special: '財商+1' },
+  { id: 'peru_machu',       name: '南美洲秘魯', tier: 'outer', cost: 180_000, lifeExp: 25, region: '南美', desc: '印加古文明',              special: '' },
+  { id: 'world_cruise',     name: '環遊世界',   tier: 'outer', cost: 750_000, lifeExp: 80, region: '全球', desc: '全屬性+1（人生夢想）',   special: '全屬性+1' },
+  { id: 'japan_fuji',       name: '富士山朝聖', tier: 'outer', cost: 75_000,  lifeExp: 18, region: '亞太', desc: 'HP+10 精神修復',         special: 'HP+10' },
+  { id: 'silicon_valley',   name: '矽谷考察',   tier: 'outer', cost: 150_000, lifeExp: 20, region: '北美', desc: 'FQ+3，可觸發創業事件',  special: '財商+3' },
 ] as const;
 
 const INSURANCE_COSTS: Record<'medical' | 'life' | 'property', number> = {
-  medical: 400,
-  life: 200,
-  property: 600,
+  medical: 6_000,
+  life: 3_000,
+  property: 9_000,
 };
 const INSURANCE_LABELS: Record<'medical' | 'life' | 'property', string> = {
   medical: '🏥 醫療險',
@@ -35,15 +35,15 @@ const INSURANCE_LABELS: Record<'medical' | 'life' | 'property', string> = {
   property: '🏠 財產險',
 };
 
-const DCA_AMOUNTS = [1000, 2000, 5000] as const;
-const LOAN_AMOUNTS = [5000, 10000, 20000, 30000, 50000] as const;
+const DCA_AMOUNTS = [15_000, 30_000, 75_000] as const;
+const LOAN_AMOUNTS = [75_000, 150_000, 300_000, 450_000, 750_000] as const;
 
 function getLoanLimit(score: number): number {
-  if (score >= 750) return 80000;
-  if (score >= 650) return 50000;
-  if (score >= 550) return 30000;
-  if (score >= 300) return 10000;
-  return 5000;
+  if (score >= 750) return 1_200_000;
+  if (score >= 650) return 750_000;
+  if (score >= 550) return 450_000;
+  if (score >= 300) return 150_000;
+  return 75_000;
 }
 function getLoanRate(score: number): number {
   if (score >= 750) return 0.005;
@@ -93,7 +93,7 @@ export default function ActionPanel({
   const [showDCAPanel, setShowDCAPanel] = useState(false);
   const [showP2PPanel, setShowP2PPanel] = useState(false);
   const [p2pTarget, setP2pTarget] = useState('');
-  const [p2pAmount, setP2pAmount] = useState(5000);
+  const [p2pAmount, setP2pAmount] = useState(75_000);
   const [p2pRate, setP2pRate] = useState(0.01);
   const [sellConfirmId, setSellConfirmId] = useState<string | null>(null);
 
@@ -102,7 +102,7 @@ export default function ActionPanel({
     ? '自由行程（不限次數）'
     : `本發薪日剩餘活動：${player.actionTokensThisPayday} 次`;
 
-  const travelDisabled = player.isBedridden || player.stats.health < 20 || noTokensLeft;
+  const travelDisabled = player.isBedridden || player.stats.health < 50 || noTokensLeft;
   const socialDisabled = player.isBedridden || player.isMarried || noTokensLeft;
 
   const availableDestinations = DESTINATIONS.filter((d) =>
@@ -409,7 +409,7 @@ export default function ActionPanel({
                   value={p2pAmount}
                   onChange={(e) => setP2pAmount(Number(e.target.value))}
                 >
-                  {[1000, 2000, 5000, 10000, 20000, 50000].map((a) => (
+                  {[15_000, 30_000, 75_000, 150_000, 300_000, 750_000].map((a) => (
                     <option key={a} value={a}>${fmt(a)}</option>
                   ))}
                 </select>
