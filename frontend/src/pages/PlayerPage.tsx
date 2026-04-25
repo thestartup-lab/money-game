@@ -108,8 +108,12 @@ export default function PlayerPage() {
   useEffect(() => {
     const s = io(SERVER_URL, {
       transports: ['websocket', 'polling'], // polling 作為 WebSocket 失敗時的備援
-      reconnectionAttempts: 5,
-      reconnectionDelay: 2000,
+      reconnection: true,
+      reconnectionAttempts: Infinity, // 永不放棄重連，避免長時間遊戲後斷線無法恢復
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      randomizationFactor: 0.5,
+      timeout: 20000,
     });
     socketRef.current = s;
 
@@ -797,8 +801,8 @@ export default function PlayerPage() {
       ? outerCircleConfig[pos % outerCircleConfig.length]
       : innerCircleConfig[pos % innerCircleConfig.length];
 
-    // 玩家個人年齡 = 全局時鐘 + (startAge - 20)
-    const personalAge = gameState.currentAge + ((myPlayer.startAge ?? 20) - 20);
+    // 顯示用年齡 = 伺服器全局時鐘（與後端事件、廣播訊息中的年齡完全一致，避免落差）
+    const personalAge = gameState.currentAge;
 
     // 計算通知數量
     const notifCount = notifications.length;

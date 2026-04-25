@@ -80,7 +80,7 @@ export default function DisplayScreen() {
   const addTicker = (msg: string) => setTicker((prev) => [msg, ...prev].slice(0, 6));
 
   useEffect(() => {
-    const s = io(SERVER_URL, { transports: ['websocket', 'polling'], reconnectionAttempts: 5, reconnectionDelay: 2000 });
+    const s = io(SERVER_URL, { transports: ['websocket', 'polling'], reconnection: true, reconnectionAttempts: Infinity, reconnectionDelay: 1000, reconnectionDelayMax: 5000, randomizationFactor: 0.5, timeout: 20000 });
     socketRef.current = s;
     s.on('connect', () => {
       setConnected(true);
@@ -368,7 +368,7 @@ export default function DisplayScreen() {
     isBedridden: p.isBedridden,
     health: p.stats.health,
     monthlyCashflow: p.monthlyCashflow,
-    age: Math.floor(gameState.currentAge + ((p.startAge ?? 20) - 20)),
+    age: Math.floor(gameState.currentAge),
     isAlive: p.isAlive,
     isMarried: p.isMarried,
     roundAction: playerRoundActions.get(p.id) || undefined,

@@ -25,7 +25,7 @@ export function useGameState(mySocketId: string | null): UseGameStateReturn {
   const [roomAnalysis, setRoomAnalysis] = useState<UseGameStateReturn['roomAnalysis']>(null);
 
   useEffect(() => {
-    const s = io(SERVER_URL, { transports: ['websocket', 'polling'], reconnectionAttempts: 5, reconnectionDelay: 2000 });
+    const s = io(SERVER_URL, { transports: ['websocket', 'polling'], reconnection: true, reconnectionAttempts: Infinity, reconnectionDelay: 1000, reconnectionDelayMax: 5000, randomizationFactor: 0.5, timeout: 20000 });
     socketRef.current = s;
 
     s.on('connect', () => setConnected(true));
