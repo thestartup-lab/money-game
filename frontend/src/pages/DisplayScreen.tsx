@@ -356,7 +356,7 @@ export default function DisplayScreen() {
 
   const playerUrl = `${window.location.protocol}//${window.location.host}/?room=${gameState.roomId}`;
 
-  // 把玩家轉為 GameBoard 格式
+  // 把玩家轉為 GameBoard 格式（含 HP / 現金流 / 年齡等富資訊，給棋盤中央面板顯示）
   const boardPlayers: BoardPlayer[] = gameState.players.map((p, i) => ({
     id: p.id,
     name: p.name,
@@ -366,9 +366,13 @@ export default function DisplayScreen() {
     isMe: false,
     colorIndex: i % 6,
     isBedridden: p.isBedridden,
+    health: p.stats.health,
+    monthlyCashflow: p.monthlyCashflow,
+    age: Math.floor(gameState.currentAge + ((p.startAge ?? 20) - 20)),
+    isAlive: p.isAlive,
+    isMarried: p.isMarried,
+    roundAction: playerRoundActions.get(p.id) || undefined,
   }));
-
-  const dotColors = ['bg-amber-400', 'bg-blue-400', 'bg-pink-400', 'bg-emerald-400', 'bg-purple-400', 'bg-orange-400'];
 
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col">
@@ -475,47 +479,6 @@ export default function DisplayScreen() {
               </div>
               <p className="text-xs text-gray-400">掃碼加入遊戲</p>
               <p className="font-mono text-2xl font-bold text-yellow-300 tracking-[0.3em]">{gameState.roomId}</p>
-            </div>
-
-            {/* 玩家名單 */}
-            <div className="space-y-2">
-              <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider px-1">
-                參與者 {gameState.players.length} 人
-              </p>
-              {[...gameState.players]
-                .sort((a, b) => b.monthlyCashflow - a.monthlyCashflow)
-                .map((p, i) => {
-                  const cfColor = p.monthlyCashflow >= 0 ? 'text-emerald-400' : 'text-red-400';
-                  const hpColor = p.stats.health >= 60 ? 'text-green-400' : p.stats.health >= 30 ? 'text-yellow-400' : 'text-red-400';
-                  const isTurn = p.id === gameState.currentPlayerTurnId;
-                  return (
-                    <div key={p.id} className={`rounded-xl px-3 py-2 ${isTurn ? 'bg-emerald-900/40 border border-emerald-700' : 'bg-gray-900'} ${p.isAlive ? '' : 'opacity-40'}`}>
-                      <div className="flex items-center gap-2">
-                        <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${dotColors[i % 6]}`} />
-                        <span className={`text-sm font-semibold ${p.isAlive ? 'text-white' : 'line-through text-gray-500'} truncate flex-1`}>
-                          {p.name}
-                        </span>
-                        <span className="text-xs text-yellow-300 font-mono flex-shrink-0">
-                          {Math.floor(gameState.currentAge + ((p.startAge ?? 20) - 20))}歲
-                        </span>
-                        {isTurn && <span className="text-xs text-emerald-300 flex-shrink-0">行動中</span>}
-                      </div>
-                      <div className="flex items-center gap-3 mt-1 text-xs pl-4">
-                        <span className={`font-mono font-bold ${cfColor}`}>${fmt(p.monthlyCashflow)}/月</span>
-                        <span className={hpColor}>HP {p.stats.health}</span>
-                        {p.isInFastTrack && <span className="text-emerald-400">外圈</span>}
-                        {p.isBedridden && <span className="text-orange-400">臥床</span>}
-                        {p.isMarried && <span className="text-pink-400">已婚</span>}
-                        {!p.isAlive && <span className="text-gray-500">結束</span>}
-                      </div>
-                      {playerRoundActions.get(p.id) && (
-                        <p className="text-xs text-sky-400 italic pl-4 mt-0.5 truncate">
-                          {playerRoundActions.get(p.id)}
-                        </p>
-                      )}
-                    </div>
-                  );
-                })}
             </div>
 
             {/* 競標面板 */}

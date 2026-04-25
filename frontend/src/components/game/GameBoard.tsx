@@ -13,6 +13,13 @@ export interface BoardPlayer {
   isMe: boolean;
   colorIndex: number;
   isBedridden?: boolean;
+  /** 額外資訊：用於棋盤中央資訊面板顯示（DisplayScreen 用） */
+  health?: number;
+  monthlyCashflow?: number;
+  age?: number;
+  isAlive?: boolean;
+  isMarried?: boolean;
+  roundAction?: string;
 }
 
 interface GameBoardProps {
@@ -187,27 +194,68 @@ export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
           });
         })()}
 
-        {/* ══ 玩家清單（底部半透明浮層）══ */}
+        {/* ══ 玩家資訊面板（棋盤中央偏左，取代側欄玩家列）══ */}
         {players.length > 0 && (
           <div className="board-player-list">
-            {players.map((p) => (
-              <div key={p.id} className={`board-player-item${p.isMe ? ' is-me' : ''}`}>
-                <div
-                  className="board-player-dot"
-                  style={{ backgroundColor: PLAYER_COLORS[p.colorIndex % 6] }}
-                />
-                <span className="board-player-name">
-                  {p.name}
-                  {p.id === currentTurnPlayerId && ' ▶'}
-                  {p.isBedridden && ' 🛏'}
-                </span>
-                <span className="board-player-pos">
-                  {p.isInFastTrack
-                    ? `FT#${p.fastTrackPosition % 16}`
-                    : `#${p.position % 25}`}
-                </span>
-              </div>
-            ))}
+            <div className="board-player-list-title">
+              👥 參與者 {players.filter((p) => p.isAlive !== false).length} 人
+            </div>
+            {[...players]
+              .sort((a, b) => (b.monthlyCashflow ?? 0) - (a.monthlyCashflow ?? 0))
+              .map((p) => {
+                const isTurn = p.id === currentTurnPlayerId;
+                const cf = p.monthlyCashflow;
+                const cfColor = cf === undefined
+                  ? '#888'
+                  : cf >= 0 ? '#34d399' : '#f87171';
+                const hp = p.health;
+                const hpColor = hp === undefined
+                  ? '#888'
+                  : hp >= 60 ? '#86efac' : hp >= 30 ? '#fde047' : '#fca5a5';
+                const dead = p.isAlive === false;
+                return (
+                  <div
+                    key={p.id}
+                    className={`board-player-item${p.isMe ? ' is-me' : ''}${isTurn ? ' is-turn' : ''}${dead ? ' is-dead' : ''}`}
+                  >
+                    <div className="board-player-row-1">
+                      <div
+                        className="board-player-dot"
+                        style={{ backgroundColor: PLAYER_COLORS[p.colorIndex % 6] }}
+                      />
+                      <span className="board-player-name">
+                        {p.name}
+                        {isTurn && ' ▶'}
+                        {p.isBedridden && ' 🛏'}
+                        {p.isMarried && ' 💍'}
+                      </span>
+                      {p.age !== undefined && (
+                        <span className="board-player-age">{p.age}歲</span>
+                      )}
+                    </div>
+                    <div className="board-player-row-2">
+                      {cf !== undefined && (
+                        <span className="board-player-cf" style={{ color: cfColor }}>
+                          ${cf >= 0 ? '+' : ''}{cf.toLocaleString()}
+                        </span>
+                      )}
+                      {hp !== undefined && (
+                        <span className="board-player-hp" style={{ color: hpColor }}>
+                          HP {hp}
+                        </span>
+                      )}
+                      <span className="board-player-pos">
+                        {p.isInFastTrack
+                          ? `外圈#${p.fastTrackPosition % 16}`
+                          : `#${p.position % 25}`}
+                      </span>
+                    </div>
+                    {p.roundAction && (
+                      <div className="board-player-action">→ {p.roundAction}</div>
+                    )}
+                  </div>
+                );
+              })}
           </div>
         )}
       </div>
