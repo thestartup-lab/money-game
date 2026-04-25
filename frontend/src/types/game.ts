@@ -114,6 +114,8 @@ export interface Player {
   visitedDestinations: string[];
   legacyBonusPoints: number;
   pre20Done: boolean;
+  /** 玩家是否目前斷線中（重連保留資料 10 分鐘） */
+  isDisconnected: boolean;
   /** 本發薪日剩餘選擇性活動次數（自由行程職業為 Infinity）*/
   actionTokensThisPayday: number;
   /** 是否為自由行程職業（B/I 象限及無底薪業務）*/
