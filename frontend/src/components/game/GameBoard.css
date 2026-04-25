@@ -77,10 +77,9 @@
 /* ── 玩家資訊面板（棋盤左中央，指南針/卷軸裝飾區域）─────────── */
 .board-player-list {
   position: absolute;
-  /* 對應棋盤左中央的裝飾區域（指南針/古地圖位置） */
-  left: 0.5%;
-  top: 50%;
-  transform: translateY(-50%);
+  /* 棋盤右下角 */
+  right: 0.5%;
+  bottom: 0.5%;
   background: linear-gradient(135deg, rgba(40, 25, 15, 0.82), rgba(20, 15, 10, 0.88));
   backdrop-filter: blur(8px);
   border: 1.5px solid rgba(180, 140, 70, 0.5);
@@ -91,8 +90,8 @@
   gap: 6px;
   width: 13%;
   min-width: 150px;
-  max-width: 200px;
-  max-height: 90%;
+  max-width: 220px;
+  max-height: 60%;
   overflow-y: auto;
   z-index: 10;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 220, 150, 0.1);
