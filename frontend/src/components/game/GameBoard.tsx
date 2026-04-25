@@ -194,70 +194,79 @@ export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
           });
         })()}
 
-        {/* ══ 玩家資訊面板（棋盤中央偏左，取代側欄玩家列）══ */}
-        {players.length > 0 && (
-          <div className="board-player-list">
-            <div className="board-player-list-title">
-              👥 參與者 {players.filter((p) => p.isAlive !== false).length} 人
-            </div>
-            {[...players]
-              .sort((a, b) => (b.monthlyCashflow ?? 0) - (a.monthlyCashflow ?? 0))
-              .map((p) => {
-                const isTurn = p.id === currentTurnPlayerId;
-                const cf = p.monthlyCashflow;
-                const cfColor = cf === undefined
-                  ? '#888'
-                  : cf >= 0 ? '#34d399' : '#f87171';
-                const hp = p.health;
-                const hpColor = hp === undefined
-                  ? '#888'
-                  : hp >= 60 ? '#86efac' : hp >= 30 ? '#fde047' : '#fca5a5';
-                const dead = p.isAlive === false;
-                return (
+        {/* ══ 當前回合玩家資訊大卡（右下角）══ */}
+        {(() => {
+          const activePlayer = players.find((p) => p.id === currentTurnPlayerId)
+            ?? players.find((p) => p.isAlive !== false);
+          if (!activePlayer) return null;
+
+          const p = activePlayer;
+          const cf = p.monthlyCashflow;
+          const cfColor = cf === undefined
+            ? '#888'
+            : cf >= 0 ? '#34d399' : '#f87171';
+          const hp = p.health;
+          const hpColor = hp === undefined
+            ? '#888'
+            : hp >= 60 ? '#86efac' : hp >= 30 ? '#fde047' : '#fca5a5';
+          const dead = p.isAlive === false;
+
+          return (
+            <div className={`board-player-list${dead ? ' is-dead' : ''}`}>
+              <div className="board-player-list-title">▶ 當前回合</div>
+              <div className="board-player-card">
+                <div className="board-player-card-header">
                   <div
-                    key={p.id}
-                    className={`board-player-item${p.isMe ? ' is-me' : ''}${isTurn ? ' is-turn' : ''}${dead ? ' is-dead' : ''}`}
-                  >
-                    <div className="board-player-row-1">
-                      <div
-                        className="board-player-dot"
-                        style={{ backgroundColor: PLAYER_COLORS[p.colorIndex % 6] }}
-                      />
-                      <span className="board-player-name">
-                        {p.name}
-                        {isTurn && ' ▶'}
-                        {p.isBedridden && ' 🛏'}
-                        {p.isMarried && ' 💍'}
-                      </span>
-                      {p.age !== undefined && (
-                        <span className="board-player-age">{p.age}歲</span>
-                      )}
+                    className="board-player-dot-big"
+                    style={{ backgroundColor: PLAYER_COLORS[p.colorIndex % 6] }}
+                  />
+                  <span className="board-player-name-big">{p.name}</span>
+                  {p.age !== undefined && (
+                    <span className="board-player-age-big">{p.age}歲</span>
+                  )}
+                </div>
+
+                <div className="board-player-stats-grid">
+                  {cf !== undefined && (
+                    <div className="board-player-stat">
+                      <div className="board-player-stat-label">月現金流</div>
+                      <div className="board-player-stat-value" style={{ color: cfColor }}>
+                        ${cf >= 0 ? '+' : ''}{cf.toLocaleString()}
+                      </div>
                     </div>
-                    <div className="board-player-row-2">
-                      {cf !== undefined && (
-                        <span className="board-player-cf" style={{ color: cfColor }}>
-                          ${cf >= 0 ? '+' : ''}{cf.toLocaleString()}
-                        </span>
-                      )}
-                      {hp !== undefined && (
-                        <span className="board-player-hp" style={{ color: hpColor }}>
-                          HP {hp}
-                        </span>
-                      )}
-                      <span className="board-player-pos">
-                        {p.isInFastTrack
-                          ? `外圈#${p.fastTrackPosition % 16}`
-                          : `#${p.position % 25}`}
-                      </span>
+                  )}
+                  {hp !== undefined && (
+                    <div className="board-player-stat">
+                      <div className="board-player-stat-label">健康 HP</div>
+                      <div className="board-player-stat-value" style={{ color: hpColor }}>
+                        {hp}
+                      </div>
                     </div>
-                    {p.roundAction && (
-                      <div className="board-player-action">→ {p.roundAction}</div>
-                    )}
+                  )}
+                  <div className="board-player-stat">
+                    <div className="board-player-stat-label">所在位置</div>
+                    <div className="board-player-stat-value board-player-pos-value">
+                      {p.isInFastTrack
+                        ? `外圈 #${p.fastTrackPosition % 16}`
+                        : `內圈 #${p.position % 25}`}
+                    </div>
                   </div>
-                );
-              })}
-          </div>
-        )}
+                </div>
+
+                <div className="board-player-tags">
+                  {p.isBedridden && <span className="board-player-tag tag-warn">🛏 臥床</span>}
+                  {p.isMarried && <span className="board-player-tag tag-pink">💍 已婚</span>}
+                  {p.isInFastTrack && <span className="board-player-tag tag-emerald">🚀 外圈</span>}
+                  {dead && <span className="board-player-tag tag-dead">⚰ 結束</span>}
+                </div>
+
+                {p.roundAction && (
+                  <div className="board-player-action-big">→ {p.roundAction}</div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

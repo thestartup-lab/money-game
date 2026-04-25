@@ -74,151 +74,182 @@
   text-align: center;
 }
 
-/* ── 玩家資訊面板（棋盤左中央，指南針/卷軸裝飾區域）─────────── */
+/* ── 當前回合玩家大卡（棋盤右下角）──────────────────────── */
 .board-player-list {
   position: absolute;
-  /* 棋盤右下角 */
-  right: 0.5%;
-  bottom: 0.5%;
-  background: linear-gradient(135deg, rgba(40, 25, 15, 0.82), rgba(20, 15, 10, 0.88));
-  backdrop-filter: blur(8px);
-  border: 1.5px solid rgba(180, 140, 70, 0.5);
-  border-radius: 14px;
-  padding: 10px 12px;
+  right: 1%;
+  bottom: 1%;
+  background: linear-gradient(135deg, rgba(40, 25, 15, 0.92), rgba(20, 15, 10, 0.95));
+  backdrop-filter: blur(10px);
+  border: 2.5px solid rgba(220, 170, 80, 0.7);
+  border-radius: 18px;
+  padding: 16px 20px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  width: 13%;
-  min-width: 150px;
-  max-width: 220px;
-  max-height: 60%;
-  overflow-y: auto;
+  gap: 12px;
+  width: 26%;
+  min-width: 280px;
+  max-width: 380px;
   z-index: 10;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 220, 150, 0.1);
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.7),
+    inset 0 1px 0 rgba(255, 220, 150, 0.15),
+    0 0 25px rgba(220, 170, 80, 0.25);
+}
+
+.board-player-list.is-dead {
+  opacity: 0.5;
 }
 
 .board-player-list-title {
   font-family: 'Noto Sans TC', sans-serif;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 700;
-  color: rgba(220, 180, 100, 0.9);
+  color: rgba(252, 211, 77, 1);
   text-align: center;
-  letter-spacing: 0.05em;
-  padding-bottom: 4px;
-  border-bottom: 1px solid rgba(180, 140, 70, 0.3);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  letter-spacing: 0.15em;
+  padding-bottom: 8px;
+  border-bottom: 1.5px solid rgba(220, 170, 80, 0.45);
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.95);
 }
 
-.board-player-item {
+.board-player-card {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 4px 6px;
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.25);
-  border: 1px solid transparent;
-  transition: all 0.2s;
+  gap: 12px;
 }
 
-.board-player-item.is-turn {
-  background: rgba(16, 185, 129, 0.18);
-  border-color: rgba(52, 211, 153, 0.6);
-  box-shadow: 0 0 8px rgba(52, 211, 153, 0.3);
-}
-
-.board-player-item.is-dead {
-  opacity: 0.4;
-}
-
-.board-player-row-1 {
+.board-player-card-header {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 12px;
 }
 
-.board-player-row-2 {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10px;
-  font-family: 'Noto Sans TC', sans-serif;
-  padding-left: 14px;
-  flex-wrap: wrap;
-}
-
-.board-player-action {
-  font-size: 10px;
-  color: rgba(125, 211, 252, 0.85);
-  padding-left: 14px;
-  font-style: italic;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
-}
-
-.board-player-dot {
-  width: 9px;
-  height: 9px;
+.board-player-dot-big {
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   flex-shrink: 0;
-  border: 1.5px solid rgba(255, 255, 255, 0.5);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  border: 3px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.7), 0 0 12px rgba(255, 255, 255, 0.2);
 }
 
-.board-player-name {
+.board-player-name-big {
   font-family: 'Noto Sans TC', sans-serif;
-  font-size: 12px;
-  font-weight: 600;
-  color: rgba(245, 230, 190, 0.95);
+  font-size: 26px;
+  font-weight: 800;
+  color: #fde68a;
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 1), 0 0 12px rgba(252, 211, 77, 0.3);
+  letter-spacing: 0.05em;
+}
+
+.board-player-age-big {
+  font-family: 'Courier New', monospace;
+  font-size: 18px;
+  font-weight: 700;
+  color: rgba(252, 211, 77, 1);
+  flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 3px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(220, 170, 80, 0.5);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
 }
 
-.board-player-age {
-  font-family: monospace;
-  font-size: 10px;
-  color: rgba(252, 211, 77, 0.9);
-  flex-shrink: 0;
+.board-player-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
 }
 
-.board-player-item.is-me .board-player-name {
-  color: #fde68a;
-  font-weight: 700;
+.board-player-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 6px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(180, 140, 70, 0.3);
+  border-radius: 10px;
 }
 
-.board-player-cf {
-  font-family: monospace;
-  font-weight: 700;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
-}
-
-.board-player-hp {
-  font-family: monospace;
-  font-weight: 600;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
-}
-
-.board-player-pos {
+.board-player-stat-label {
   font-family: 'Noto Sans TC', sans-serif;
-  font-size: 10px;
-  font-weight: 700;
-  color: rgba(180, 150, 80, 0.95);
-  margin-left: auto;
+  font-size: 11px;
+  color: rgba(220, 200, 160, 0.75);
+  letter-spacing: 0.05em;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
-/* 滾動條樣式 */
-.board-player-list::-webkit-scrollbar {
-  width: 4px;
+.board-player-stat-value {
+  font-family: 'Courier New', monospace;
+  font-size: 18px;
+  font-weight: 800;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 1);
+  white-space: nowrap;
 }
-.board-player-list::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 2px;
+
+.board-player-pos-value {
+  font-family: 'Noto Sans TC', sans-serif;
+  font-size: 15px;
+  color: rgba(252, 211, 77, 1);
 }
-.board-player-list::-webkit-scrollbar-thumb {
-  background: rgba(180, 140, 70, 0.4);
-  border-radius: 2px;
+
+.board-player-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+
+.board-player-tag {
+  font-family: 'Noto Sans TC', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+.tag-warn {
+  background: rgba(249, 115, 22, 0.25);
+  color: #fdba74;
+  border: 1px solid rgba(251, 146, 60, 0.5);
+}
+
+.tag-pink {
+  background: rgba(236, 72, 153, 0.22);
+  color: #f9a8d4;
+  border: 1px solid rgba(244, 114, 182, 0.5);
+}
+
+.tag-emerald {
+  background: rgba(16, 185, 129, 0.22);
+  color: #6ee7b7;
+  border: 1px solid rgba(52, 211, 153, 0.5);
+}
+
+.tag-dead {
+  background: rgba(120, 120, 120, 0.3);
+  color: #d1d5db;
+  border: 1px solid rgba(156, 163, 175, 0.5);
+}
+
+.board-player-action-big {
+  font-family: 'Noto Sans TC', sans-serif;
+  font-size: 14px;
+  color: #7dd3fc;
+  font-style: italic;
+  text-align: center;
+  padding: 8px 10px;
+  background: rgba(14, 165, 233, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 10px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
 }
 
 /* ── 響應式 ──────────────────────────────────────────────── */
