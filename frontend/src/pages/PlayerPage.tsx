@@ -3,6 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import type { GameState, Player, PlayerAnalysis, ActiveEvent, PaydayFormData, PaydayPlanPayload, LifeChoice } from '../types/game';
 import FinancialStatement from '../components/game/FinancialStatement';
 import DiceRoller from '../components/game/DiceRoller';
+import DiceRollOverlay, { type DiceRollData } from '../components/game/DiceRollOverlay';
 import ActionPanel from '../components/game/ActionPanel';
 import AnalysisPage from './AnalysisPage';
 import EventCard from '../components/game/EventCard';
@@ -51,6 +52,7 @@ export default function PlayerPage() {
   const [notifications, setNotifications] = useState<string[]>([]);
   const [lastRoll, setLastRoll] = useState<{ rolled: number; newPosition: number } | undefined>();
   const [rollingLocked, setRollingLocked] = useState(false);
+  const [diceAnim, setDiceAnim] = useState<DiceRollData | null>(null);
 
   // 互動機制 state
   type CongratulatableEvent = { targetId: string; targetName: string; event: string };
@@ -181,6 +183,11 @@ export default function PlayerPage() {
     s.on('rollResult', (p: { rolled: number; newPosition: number }) => {
       setLastRoll(p);
       setRollingLocked(false);
+    });
+    s.on('playerRolled', (p: { playerId: string; playerName: string; colorIndex: number; dice: number[]; total: number; oldPosition: number; newPosition: number }) => {
+      // 只為自己播放動畫，避免他人擲骰時干擾自己手機畫面
+      if (p.playerId !== s.id) return;
+      setDiceAnim({ ...p, key: Date.now() });
     });
     s.on('paydayPlanningRequired', (p: PaydayFormData) => {
       setPaydayForm(p);
@@ -808,7 +815,14 @@ export default function PlayerPage() {
     const notifCount = notifications.length;
 
     return (
-      <div className="min-h-screen bg-gray-900 flex flex-col max-w-lg mx-auto">
+      <div className="min-h-screen bg-gray-900 flex flex-col max-w-lg mx-auto relative">
+
+        {/* ── 擲骰動畫 overlay（自己擲骰時播放） ── */}
+        {diceAnim && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center pointer-events-none">
+            <DiceRollOverlay data={diceAnim} onDone={() => setDiceAnim(null)} size="small" />
+          </div>
+        )}
 
         {/* ── 發薪日全螢幕表單（最高層） ── */}
         {paydayForm && myPlayer && (

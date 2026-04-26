@@ -637,12 +637,18 @@ io.on('connection', (socket: Socket) => {
       const diceCount = (baseDice + player.bonusDice) as 1 | 2 | 3;
       player.bonusDice = 0;
 
-      const rolled = rollDice(diceCount > 2 ? 2 : diceCount);
+      // 直接在伺服器產生個別骰面，方便前端做翻滾動畫
+      const actualDiceCount = diceCount > 2 ? 2 : diceCount;
+      const diceFaces: number[] = [];
+      for (let i = 0; i < actualDiceCount; i++) {
+        diceFaces.push(Math.floor(Math.random() * 6) + 1);
+      }
+      const rolled = diceFaces.reduce((a, b) => a + b, 0);
       const oldPos = player.currentPosition;
       const { passedPaydays, requiresPaydayPlanning } = movePlayer(player, rolled);
 
       console.log(
-        `[playerRoll] ${player.name}（${roomId}）擲出 ${rolled}，` +
+        `[playerRoll] ${player.name}（${roomId}）擲出 ${rolled}（${diceFaces.join('+')}），` +
           `移動至位置 ${player.currentPosition}，` +
           `路過發薪日：${passedPaydays.length > 0 ? passedPaydays.join(', ') : '無'}`
       );
@@ -652,6 +658,18 @@ io.on('connection', (socket: Socket) => {
         rolled,
         newPosition: player.currentPosition,
         passedPaydays,
+      });
+
+      // 廣播給整個房間（含 DisplayScreen），讓大螢幕播放骰子動畫
+      const playerColorIndex = gs.playerOrder.indexOf(player.id);
+      emitToRoom(roomId, 'playerRolled', {
+        playerId: player.id,
+        playerName: player.name,
+        colorIndex: (playerColorIndex >= 0 ? playerColorIndex : 0) % 6,
+        dice: diceFaces,
+        total: rolled,
+        oldPosition: oldPos,
+        newPosition: player.currentPosition,
       });
 
       // --- 3–4. 每個發薪日：暫停時鐘 → 全員規劃 → 發薪 → 繳稅 ---

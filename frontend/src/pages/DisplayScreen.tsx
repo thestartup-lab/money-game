@@ -7,6 +7,7 @@ import { GameBoard } from '../components/game/GameBoard';
 import type { BoardPlayer } from '../components/game/GameBoard';
 import IntroSheet from '../components/game/IntroSheet';
 import DecisionHistoryView from '../components/analysis/DecisionHistoryView';
+import DiceRollOverlay, { type DiceRollData } from '../components/game/DiceRollOverlay';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
@@ -76,6 +77,7 @@ export default function DisplayScreen() {
   const [auctionPanel, setAuctionPanel] = useState<AuctionPanel | null>(null);
   const auctionCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [diceAnim, setDiceAnim] = useState<DiceRollData | null>(null);
 
   const addTicker = (msg: string) => setTicker((prev) => [msg, ...prev].slice(0, 6));
 
@@ -165,6 +167,15 @@ export default function DisplayScreen() {
       setPlayerRoundActions((prev) => {
         const next = new Map(prev);
         next.set(p.playerId, `前往「${p.destinationName ?? '旅遊地'}」體驗 +${p.lifeExperienceGained}`);
+        return next;
+      });
+    });
+
+    s.on('playerRolled', (p: { playerId: string; playerName: string; colorIndex: number; dice: number[]; total: number; oldPosition: number; newPosition: number }) => {
+      setDiceAnim({ ...p, key: Date.now() });
+      setPlayerRoundActions((prev) => {
+        const next = new Map(prev);
+        next.set(p.playerId, `擲出 ${p.total} 點，移動至 ${p.newPosition}`);
         return next;
       });
     });
@@ -520,6 +531,9 @@ export default function DisplayScreen() {
             style={{ maxHeight: 'calc(100vh - 90px)' }}
           >
             <GameBoard players={boardPlayers} currentTurnPlayerId={gameState.currentPlayerTurnId} />
+
+            {/* 擲骰動畫 overlay */}
+            <DiceRollOverlay data={diceAnim} onDone={() => setDiceAnim(null)} size="large" />
 
             {/* 發薪日決策小卡 overlay */}
             {showPaydayOverlay && paydayCards.size > 0 && (
