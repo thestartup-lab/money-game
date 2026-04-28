@@ -78,6 +78,10 @@ export default function DisplayScreen() {
   const auctionCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [diceAnim, setDiceAnim] = useState<DiceRollData | null>(null);
+  // 骰子動畫期間：鎖定該玩家位置在 oldPosition、暫存 centerEvent，等動畫結束才釋放
+  const diceAnimRef = useRef<DiceRollData | null>(null);
+  const pendingCenterEventsRef = useRef<{ evt: CellEvent; autoDismissMs?: number }[]>([]);
+  const [positionOverride, setPositionOverride] = useState<Map<string, number>>(new Map());
 
   const addTicker = (msg: string) => setTicker((prev) => [msg, ...prev].slice(0, 6));
 
@@ -172,7 +176,15 @@ export default function DisplayScreen() {
     });
 
     s.on('playerRolled', (p: { playerId: string; playerName: string; colorIndex: number; dice: number[]; total: number; oldPosition: number; newPosition: number }) => {
-      setDiceAnim({ ...p, key: Date.now() });
+      const data = { ...p, key: Date.now() };
+      setDiceAnim(data);
+      diceAnimRef.current = data;
+      // 動畫期間先把該玩家位置鎖回 oldPosition，等骰子停才實際移動
+      setPositionOverride((prev) => {
+        const next = new Map(prev);
+        next.set(p.playerId, p.oldPosition);
+        return next;
+      });
       setPlayerRoundActions((prev) => {
         const next = new Map(prev);
         next.set(p.playerId, `擲出 ${p.total} 點，移動至 ${p.newPosition}`);
@@ -181,6 +193,11 @@ export default function DisplayScreen() {
     });
 
     const showCenterEvent = (evt: CellEvent, autoDismissMs?: number) => {
+      // 若骰子動畫還在播，先暫存，等 onDone 時再依序顯示
+      if (diceAnimRef.current) {
+        pendingCenterEventsRef.current.push({ evt, autoDismissMs });
+        return;
+      }
       setCenterEvent(evt);
       if (centerEventTimer.current) clearTimeout(centerEventTimer.current);
       if (autoDismissMs) {
@@ -371,7 +388,8 @@ export default function DisplayScreen() {
   const boardPlayers: BoardPlayer[] = gameState.players.map((p, i) => ({
     id: p.id,
     name: p.name,
-    position: p.currentPosition,
+    // 骰子動畫期間，鎖定在 oldPosition；動畫結束後才更新為實際 currentPosition
+    position: positionOverride.get(p.id) ?? p.currentPosition,
     fastTrackPosition: p.fastTrackPosition ?? 0,
     isInFastTrack: p.isInFastTrack ?? false,
     isMe: false,
@@ -533,7 +551,37 @@ export default function DisplayScreen() {
             <GameBoard players={boardPlayers} currentTurnPlayerId={gameState.currentPlayerTurnId} />
 
             {/* 擲骰動畫 overlay */}
-            <DiceRollOverlay data={diceAnim} onDone={() => setDiceAnim(null)} size="large" />
+            <DiceRollOverlay
+              data={diceAnim}
+              size="large"
+              onDone={() => {
+                const finished = diceAnimRef.current;
+                diceAnimRef.current = null;
+                setDiceAnim(null);
+                // 釋放位置鎖：玩家現在才「實際移動」到新格子
+                if (finished) {
+                  setPositionOverride((prev) => {
+                    const next = new Map(prev);
+                    next.delete(finished.playerId);
+                    return next;
+                  });
+                }
+                // 依序播放暫存的事件（同一個 cell 通常只會有 1 個，取最後一個避免堆疊）
+                const pending = pendingCenterEventsRef.current;
+                pendingCenterEventsRef.current = [];
+                if (pending.length > 0) {
+                  // 留 0.4 秒讓玩家視線從骰子移回中央，再彈出事件
+                  setTimeout(() => {
+                    const last = pending[pending.length - 1];
+                    setCenterEvent(last.evt);
+                    if (centerEventTimer.current) clearTimeout(centerEventTimer.current);
+                    if (last.autoDismissMs) {
+                      centerEventTimer.current = setTimeout(() => setCenterEvent(null), last.autoDismissMs);
+                    }
+                  }, 400);
+                }
+              }}
+            />
 
             {/* 發薪日決策小卡 overlay */}
             {showPaydayOverlay && paydayCards.size > 0 && (

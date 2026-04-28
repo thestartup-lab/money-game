@@ -4,14 +4,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 45;
+  z-index: 55;
   animation: dice-overlay-in 0.25s ease-out;
-}
-
-/* 大螢幕：骰子靠上方，避免與置中的 centerEvent / paydayOverlay 重疊 */
-.dice-overlay-root.size-large {
-  align-items: flex-start;
-  padding-top: 24px;
 }
 
 .dice-overlay-root.phase-fade {
@@ -40,7 +34,7 @@
   backdrop-filter: blur(8px);
 }
 
-.size-large .dice-overlay-card { padding: 20px 36px; gap: 14px; }
+.size-large .dice-overlay-card { padding: 40px 64px; gap: 28px; }
 .size-small .dice-overlay-card { padding: 14px 18px; gap: 10px; border-width: 2px; border-radius: 16px; }
 
 .dice-overlay-name {
@@ -51,7 +45,7 @@
   letter-spacing: 0.05em;
 }
 
-.size-large .dice-overlay-name { font-size: 22px; }
+.size-large .dice-overlay-name { font-size: 32px; }
 .size-small .dice-overlay-name { font-size: 14px; }
 
 .dice-overlay-dot {
@@ -85,7 +79,7 @@
   transition: transform 0.18s ease-out;
 }
 
-.size-large .die { width: 80px; height: 80px; }
+.size-large .die { width: 130px; height: 130px; }
 .size-small .die { width: 48px; height: 48px; border-radius: 10px; }
 
 .die-tumble {
@@ -129,7 +123,7 @@
   justify-self: center;
 }
 
-.size-large .die-pip { width: 14px; height: 14px; }
+.size-large .die-pip { width: 22px; height: 22px; }
 .size-small .die-pip { width: 8px; height: 8px; }
 
 .dice-overlay-total {
@@ -142,7 +136,7 @@
   min-height: 1em;
 }
 
-.size-large .dice-overlay-total { font-size: 28px; }
+.size-large .dice-overlay-total { font-size: 42px; }
 .size-small .dice-overlay-total { font-size: 18px; }
 
 .dice-overlay-total.is-revealed {
