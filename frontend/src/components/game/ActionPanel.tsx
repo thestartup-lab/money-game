@@ -127,7 +127,15 @@ export default function ActionPanel({
 
   const loanLimit = getLoanLimit(player.creditScore);
   const loanRate = getLoanRate(player.creditScore);
-  const existingLoanTotal = player.liabilities?.reduce((s, l) => s + l.totalDebt, 0) ?? 0;
+  // 只計算「無擔保負債」（不含房貸、加盟貸款等資產綁定的 secured debt）
+  const securedLiabilityIds = new Set(
+    (player.assets ?? [])
+      .map((a) => a.linkedLiabilityId)
+      .filter((id): id is string => Boolean(id))
+  );
+  const existingLoanTotal = (player.liabilities ?? [])
+    .filter((l) => !securedLiabilityIds.has(l.id))
+    .reduce((s, l) => s + l.totalDebt, 0);
   const availableLoan = Math.max(0, loanLimit - existingLoanTotal);
 
   const dcaPortfolioValue = player.assets?.find((a) => a.id === 'stock-dca')?.currentValue ?? 0;
@@ -344,8 +352,8 @@ export default function ActionPanel({
           {showLoanPanel ? (
             <div className="space-y-2">
               <div className="flex justify-between text-xs text-gray-400 mb-1">
-                <span>可借上限：${fmt(availableLoan)}</span>
-                <span>現有負債：${fmt(existingLoanTotal)}</span>
+                <span>可借：${fmt(availableLoan)}</span>
+                <span title="不含房貸與事業貸款等已用資產做擔保的負債">無擔保負債：${fmt(existingLoanTotal)}</span>
               </div>
               {availableLoan <= 0 ? (
                 <p className="text-xs text-red-400 text-center py-2">已達借款上限，無法再借</p>
@@ -396,8 +404,8 @@ export default function ActionPanel({
                 專為投資資產設計：享八折利率、不扣信用值。請輸入打算購買的資產名稱備註。
               </p>
               <div className="flex justify-between text-xs text-gray-400 mb-1">
-                <span>可借上限：${fmt(availableLoan)}</span>
-                <span>現有負債：${fmt(existingLoanTotal)}</span>
+                <span>可借：${fmt(availableLoan)}</span>
+                <span title="不含房貸與事業貸款等已用資產做擔保的負債">無擔保負債：${fmt(existingLoanTotal)}</span>
               </div>
               <input
                 type="text"

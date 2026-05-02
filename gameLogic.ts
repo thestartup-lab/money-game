@@ -484,6 +484,30 @@ export interface LoanResult {
 // ── 應急借款 ──────────────────────────────────────────────
 
 /**
+ * 計算玩家「無擔保負債」總額（房貸、加盟貸款等資產綁定負債不計入）。
+ *
+ * 銀行邏輯：mortgage / 事業貸款 由資產做擔保，不會吃個人信用額度。
+ * 只有應急借款、進修貸款、P2P、投資槓桿借款等 unsecured debt 才會壓縮可借空間。
+ */
+export function getUnsecuredLiabilityTotal(player: Player): number {
+  const securedIds = new Set(
+    player.assets
+      .map((a) => a.linkedLiabilityId)
+      .filter((id): id is string => Boolean(id))
+  );
+  return player.liabilities
+    .filter((l) => !securedIds.has(l.id))
+    .reduce((sum, l) => sum + l.totalDebt, 0);
+}
+
+/**
+ * 計算玩家目前還能借多少（信用上限 - 無擔保負債）。
+ */
+export function getAvailableLoan(player: Player): number {
+  return Math.max(0, getLoanLimit(player.creditScore) - getUnsecuredLiabilityTotal(player));
+}
+
+/**
  * 向銀行申請應急借款。
  * - 月利率與上限依玩家當前信用值決定
  * - 借款後信用值 -50
@@ -492,9 +516,14 @@ export function takeEmergencyLoan(player: Player, amount: number): LoanResult {
   if (amount <= 0) {
     return { success: false, message: '借款金額必須大於 0。' };
   }
-  const limit = getLoanLimit(player.creditScore);
-  if (amount > limit) {
-    return { success: false, message: `借款金額 $${amount} 超過目前信用等級的上限 $${limit}。` };
+  const available = getAvailableLoan(player);
+  if (amount > available) {
+    const limit = getLoanLimit(player.creditScore);
+    const used = getUnsecuredLiabilityTotal(player);
+    return {
+      success: false,
+      message: `借款 $${amount.toLocaleString()} 超過目前可借上限 $${available.toLocaleString()}（信用上限 $${limit.toLocaleString()}，已用 $${used.toLocaleString()} 無擔保負債）。`,
+    };
   }
 
   const rate = getLoanRate(player.creditScore);
@@ -535,9 +564,14 @@ export function takeLeverageLoan(
   if (amount <= 0) {
     return { success: false, message: '借款金額必須大於 0。' };
   }
-  const limit = getLoanLimit(player.creditScore);
-  if (amount > limit) {
-    return { success: false, message: `借款金額 $${amount} 超過目前信用等級的上限 $${limit}。` };
+  const available = getAvailableLoan(player);
+  if (amount > available) {
+    const limit = getLoanLimit(player.creditScore);
+    const used = getUnsecuredLiabilityTotal(player);
+    return {
+      success: false,
+      message: `借款 $${amount.toLocaleString()} 超過可借上限 $${available.toLocaleString()}（信用上限 $${limit.toLocaleString()}，已用 $${used.toLocaleString()} 無擔保負債）。`,
+    };
   }
 
   const rate = getLoanRate(player.creditScore) * 0.8;

@@ -13,6 +13,7 @@ import {
   cancelInsurance,
   takeEmergencyLoan,
   takeLeverageLoan,
+  getAvailableLoan,
   repayLoan,
   InsuranceType,
   rollSocialClass,
@@ -2536,8 +2537,7 @@ async function handleLandingSquare(
         emitCellEvent(socket, roomId, player.name, 'FT 大交易', `💼 外圈大型投資機會：${deal.title}！`);
         pauseGameClock(gs);
         emitToRoom(roomId, 'gamePaused', { reason: '外圈大型交易', currentAge: Math.round(getCurrentAge(gs) * 10) / 10 });
-        const _ftExistingLoan = player.liabilities.reduce((s, l) => s + l.totalDebt, 0);
-        const _ftLoanAvailable = Math.max(0, getLoanLimit(player.creditScore) - _ftExistingLoan);
+        const _ftLoanAvailable = getAvailableLoan(player);
         socket.emit('fastTrackDealCard', {
           squareType: ftSqType,
           deal,
@@ -2909,9 +2909,8 @@ async function handleLandingSquare(
         downPayment: c.asset.downPayment ?? c.asset.cost,
         monthlyCashflow: c.asset.monthlyCashflow,
       }));
-      // 計算玩家當前可用「投資槓桿借款」額度（給前端決定是否提供「借款購買」選項）
-      const _existingLoanTotal = player.liabilities.reduce((s, l) => s + l.totalDebt, 0);
-      const _loanAvailable = Math.max(0, getLoanLimit(player.creditScore) - _existingLoanTotal);
+      // 計算玩家當前可用「投資槓桿借款」額度（只計算無擔保負債，房貸/事業貸款不計入）
+      const _loanAvailable = getAvailableLoan(player);
       socket.emit('dealCardsDrawn', {
         cards: cardsForClient,
         canPickTwo: drawCount > 1,
