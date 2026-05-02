@@ -705,12 +705,67 @@ export default function PlayerPage() {
               </button>
             </div>
 
-            {/* B / I 提示說明 */}
-            <div className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 space-y-1">
-              <p className="text-xs text-gray-400 font-semibold">B / I 象限說明（非初始選項）</p>
-              <p className="text-xs text-gray-500">B（企業主）：遊戲中現金達門檻後可申請加盟，或透過特殊事件創業取得。</p>
-              <p className="text-xs text-gray-500">I（投資者）：被動收入 ≥ 總支出時，自動達到 FastTrack 狀態。</p>
-            </div>
+            {/* B 象限卡片（門檻：學識≥5 + 資源≥5）*/}
+            {(() => {
+              const ac = myPlayer?.growthStats?.academic ?? 0;
+              const re = myPlayer?.growthStats?.resource ?? 0;
+              const meetsB = ac >= 5 && re >= 5;
+              return (
+                <div className={`card space-y-2 ${meetsB ? '' : 'opacity-60'}`}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold bg-amber-700 text-white px-2 py-0.5 rounded-full">B</span>
+                    <p className="text-sm font-semibold text-white">企業主（Business Owner）</p>
+                  </div>
+                  <p className="text-xs text-gray-400">起手即擁有事業資產與被動現金流。行程自由、薪資微薄，靠生意 cashflow 翻身。</p>
+                  <p className="text-xs text-gray-500">職業：餐廳老闆 或 加盟主（隨機分配，自帶 $750K–$1.2M 事業）</p>
+                  <p className={`text-xs font-semibold ${meetsB ? 'text-emerald-400' : 'text-red-400'}`}>
+                    門檻：學識 ≥ 5 且 資源 ≥ 5（你目前 學識={ac}、資源={re}）
+                  </p>
+                  <button
+                    className={`w-full font-bold py-2.5 rounded-xl transition-colors border ${
+                      meetsB
+                        ? 'bg-amber-800 hover:bg-amber-700 border-amber-600 text-white'
+                        : 'bg-gray-800 border-gray-700 text-gray-500 cursor-not-allowed'
+                    }`}
+                    disabled={!meetsB}
+                    onClick={() => { if (meetsB) { setError(''); emit('selectQuadrant', { quadrant: 'B' }); } }}
+                  >
+                    {meetsB ? '選擇 B 象限，隨機分配企業' : '門檻不足，無法選 B'}
+                  </button>
+                </div>
+              );
+            })()}
+
+            {/* I 象限卡片（門檻：學識≥7 + 資源≥7）*/}
+            {(() => {
+              const ac = myPlayer?.growthStats?.academic ?? 0;
+              const re = myPlayer?.growthStats?.resource ?? 0;
+              const meetsI = ac >= 7 && re >= 7;
+              return (
+                <div className={`card space-y-2 ${meetsI ? '' : 'opacity-60'}`}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold bg-emerald-700 text-white px-2 py-0.5 rounded-full">I</span>
+                    <p className="text-sm font-semibold text-white">投資者（Investor）</p>
+                  </div>
+                  <p className="text-xs text-gray-400">天使投資人：起始 FQ=5、$450K 股票投組、$7,500/月配息。月支出極低，最快達 FastTrack。</p>
+                  <p className="text-xs text-gray-500">起始現金僅 $3,000（資金已投入市場）</p>
+                  <p className={`text-xs font-semibold ${meetsI ? 'text-emerald-400' : 'text-red-400'}`}>
+                    門檻：學識 ≥ 7 且 資源 ≥ 7（你目前 學識={ac}、資源={re}）
+                  </p>
+                  <button
+                    className={`w-full font-bold py-2.5 rounded-xl transition-colors border ${
+                      meetsI
+                        ? 'bg-emerald-800 hover:bg-emerald-700 border-emerald-600 text-white'
+                        : 'bg-gray-800 border-gray-700 text-gray-500 cursor-not-allowed'
+                    }`}
+                    disabled={!meetsI}
+                    onClick={() => { if (meetsI) { setError(''); emit('selectQuadrant', { quadrant: 'I' }); } }}
+                  >
+                    {meetsI ? '選擇 I 象限，成為天使投資人' : '門檻不足，無法選 I'}
+                  </button>
+                </div>
+              );
+            })()}
 
             {error && <p className="text-red-400 text-sm text-center">{error}</p>}
           </div>

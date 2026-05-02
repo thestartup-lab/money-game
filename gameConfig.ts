@@ -1097,6 +1097,35 @@ export const S_PROFESSION_POOLS = {
   advanced: ['solo_lawyer', 'consultant', 'financial_advisor', 'counselor'],
 };
 
+/** B 象限職業池（Pre-20 直接選 B 象限時使用） */
+export const B_PROFESSION_POOLS = {
+  basic: ['restaurant_owner', 'franchise_owner'],
+};
+
+/** I 象限職業池（Pre-20 直接選 I 象限時使用） */
+export const I_PROFESSION_POOLS = {
+  basic: ['angel_investor'],
+};
+
+/**
+ * Pre-20 直接選擇 B / I 象限的門檻。
+ *
+ * 設計理念：B/I 象限自帶高價值起始資產（餐廳/加盟店/股票投組），
+ * 為了避免起手就過於強勢，需要 Pre-20 階段的成長點達到一定條件。
+ */
+export const QUADRANT_SELECT_THRESHOLDS: Record<'B' | 'I', { academicMin: number; resourceMin: number; description: string }> = {
+  B: {
+    academicMin: 5,
+    resourceMin: 5,
+    description: '學識 ≥ 5 且 資源 ≥ 5（具備經營知識與創業資金）',
+  },
+  I: {
+    academicMin: 7,
+    resourceMin: 7,
+    description: '學識 ≥ 7 且 資源 ≥ 7（具備金融專業與投資資本）',
+  },
+};
+
 /** 加盟主申請最低現金門檻 */
 export const FRANCHISE_CASH_THRESHOLD = 750_000;
 

@@ -681,7 +681,9 @@ export function applyGrowthStats(player: Player, growthStats: GrowthStats): void
   // 學識映射
   const academic = Math.min(10, Math.max(0, growthStats.academic));
   player.stats.careerSkill = academic * 8;
-  player.stats.financialIQ = academic >= 8 ? 3 : academic >= 5 ? 2 : 1;
+  // FQ 取「學識映射值」與「現有 FQ」的最大值，避免覆蓋 I 象限的 startingFQ=5
+  const academicFQ = academic >= 8 ? 3 : academic >= 5 ? 2 : 1;
+  player.stats.financialIQ = Math.max(player.stats.financialIQ, academicFQ);
 
   // 健康映射
   const health = Math.min(10, Math.max(0, growthStats.health));

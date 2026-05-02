@@ -79,6 +79,33 @@ export interface CareerChangeResult {
   previousProfession?: string;
   newProfession?: string;
   salaryChange?: number;   // 正值=加薪，負值=降薪
+  /** 轉到 B/I 象限時，自動買入起始資產所扣除的現金 */
+  assetCostPaid?: number;
+  /** 同步注入的 startingAssets 摘要 */
+  injectedAssets?: { name: string; cost: number; monthlyCashflow: number }[];
+  /** 轉職前後的 FQ 變化 */
+  fqBefore?: number;
+  fqAfter?: number;
+}
+
+/**
+ * 計算轉職到指定職業所需的「起始資產購買成本」。
+ *
+ * 規則：
+ * - E/S 象限：成本 = 0
+ * - B/I 象限：每筆 startingAsset 的「自有資金部分」加總
+ *   = sum( cost - liabilityAmount )，亦即玩家需用現金支付資產淨值。
+ *   負債部分自動承擔（與 createPlayer 相同邏輯）。
+ */
+export function getCareerChangeAssetCost(newProfessionId: string): number {
+  const newProfession = PROFESSION_MAP.get(newProfessionId);
+  if (!newProfession || !newProfession.startingAssets) return 0;
+  let total = 0;
+  for (const asset of newProfession.startingAssets) {
+    const liability = asset.liabilityAmount ?? 0;
+    total += Math.max(0, (asset.cost ?? 0) - liability);
+  }
+  return total;
 }
 
 // ============================================================
@@ -337,8 +364,18 @@ export function executeCareerChange(
     };
   }
 
+  // 若目標象限為 B 或 I，需以現金買入該職業的「起始資產自有部分」
+  const assetCost = getCareerChangeAssetCost(newProfession.id);
+  if (assetCost > 0 && player.cash < assetCost) {
+    return {
+      success: false,
+      message: `轉職至 ${newProfession.name} 需先以現金買入起始資產（自有資金 $${assetCost.toLocaleString()}），目前現金 $${player.cash.toLocaleString()} 不足。`,
+    };
+  }
+
   const previousProfession = player.profession.name;
   const oldSalary = player.salary;
+  const fqBefore = player.stats.financialIQ;
 
   // 更新職業與財務
   player.profession = newProfession;
@@ -349,6 +386,50 @@ export function executeCareerChange(
   player.expenses.otherExpenses = newProfession.startingOtherExpenses;
   // taxes 在新系統由年度累進稅處理，不在此更新
 
+  // 注入 B/I 象限的起始資產（與 createPlayer 同邏輯，但從現金扣除自有部分）
+  const injectedAssets: { name: string; cost: number; monthlyCashflow: number }[] = [];
+  if (newProfession.startingAssets && newProfession.startingAssets.length > 0) {
+    newProfession.startingAssets.forEach((template, idx) => {
+      const assetId = `cc-${player.id}-${Date.now()}-${idx}`;
+      const liabilityId = template.liabilityAmount
+        ? `cc-liab-${player.id}-${Date.now()}-${idx}`
+        : undefined;
+
+      player.assets.push({
+        id: assetId,
+        name: template.name,
+        type: template.type,
+        cost: template.cost,
+        monthlyCashflow: template.monthlyCashflow,
+        currentValue: template.currentValue,
+        linkedLiabilityId: liabilityId,
+      });
+
+      if (template.liabilityAmount && liabilityId) {
+        player.liabilities.push({
+          id: liabilityId,
+          name: template.liabilityName ?? `${template.name}貸款`,
+          totalDebt: template.liabilityAmount,
+          monthlyPayment:
+            template.liabilityMonthlyPayment ??
+            Math.round(template.liabilityAmount * 0.005),
+        });
+      }
+
+      injectedAssets.push({
+        name: template.name,
+        cost: template.cost,
+        monthlyCashflow: template.monthlyCashflow,
+      });
+    });
+    player.cash -= assetCost;
+  }
+
+  // 套用 startingFQ（取較大值，避免高 FQ 的玩家轉職反而被降回）
+  if (newProfession.startingFQ !== undefined) {
+    player.stats.financialIQ = Math.max(player.stats.financialIQ, newProfession.startingFQ);
+  }
+
   // SK 歸零
   player.stats.careerSkill = 0;
 
@@ -358,5 +439,9 @@ export function executeCareerChange(
     previousProfession,
     newProfession: newProfession.name,
     salaryChange: newProfession.startingSalary - oldSalary,
+    assetCostPaid: assetCost,
+    injectedAssets: injectedAssets.length > 0 ? injectedAssets : undefined,
+    fqBefore,
+    fqAfter: player.stats.financialIQ,
   };
 }

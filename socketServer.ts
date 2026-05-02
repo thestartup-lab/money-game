@@ -44,7 +44,8 @@ import {
   HP_ACTIVITY_THRESHOLDS,
   HOST_ACTIVATION_DRS_BONUS,
   CRISIS_FREQ_BY_STAGE,
-  E_PROFESSION_POOLS, S_PROFESSION_POOLS, FRANCHISE_CASH_THRESHOLD, PROFESSIONS,
+  E_PROFESSION_POOLS, S_PROFESSION_POOLS, B_PROFESSION_POOLS, I_PROFESSION_POOLS,
+  QUADRANT_SELECT_THRESHOLDS, FRANCHISE_CASH_THRESHOLD, PROFESSIONS,
   SECOND_LIFE_CELL,
   STOCK_DCA_MONTHLY_RETURN_RATE,
   SKILL_CAREER_CHANGE_THRESHOLD,
@@ -1358,7 +1359,7 @@ io.on('connection', (socket: Socket) => {
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 
-  socket.on('selectQuadrant', (payload: { quadrant: 'E' | 'S' }) => {
+  socket.on('selectQuadrant', (payload: { quadrant: 'E' | 'S' | 'B' | 'I' }) => {
     const gs = getRoomState(socket);
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
@@ -1369,16 +1370,34 @@ io.on('connection', (socket: Socket) => {
     const { quadrant } = payload;
     const hasEdu = player.hasContinuedEducation;
 
+    // B / I 象限門檻檢查
+    if (quadrant === 'B' || quadrant === 'I') {
+      const t = QUADRANT_SELECT_THRESHOLDS[quadrant];
+      if (
+        player.growthStats.academic < t.academicMin ||
+        player.growthStats.resource < t.resourceMin
+      ) {
+        socket.emit('error', {
+          message: `${quadrant} 象限門檻：${t.description}（你目前 學識=${player.growthStats.academic}、資源=${player.growthStats.resource}）。`,
+        });
+        return;
+      }
+    }
+
     // 建立隨機職業池
     let pool: string[];
     if (quadrant === 'E') {
       pool = hasEdu
         ? [...E_PROFESSION_POOLS.advanced]
         : [...E_PROFESSION_POOLS.basic];
-    } else {
+    } else if (quadrant === 'S') {
       pool = hasEdu
         ? [...S_PROFESSION_POOLS.advanced]
         : [...S_PROFESSION_POOLS.basicLow, ...S_PROFESSION_POOLS.basicMid];
+    } else if (quadrant === 'B') {
+      pool = [...B_PROFESSION_POOLS.basic];
+    } else {
+      pool = [...I_PROFESSION_POOLS.basic];
     }
 
     const randomId = pool[Math.floor(Math.random() * pool.length)];
@@ -1399,6 +1418,50 @@ io.on('connection', (socket: Socket) => {
     player.actionTokensThisPayday = chosen.hasFlexibleSchedule ? Infinity : 1;
     player.startAge = hasEdu ? 25 : 22;
     player.pre20Done = true;
+
+    // B / I 象限：注入起始資產與 startingFQ（修正之前 selectQuadrant 不處理的 bug）
+    if (chosen.startingAssets && chosen.startingAssets.length > 0) {
+      // 先清掉先前 createPlayer 階段（隨機指派）注入的 startingAssets / 對應負債，
+      // 避免「我原本被隨機分到 angel_investor，後來改選 E，但 $450K 投組還在」
+      player.assets = player.assets.filter((a) => !a.id.startsWith(`start-${player.id}-`));
+      player.liabilities = player.liabilities.filter((l) => !l.id.startsWith(`start-liability-${player.id}-`));
+
+      chosen.startingAssets.forEach((template, idx) => {
+        const assetId = `start-${player.id}-${idx}`;
+        const liabilityId = template.liabilityAmount
+          ? `start-liability-${player.id}-${idx}`
+          : undefined;
+
+        player.assets.push({
+          id: assetId,
+          name: template.name,
+          type: template.type,
+          cost: template.cost,
+          monthlyCashflow: template.monthlyCashflow,
+          currentValue: template.currentValue,
+          linkedLiabilityId: liabilityId,
+        });
+
+        if (template.liabilityAmount && liabilityId) {
+          player.liabilities.push({
+            id: liabilityId,
+            name: template.liabilityName ?? `${template.name}貸款`,
+            totalDebt: template.liabilityAmount,
+            monthlyPayment:
+              template.liabilityMonthlyPayment ??
+              Math.round(template.liabilityAmount * 0.005),
+          });
+        }
+      });
+    } else {
+      // E / S 象限：清掉所有 createPlayer 階段被隨機指派注入的 starting 資產
+      player.assets = player.assets.filter((a) => !a.id.startsWith(`start-${player.id}-`));
+      player.liabilities = player.liabilities.filter((l) => !l.id.startsWith(`start-liability-${player.id}-`));
+    }
+
+    if (chosen.startingFQ !== undefined) {
+      player.stats.financialIQ = Math.max(player.stats.financialIQ, chosen.startingFQ);
+    }
 
     console.log(`[selectQuadrant] ${player.name}（${roomId}）選擇 ${quadrant} 象限，分配職業：${chosen.name}${hasEdu ? '（進修後）' : ''}`);
 
@@ -3232,9 +3295,21 @@ function buildAffordableOptions(player: Player): object {
 }
 
 function buildAvailableProfessions(player: Player): object[] {
+  const { getCareerChangeAssetCost } = require('./statsSystem');
   return PROFESSIONS
     .filter((p) => p.id !== player.profession.id)
-    .map((p) => ({ id: p.id, name: p.name, quadrant: p.quadrant, salary: p.startingSalary }));
+    .map((p) => {
+      const assetCost = getCareerChangeAssetCost(p.id);
+      return {
+        id: p.id,
+        name: p.name,
+        quadrant: p.quadrant,
+        salary: p.startingSalary,
+        startingFQ: p.startingFQ,
+        assetCost, // 轉職到 B/I 需從現金扣除的「自有資產成本」
+        canAfford: assetCost === 0 || player.cash >= assetCost,
+      };
+    });
 }
 
 // ============================================================

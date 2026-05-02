@@ -68,7 +68,18 @@ interface Props {
   onSellAsset: (assetId: string) => void;
   onRequestAnalysis: () => void;
   isGameOver: boolean;
-  careerChangeData?: { message: string; availableProfessions: { id: string; name: string; quadrant?: string; description?: string }[] } | null;
+  careerChangeData?: {
+    message: string;
+    availableProfessions: {
+      id: string;
+      name: string;
+      quadrant?: string;
+      description?: string;
+      assetCost?: number;
+      canAfford?: boolean;
+      startingFQ?: number;
+    }[];
+  } | null;
   onCareerChange?: (professionId: string) => void;
 }
 
@@ -577,18 +588,46 @@ export default function ActionPanel({
         <div className="card border-2 border-yellow-500">
           <p className="text-xs text-yellow-400 font-bold mb-1">🎯 技能巔峰 — 可以轉職！</p>
           <p className="text-xs text-gray-300 mb-2">{careerChangeData.message}</p>
+          <p className="text-[11px] text-amber-300 mb-2">轉職至 B/I 象限需以現金買入起始事業/投資資產（自有資金部分）。</p>
           <div className="space-y-1">
-            {careerChangeData.availableProfessions.map((prof) => (
-              <button
-                key={prof.id}
-                className="w-full text-left text-xs px-3 py-2 rounded-xl bg-yellow-900/40 hover:bg-yellow-900/70 border border-yellow-700 text-yellow-200 transition-colors"
-                onClick={() => onCareerChange(prof.id)}
-              >
-                <span className="font-bold">{prof.name}</span>
-                {prof.quadrant && <span className="ml-2 text-yellow-500">（{prof.quadrant}）</span>}
-                {prof.description && <span className="block text-gray-400 text-xs mt-0.5">{prof.description}</span>}
-              </button>
-            ))}
+            {careerChangeData.availableProfessions.map((prof) => {
+              const cost = prof.assetCost ?? 0;
+              const affordable = prof.canAfford !== false;
+              const isBI = prof.quadrant === 'B' || prof.quadrant === 'I';
+              return (
+                <button
+                  key={prof.id}
+                  disabled={!affordable}
+                  className={`w-full text-left text-xs px-3 py-2 rounded-xl border transition-colors ${
+                    affordable
+                      ? 'bg-yellow-900/40 hover:bg-yellow-900/70 border-yellow-700 text-yellow-200'
+                      : 'bg-gray-800 border-gray-700 text-gray-500 cursor-not-allowed'
+                  }`}
+                  onClick={() => affordable && onCareerChange(prof.id)}
+                  title={cost > 0 ? `需付資產成本 $${cost.toLocaleString()}` : ''}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold">{prof.name}</span>
+                    {prof.quadrant && (
+                      <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded-full ${
+                        prof.quadrant === 'I' ? 'bg-emerald-700 text-white' :
+                        prof.quadrant === 'B' ? 'bg-amber-700 text-white' :
+                        prof.quadrant === 'S' ? 'bg-purple-700 text-white' :
+                        'bg-blue-700 text-white'
+                      }`}>{prof.quadrant}</span>
+                    )}
+                  </div>
+                  {isBI && cost > 0 && (
+                    <span className={`block text-[10px] mt-0.5 ${affordable ? 'text-emerald-300' : 'text-red-400'}`}>
+                      需付資產成本 ${cost.toLocaleString()}
+                      {!affordable && '（現金不足）'}
+                      {prof.startingFQ ? ` ｜ FQ→${prof.startingFQ}` : ''}
+                    </span>
+                  )}
+                  {prof.description && <span className="block text-gray-400 text-xs mt-0.5">{prof.description}</span>}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
