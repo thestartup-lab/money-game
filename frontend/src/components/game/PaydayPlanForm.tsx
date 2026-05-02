@@ -48,7 +48,7 @@ export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPla
 
   const totalCost = useMemo(() => {
     let cost = 0;
-    if (checks.fqUpgrade)    cost += data.affordableOptions.fqUpgrade.cost;
+    if (checks.fqUpgrade)    cost += data.affordableOptions.fqUpgrade.cost ?? 0;
     if (checks.healthBoost)  cost += data.affordableOptions.healthBoost.cost;
     else if (checks.healthMaint) cost += data.affordableOptions.healthMaintenance.cost;
     if (checks.skillTraining) cost += data.affordableOptions.skillTraining.cost;
@@ -148,7 +148,7 @@ export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPla
                   <div className="flex-1">
                     <div className="text-sm text-white">{label}</div>
                     <div className={`text-xs ${checked || canAfford ? 'text-gray-400' : 'text-red-400'}`}>
-                      費用：${opt.cost.toLocaleString()}
+                      {opt.cost != null ? `費用：$${opt.cost.toLocaleString()}` : '已達上限'}
                     </div>
                   </div>
                 </label>

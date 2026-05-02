@@ -808,8 +808,9 @@ export default function PlayerPage() {
       ? outerCircleConfig[pos % outerCircleConfig.length]
       : innerCircleConfig[pos % innerCircleConfig.length];
 
-    // 顯示用年齡 = 伺服器全局時鐘（與後端事件、廣播訊息中的年齡完全一致，避免落差）
-    const personalAge = gameState.currentAge;
+    // 顯示用年齡：取伺服器全局時鐘與玩家起始年齡的較大值
+    // 選擇進修的玩家 startAge=25，遊戲剛開始時時鐘仍為20，應顯示25而非20
+    const personalAge = Math.max(myPlayer.startAge ?? 20, gameState.currentAge);
 
     // 計算通知數量
     const notifCount = notifications.length;

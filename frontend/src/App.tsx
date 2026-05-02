@@ -3,6 +3,7 @@ import PlayerPage from './pages/PlayerPage';
 import DisplayScreen from './pages/DisplayScreen';
 import AdminPage from './pages/AdminPage';
 import { GameBoard } from './components/game/GameBoard';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 /**
  * 路由：根據 URL 參數決定顯示哪個介面
@@ -20,10 +21,10 @@ export default function App() {
     return 'player';
   }, []);
 
-  if (mode === 'display') return <DisplayScreen />;
-  if (mode === 'admin') return <AdminPage />;
-  if (mode === 'board') return <BoardPreview />;
-  return <PlayerPage />;
+  if (mode === 'display') return <ErrorBoundary><DisplayScreen /></ErrorBoundary>;
+  if (mode === 'admin') return <ErrorBoundary><AdminPage /></ErrorBoundary>;
+  if (mode === 'board') return <ErrorBoundary><BoardPreview /></ErrorBoundary>;
+  return <ErrorBoundary><PlayerPage /></ErrorBoundary>;
 }
 
 function BoardPreview() {
