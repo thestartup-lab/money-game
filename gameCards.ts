@@ -17,6 +17,8 @@ export enum SquareType {
   Crisis       = 'Crisis',
   /** 人際關係事件格：停在此格須抽 RELATIONSHIP_EVENTS 牌組 */
   Relationship = 'Relationship',
+  /** 第二人生格：路過或停在此格首次解鎖 FastTrack 進入資格 */
+  SecondLife   = 'SecondLife',
 }
 
 export interface BoardSquare {
@@ -60,6 +62,7 @@ export const BOARD: readonly BoardSquare[] = [
   { index: 21, type: SquareType.BigDeal,    label: '大交易' },
   { index: 22, type: SquareType.Downsizing, label: '裁員' },
   { index: 23, type: SquareType.Crisis,     label: '危機事件' },
+  { index: 24, type: SquareType.SecondLife, label: '第二人生' },
 ];
 
 // ============================================================
@@ -887,8 +890,9 @@ export function getFastTrackSquareType(position: number): FastTrackSquareType {
 }
 
 export function getSquareType(position: number): SquareType {
+  // 注意：BOARD 共 25 格（0-24），與 RAT_RACE_TRACK_SIZE 一致
   const square = BOARD[position % BOARD.length];
-  return square.type;
+  return square?.type ?? SquareType.Payday;
 }
 
 /**

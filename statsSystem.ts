@@ -310,6 +310,23 @@ export function checkBedriddenStatus(player: Player): boolean {
 }
 
 /**
+ * 統一的 HP 變動 helper。
+ * 套用 delta 後 clamp 到 [0, 100]，並自動觸發 isBedridden 同步更新。
+ *
+ * @param player 玩家物件（直接修改 stats.health & isBedridden）
+ * @param delta  本次 HP 變化量（正數=回血，負數=扣血）
+ * @returns true = 本次操作剛觸發臥床
+ */
+export function applyHPChange(player: Player, delta: number): boolean {
+  player.stats.health = Math.max(0, Math.min(100, player.stats.health + delta));
+  // HP 回升後解除臥床（保持與 admin 編輯邏輯一致）
+  if (player.stats.health > 0 && player.isBedridden) {
+    player.isBedridden = false;
+  }
+  return checkBedriddenStatus(player);
+}
+
+/**
  * 套用 NT 自然成長。
  *
  * 每當 paydayCount 為 NETWORK_AUTO_GAIN_INTERVAL 的倍數時，NT +1。

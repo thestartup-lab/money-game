@@ -63,11 +63,13 @@ export default function PlayerPage() {
   };
   type PartnershipOffer = { offerId: string; offerorName: string; targetId: string };
   type LoanOffer = { offerId: string; lenderName: string; borrowerId: string; amount: number; monthlyRate: number };
+  type LoanRequest = { requestId: string; borrowerName: string; lenderId: string; amount: number; monthlyRate: number };
   const [congratulatableEvent, setCongratulatableEvent] = useState<CongratulatableEvent | null>(null);
   const [activeAuction, setActiveAuction] = useState<ActiveAuction | null>(null);
   const [auctionBid, setAuctionBid] = useState('');
   const [partnershipOffer, setPartnershipOffer] = useState<PartnershipOffer | null>(null);
   const [loanOffer, setLoanOffer] = useState<LoanOffer | null>(null);
+  const [loanRequest, setLoanRequest] = useState<LoanRequest | null>(null);
 
   // 格子事件 & 發薪日表單
   const [activeEvent, setActiveEvent] = useState<ActiveEvent | null>(null);
@@ -287,9 +289,26 @@ export default function PlayerPage() {
         setLoanOffer(p);
       }
     });
-    s.on('loanAccepted', (p: { lenderName: string; borrowerName: string; amount: number }) => {
-      addNotification(`✅ P2P 借貸成交：${p.lenderName} → ${p.borrowerName} $${fmt(p.amount)}`);
+    s.on('loanRequestReceived', (p: { requestId: string; borrowerId: string; borrowerName: string; lenderId: string; lenderName: string; amount: number; monthlyRate: number }) => {
+      if (p.lenderId === s.id) {
+        addNotification(`💸 ${p.borrowerName} 向你請求借款 $${fmt(p.amount)}（月息 ${(p.monthlyRate * 100).toFixed(1)}%）`);
+        setLoanRequest({ requestId: p.requestId, borrowerName: p.borrowerName, lenderId: p.lenderId, amount: p.amount, monthlyRate: p.monthlyRate });
+      } else if (p.borrowerId === s.id) {
+        addNotification(`📨 已向 ${p.lenderName} 發出借款請求 $${fmt(p.amount)}（月息 ${(p.monthlyRate * 100).toFixed(1)}%），等待對方回應`);
+      }
+    });
+    s.on('loanRequestDeclined', (p: { requestId: string; borrowerId: string; lenderId: string }) => {
+      if (p.borrowerId === s.id) addNotification('❌ 對方拒絕了你的借款請求');
+      if (p.lenderId === s.id) {
+        addNotification('🛑 你已拒絕該借款請求');
+        setLoanRequest(null);
+      }
+    });
+    s.on('loanAccepted', (p: { lenderName: string; borrowerName: string; amount: number; initiatedBy?: string }) => {
+      const verb = p.initiatedBy === 'borrower' ? '同意借出' : '借貸成交';
+      addNotification(`✅ P2P ${verb}：${p.lenderName} → ${p.borrowerName} $${fmt(p.amount)}`);
       setLoanOffer(null);
+      setLoanRequest(null);
     });
     s.on('congratulationSent', (p: { senderName: string; targetName: string; amount: number }) => {
       addNotification(`🎊 ${p.senderName} 恭喜了 ${p.targetName}（$${p.amount}）`);
@@ -862,6 +881,24 @@ export default function PlayerPage() {
           </div>
         )}
 
+        {loanRequest && (
+          <div className="card border border-amber-600 bg-amber-900 space-y-2">
+            <p className="text-amber-200 font-semibold text-sm">💸 {loanRequest.borrowerName} 向你請求借款 ${loanRequest.amount.toLocaleString()}</p>
+            <p className="text-amber-400 text-xs">月息 {(loanRequest.monthlyRate * 100).toFixed(1)}%（對方每月還你 ${Math.round(loanRequest.amount * loanRequest.monthlyRate).toLocaleString()}）</p>
+            <p className="text-amber-300 text-xs">同意後將從你的現金扣 ${loanRequest.amount.toLocaleString()}，並把該金額轉給對方。</p>
+            <div className="flex gap-2">
+              <button className="btn-primary text-sm flex-1" onClick={() => {
+                emit('loanRequestResponse', { requestId: loanRequest.requestId, accepted: true });
+                setLoanRequest(null);
+              }}>✅ 同意借出</button>
+              <button className="btn-secondary text-sm" onClick={() => {
+                emit('loanRequestResponse', { requestId: loanRequest.requestId, accepted: false });
+                setLoanRequest(null);
+              }}>❌ 拒絕</button>
+            </div>
+          </div>
+        )}
+
         {/* 通知 */}
         {notifications.length > 0 && (
           <div className="card space-y-1">
@@ -1056,6 +1093,7 @@ export default function PlayerPage() {
                 onTakeLeverageLoan={(amt, name) => emit('takeLeverageLoan', { amount: amt, targetAssetName: name })}
                 onInvestStockDCA={(amt) => emit('investStockDCA', { amount: amt })}
                 onLoanOffer={(targetId, amount, monthlyRate) => emit('loanOffer', { targetPlayerId: targetId, amount, monthlyRate })}
+                onLoanRequest={(targetId, amount, monthlyRate) => emit('loanRequest', { targetPlayerId: targetId, amount, monthlyRate })}
                 onSellAsset={(assetId) => emit('sellAsset', { assetId })}
                 onRequestAnalysis={() => { emit('requestPlayerAnalysis'); }}
                 isGameOver={isGameOver}
@@ -1123,6 +1161,16 @@ export default function PlayerPage() {
               <div className="flex gap-2">
                 <button className="btn-primary text-sm flex-1" onClick={() => { emit('loanResponse', { offerId: loanOffer.offerId, accepted: true }); setLoanOffer(null); }}>✅ 借款</button>
                 <button className="btn-secondary text-sm" onClick={() => { emit('loanResponse', { offerId: loanOffer.offerId, accepted: false }); setLoanOffer(null); }}>❌ 拒絕</button>
+              </div>
+            </div>
+          )}
+          {loanRequest && (
+            <div className="mx-4 my-2 rounded-xl border border-amber-600 bg-amber-900 p-3 space-y-2">
+              <p className="text-amber-200 font-semibold text-sm">💸 {loanRequest.borrowerName} 向你請求借款 ${fmt(loanRequest.amount)}</p>
+              <p className="text-amber-400 text-xs">月息 {(loanRequest.monthlyRate * 100).toFixed(1)}%（對方每月還你 ${fmt(Math.round(loanRequest.amount * loanRequest.monthlyRate))}）</p>
+              <div className="flex gap-2">
+                <button className="btn-primary text-sm flex-1" onClick={() => { emit('loanRequestResponse', { requestId: loanRequest.requestId, accepted: true }); setLoanRequest(null); }}>✅ 同意借出</button>
+                <button className="btn-secondary text-sm" onClick={() => { emit('loanRequestResponse', { requestId: loanRequest.requestId, accepted: false }); setLoanRequest(null); }}>❌ 拒絕</button>
               </div>
             </div>
           )}

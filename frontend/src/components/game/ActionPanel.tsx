@@ -65,6 +65,7 @@ interface Props {
   onTakeLeverageLoan: (amount: number, targetAssetName: string) => void;
   onInvestStockDCA: (amount: number) => void;
   onLoanOffer: (targetId: string, amount: number, monthlyRate: number) => void;
+  onLoanRequest: (targetId: string, amount: number, monthlyRate: number) => void;
   onSellAsset: (assetId: string) => void;
   onRequestAnalysis: () => void;
   isGameOver: boolean;
@@ -94,6 +95,7 @@ export default function ActionPanel({
   onTakeLeverageLoan,
   onInvestStockDCA,
   onLoanOffer,
+  onLoanRequest,
   onSellAsset,
   onRequestAnalysis,
   isGameOver,
@@ -107,6 +109,7 @@ export default function ActionPanel({
   const [leverageAssetName, setLeverageAssetName] = useState('');
   const [showDCAPanel, setShowDCAPanel] = useState(false);
   const [showP2PPanel, setShowP2PPanel] = useState(false);
+  const [p2pMode, setP2pMode] = useState<'lend' | 'borrow'>('lend');
   const [p2pTarget, setP2pTarget] = useState('');
   const [p2pAmount, setP2pAmount] = useState(75_000);
   const [p2pRate, setP2pRate] = useState(0.01);
@@ -484,13 +487,28 @@ export default function ActionPanel({
             <p className="text-xs text-gray-500 text-center py-2">需要其他參與者才能使用<br />P2P 借貸功能</p>
           ) : showP2PPanel ? (
             <div className="space-y-2">
-              <p className="text-xs text-gray-400">選擇借款對象、金額與月利率，傳送借款邀請給對方</p>
+              {/* 模式切換 */}
+              <div className="grid grid-cols-2 gap-1 bg-gray-900 rounded-lg p-1">
+                <button
+                  className={`text-xs py-1.5 rounded ${p2pMode === 'lend' ? 'bg-emerald-700 text-white font-bold' : 'text-gray-400'}`}
+                  onClick={() => setP2pMode('lend')}
+                >🤝 借出（提供借款）</button>
+                <button
+                  className={`text-xs py-1.5 rounded ${p2pMode === 'borrow' ? 'bg-amber-700 text-white font-bold' : 'text-gray-400'}`}
+                  onClick={() => setP2pMode('borrow')}
+                >💸 借入（請求借款）</button>
+              </div>
+              <p className="text-xs text-gray-400">
+                {p2pMode === 'lend'
+                  ? '提供借款給其他玩家：你拿出現金，對方需以月息還款給你。'
+                  : '主動向其他玩家請求借款：對方拿出現金借給你，你每月以月息還款。會占用你的信用額度。'}
+              </p>
               <select
                 className="w-full rounded-lg bg-gray-700 border border-gray-600 text-white text-sm px-2 py-1.5"
                 value={p2pTarget}
                 onChange={(e) => setP2pTarget(e.target.value)}
               >
-                <option value="">-- 選擇借款人 --</option>
+                <option value="">-- {p2pMode === 'lend' ? '選擇借款人' : '選擇貸款人'} --</option>
                 {otherPlayers.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
@@ -519,25 +537,46 @@ export default function ActionPanel({
                   ))}
                 </select>
               </div>
-              {p2pTarget && (
+              {p2pTarget && p2pMode === 'lend' && (
                 <div className="text-xs text-gray-400">
                   對方月還款：<span className="text-yellow-300">${fmt(Math.round(p2pAmount * p2pRate))}</span>
                   {'  '}你付出：<span className={player.cash >= p2pAmount ? 'text-emerald-400' : 'text-red-400'}>${fmt(p2pAmount)}</span>
                   {player.cash < p2pAmount && <span className="text-red-400 ml-1">（現金不足）</span>}
                 </div>
               )}
+              {p2pTarget && p2pMode === 'borrow' && (() => {
+                const willOverLimit = existingLoanTotal + p2pAmount > loanLimit;
+                return (
+                  <div className="text-xs text-gray-400">
+                    你月還款：<span className="text-yellow-300">${fmt(Math.round(p2pAmount * p2pRate))}</span>
+                    {'  '}你拿到：<span className="text-emerald-400">${fmt(p2pAmount)}</span>
+                    <div className={`mt-1 ${willOverLimit ? 'text-red-400' : 'text-gray-400'}`}>
+                      可借餘額：${fmt(availableLoan)}
+                      {willOverLimit && '（超過信用上限）'}
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="grid grid-cols-2 gap-2">
                 <button className="btn-secondary text-sm" onClick={() => setShowP2PPanel(false)}>取消</button>
-                <button
-                  className="btn-primary text-sm"
-                  disabled={!p2pTarget || player.cash < p2pAmount}
-                  onClick={() => { onLoanOffer(p2pTarget, p2pAmount, p2pRate); setShowP2PPanel(false); setP2pTarget(''); }}
-                >發送邀請</button>
+                {p2pMode === 'lend' ? (
+                  <button
+                    className="btn-primary text-sm"
+                    disabled={!p2pTarget || player.cash < p2pAmount}
+                    onClick={() => { onLoanOffer(p2pTarget, p2pAmount, p2pRate); setShowP2PPanel(false); setP2pTarget(''); }}
+                  >發送借款邀請</button>
+                ) : (
+                  <button
+                    className="btn-primary text-sm"
+                    disabled={!p2pTarget || existingLoanTotal + p2pAmount > loanLimit}
+                    onClick={() => { onLoanRequest(p2pTarget, p2pAmount, p2pRate); setShowP2PPanel(false); setP2pTarget(''); }}
+                  >發送借款請求</button>
+                )}
               </div>
             </div>
           ) : (
             <button className="btn-secondary w-full text-sm" onClick={() => setShowP2PPanel(true)}>
-              🤝 借款給其他玩家
+              🤝 借款 / 借入（P2P）
             </button>
           )}
         </div>

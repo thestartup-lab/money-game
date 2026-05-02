@@ -57,6 +57,8 @@ export interface Expenses {
   otherExpenses: number;
   insurancePremiums: number;
   childExpenses: number;
+  /** 無擔保負債月付加總（後端計算後給前端顯示用） */
+  unsecuredLoanPayments?: number;
 }
 
 export interface InsuranceState {

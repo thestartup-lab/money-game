@@ -165,6 +165,9 @@ export function acceptDealCard(player: Player, card: DealCard): void {
  * 套用慈善捐款。
  * - donate: 從 cash 扣除月薪的 donationPercentage，並設定 bonusDice。
  * - 不捐：不做任何事。
+ *
+ * ⚠ 注意：薪資 0 或捐款金額為 0 時不應獲得獎勵骰，避免無底薪業務員等
+ *   nt_driven 在 NT 過低時白嫖獎勵骰。
  */
 export function applyCharityDonation(
   player: Player,
@@ -173,6 +176,7 @@ export function applyCharityDonation(
 ): void {
   if (!donate) return;
   const donationAmount = Math.round(player.salary * card.donationPercentage);
+  if (donationAmount <= 0) return;
   player.cash -= Math.min(donationAmount, player.cash);
   player.bonusDice = card.bonusDiceCount;
 }

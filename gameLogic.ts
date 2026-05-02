@@ -1024,7 +1024,11 @@ export function goTravel(player: Player, destinationId: string): GoTravelResult 
   }
 
   player.cash -= dest.cost;
-  player.stats.health = Math.max(0, player.stats.health - dest.hpCost);
+  // 旅遊扣 HP（透過 applyHPChange 同步 isBedridden）
+  {
+    const { applyHPChange } = require('./statsSystem');
+    applyHPChange(player, -dest.hpCost);
+  }
 
   // 重複造訪：只給半數體驗值
   const alreadyVisited = player.visitedDestinations.includes(dest.id);
@@ -1040,11 +1044,12 @@ export function goTravel(player: Player, destinationId: string): GoTravelResult 
   // 特殊屬性加成
   const fx = dest.statEffect;
   if (fx) {
+    const { applyHPChange } = require('./statsSystem');
     const ntCap = player.profession.salaryType === 'nt_driven' ? Infinity : 10;
     if (fx.nt)  player.stats.network      = Math.min(ntCap, player.stats.network      + fx.nt);
     if (fx.fq)  player.stats.financialIQ  = Math.min(10, player.stats.financialIQ  + fx.fq);
     if (fx.sk)  player.stats.careerSkill  = Math.min(100, player.stats.careerSkill + fx.sk);
-    if (fx.hp)  player.stats.health       = Math.min(100, player.stats.health      + fx.hp);
+    if (fx.hp)  applyHPChange(player, fx.hp);
     if (fx.legacyScore) player.legacyBonusPoints = (player.legacyBonusPoints ?? 0) + fx.legacyScore;
   }
 

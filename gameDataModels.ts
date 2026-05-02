@@ -507,7 +507,9 @@ export class Player {
   /**
    * 所有支出細項加總。
    * 保費依 insurance 持有狀態從 gameConfig 常量自動計算；
-   * 孩子費用依 numberOfChildren × PER_CHILD_EXPENSE 自動計算。
+   * 孩子費用依 numberOfChildren × PER_CHILD_EXPENSE 自動計算；
+   * 「無擔保負債月付」（應急借款、進修貸款、P2P 借貸、投資槓桿借款等）
+   * 自動加總 — 房貸／事業貸款不算（因其資產的 monthlyCashflow 已是淨額）。
    */
   get totalExpenses(): number {
     const e = this.expenses;
@@ -519,6 +521,17 @@ export class Player {
 
     const childExpenses = this.numberOfChildren * PER_CHILD_EXPENSE;
 
+    // 找出「有擔保的負債 id」（資產綁定）
+    const securedLiabilityIds = new Set(
+      this.assets
+        .map((a) => a.linkedLiabilityId)
+        .filter((id): id is string => Boolean(id))
+    );
+    // 無擔保負債的月付加總
+    const unsecuredLoanPayments = this.liabilities
+      .filter((l) => !securedLiabilityIds.has(l.id))
+      .reduce((sum, l) => sum + (l.monthlyPayment ?? 0), 0);
+
     return (
       e.taxes +
       e.homeMortgagePayment +
@@ -526,7 +539,8 @@ export class Player {
       e.creditCardPayment +
       e.otherExpenses +
       insurancePremiums +
-      childExpenses
+      childExpenses +
+      unsecuredLoanPayments
     );
   }
 
@@ -562,9 +576,16 @@ export class GameState {
   pendingPartnershipOffers?: Record<string, {
     offerorId: string; targetId: string; dealCardId?: string; createdAt: number;
   }>;
-  /** 待回應的 P2P 借貸邀請（key = offerId） */
+  /** 待回應的 P2P 借貸邀請（key = offerId）— 借款方主動「提供借款」給特定玩家 */
   pendingLoanOffers?: Record<string, {
     lenderId: string; borrowerId: string; amount: number; monthlyRate: number; createdAt: number;
+  }>;
+  /**
+   * 待回應的 P2P 借貸請求（key = requestId）— 玩家「主動向其他玩家請求借款」。
+   * 被請求的玩家可以接受（同意以指定條件借款）或拒絕。
+   */
+  pendingLoanRequests?: Record<string, {
+    borrowerId: string; lenderId: string; amount: number; monthlyRate: number; createdAt: number;
   }>;
   /** 進行中的競標（key = auctionId） */
   activeAuctions?: Record<string, {

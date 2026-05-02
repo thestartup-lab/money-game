@@ -65,6 +65,7 @@ import {
   executeCareerChange,
   getFQUpgradeCost,
   checkBedriddenStatus,
+  applyHPChange,
 } from './statsSystem';
 import {
   getSquareType,
@@ -229,6 +230,14 @@ function serializePlayer(p: Player): object {
     (p.insurance.hasPropertyInsurance ? PROPERTY_INSURANCE_PREMIUM : 0);
   const childExpenses = p.numberOfChildren * PER_CHILD_EXPENSE;
 
+  // 無擔保負債月付加總（與 Player.totalExpenses getter 同邏輯）
+  const _securedIds = new Set(
+    p.assets.map((a) => a.linkedLiabilityId).filter((id): id is string => Boolean(id))
+  );
+  const unsecuredLoanPayments = p.liabilities
+    .filter((l) => !_securedIds.has(l.id))
+    .reduce((sum, l) => sum + (l.monthlyPayment ?? 0), 0);
+
   return {
     id: p.id,
     name: p.name,
@@ -239,7 +248,7 @@ function serializePlayer(p: Player): object {
     isAlive: p.isAlive,
     cash: p.cash,
     salary: p.salary,
-    expenses: { ...p.expenses, insurancePremiums, childExpenses },
+    expenses: { ...p.expenses, insurancePremiums, childExpenses, unsecuredLoanPayments },
     assets: p.assets,
     liabilities: p.liabilities,
     insurance: p.insurance,
@@ -656,11 +665,13 @@ io.on('connection', (socket: Socket) => {
 
       // --- 2. 擲骰 & 移動（含 bonusDice 加成）---
       const baseDice = payload?.diceCount ?? 1;
-      const diceCount = (baseDice + player.bonusDice) as 1 | 2 | 3;
+      const diceCount = Math.min(3, baseDice + player.bonusDice) as 1 | 2 | 3;
       player.bonusDice = 0;
 
-      // 直接在伺服器產生個別骰面，方便前端做翻滾動畫
-      const actualDiceCount = diceCount > 2 ? 2 : diceCount;
+      // ⚠ 修正：以前 actualDiceCount = diceCount > 2 ? 2 : diceCount，
+      //   慈善獎勵骰會把 base 2 + bonus 1 = 3 capped 回 2，導致第三顆骰直接消失。
+      //   現在最多支援到 3 顆骰子（前端 DiceRollOverlay 也已支援）。
+      const actualDiceCount = diceCount;
       const diceFaces: number[] = [];
       for (let i = 0; i < actualDiceCount; i++) {
         diceFaces.push(Math.floor(Math.random() * 6) + 1);
@@ -820,17 +831,21 @@ io.on('connection', (socket: Socket) => {
           triggerPayday(player, gs, maintenanceDone);
           logPlayerEvent(player, gs, 'payday', `發薪日（第 ${player.paydayCount} 次）`, _pdCashBefore, _pdFlowBefore, _pdNWBefore);
 
-          // 股票定期定額：每次發薪日 stock-dca 資產複利增長並進帳
+          // 股票定期定額：每次發薪日 stock-dca 資產複利增長
+          // ⚠ 修正：以前同時做 cash += growth 並設 monthlyCashflow = growth，
+          // triggerPayday 內 totalIncome 也會把 monthlyCashflow 加進現金 → 雙重計入。
+          // 現改為「只反映在資產 currentValue 上，不直接加現金、不設 monthlyCashflow」。
+          // 玩家想要兌現增值請走 sellAsset。
           const dcaAsset = player.assets.find((a) => a.id === 'stock-dca');
           if (dcaAsset) {
             const prevVal = dcaAsset.currentValue ?? dcaAsset.cost;
             dcaAsset.currentValue = Math.round(prevVal * (1 + STOCK_DCA_MONTHLY_RETURN_RATE));
             const growth = dcaAsset.currentValue - prevVal;
+            // 保持 monthlyCashflow 為 0（DCA 是純增值資產，不是現金流資產）
+            dcaAsset.monthlyCashflow = 0;
             if (growth > 0) {
-              player.cash += growth;
-              dcaAsset.monthlyCashflow = growth;
               emitCellEvent(socket, roomId, player.name, '股票增值',
-                `📈 指數基金月複利 +$${growth.toLocaleString()}（已進帳），總值 $${dcaAsset.currentValue.toLocaleString()}`);
+                `📈 指數基金月複利 +$${growth.toLocaleString()}（資產增值），總值 $${dcaAsset.currentValue.toLocaleString()}`);
             }
           }
 
@@ -870,6 +885,14 @@ io.on('connection', (socket: Socket) => {
 
       // --- 5. 處理落點格子 ---
       await handleLandingSquare(socket, player, gs);
+
+      // ⚠ 玩家可能在 handleLandingSquare 中因危機/疾病死亡，
+      //   後續 FastTrack 解鎖、增值、advanceToNextTurn 邏輯需要 isAlive 守衛
+      if (!player.isAlive) {
+        gs.advanceToNextTurn();
+        emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+        return;
+      }
 
       // --- 5b. 老鼠賽跑脫出檢查 ---
       // 偵測本次移動是否路過「第二人生」格（cell 24）
@@ -1503,37 +1526,52 @@ io.on('connection', (socket: Socket) => {
     const franchise = PROFESSIONS.find((p) => p.id === 'franchise_owner');
     if (!franchise) { socket.emit('error', { message: '加盟職業設定錯誤。' }); return; }
 
+    // ⚠ 實際扣除加盟金（先前的 bug：只檢查門檻不扣錢）
+    const _bfCB = player.cash;
+    const _bfFB = player.monthlyCashflow;
+    player.cash -= FRANCHISE_CASH_THRESHOLD;
+
     player.profession = franchise;
     player.salary = franchise.startingSalary;
     player.expenses.otherExpenses = franchise.startingOtherExpenses;
     player.actionTokensThisPayday = Infinity;
 
-    // 注入加盟店資產與負債
+    // 注入加盟店資產與負債（含 linkedLiabilityId 連結，與 createPlayer 一致）
     if (franchise.startingAssets) {
-      for (const tmpl of franchise.startingAssets) {
-        const asset = {
-          id: `franchise-${player.id}-${Date.now()}`,
+      franchise.startingAssets.forEach((tmpl, idx) => {
+        const ts = Date.now();
+        const assetId = `franchise-${player.id}-${ts}-${idx}`;
+        const liabilityId = tmpl.liabilityAmount
+          ? `franchise-loan-${player.id}-${ts}-${idx}`
+          : undefined;
+
+        player.assets.push({
+          id: assetId,
           name: tmpl.name,
           type: tmpl.type,
           cost: tmpl.cost,
           currentValue: tmpl.currentValue ?? tmpl.cost,
           monthlyCashflow: tmpl.monthlyCashflow,
-        };
-        player.assets.push(asset);
-        if (tmpl.liabilityName && tmpl.liabilityAmount) {
+          linkedLiabilityId: liabilityId,
+        });
+
+        if (tmpl.liabilityAmount && liabilityId) {
           player.liabilities.push({
-            id: `franchise-loan-${player.id}-${Date.now()}`,
-            name: tmpl.liabilityName,
+            id: liabilityId,
+            name: tmpl.liabilityName ?? `${tmpl.name}貸款`,
             totalDebt: tmpl.liabilityAmount,
-            monthlyPayment: tmpl.liabilityMonthlyPayment ?? 0,
+            monthlyPayment: tmpl.liabilityMonthlyPayment ?? Math.round(tmpl.liabilityAmount * 0.005),
           });
-          player.expenses.homeMortgagePayment += tmpl.liabilityMonthlyPayment ?? 0;
+          // ⚠ 不要再把 liabilityMonthlyPayment 加進 homeMortgagePayment：
+          //   負債月付會由 totalExpenses getter 自動加總（見 fix-5），且資產的
+          //   monthlyCashflow 在資料設計上「已扣除貸款月付的淨額」，
+          //   再加入支出會造成雙重扣除。
         }
-      }
+      });
     }
 
-    logPlayerEvent(player, gs, 'franchise', `轉職加盟主（支付 $${FRANCHISE_CASH_THRESHOLD} 加盟金）`,
-      player.cash, player.monthlyCashflow, 0, {});
+    logPlayerEvent(player, gs, 'franchise', `轉職加盟主（支付 $${FRANCHISE_CASH_THRESHOLD.toLocaleString()} 加盟金）`,
+      _bfCB, _bfFB, 0, {});
 
     console.log(`[buyFranchise] ${player.name}（${roomId}）成功申請加盟`);
     socket.emit('franchisePurchased', { professionName: franchise.name, initialCashflow: player.monthlyCashflow });
@@ -1642,6 +1680,12 @@ io.on('connection', (socket: Socket) => {
     const offer = gs.pendingLoanOffers?.[payload.offerId];
     if (!offer) { socket.emit('error', { message: '借貸邀請已過期。' }); return; }
 
+    // ⚠ 安全性：只有「指定的借款人」可以接受／拒絕這筆 offer
+    if (socket.id !== offer.borrowerId) {
+      socket.emit('error', { message: '此借貸邀請不是給你的，無權回應。' });
+      return;
+    }
+
     const lender = gs.players.get(offer.lenderId);
     const borrower = gs.players.get(socket.id);
     if (!lender || !borrower) return;
@@ -1679,7 +1723,8 @@ io.on('connection', (socket: Socket) => {
       totalDebt: offer.amount,
       monthlyPayment: monthlyInterest,
     });
-    borrower.expenses.otherExpenses += monthlyInterest;
+    // ⚠ 不再寫入 otherExpenses（會被無擔保負債月付自動加進 totalExpenses）。
+    // 過去這樣寫會導致還清後 otherExpenses 殘留幽靈月息。
 
     emitToRoom(roomId, 'loanAccepted', {
       loanId, lenderId: offer.lenderId, lenderName: lender.name,
@@ -1688,6 +1733,127 @@ io.on('connection', (socket: Socket) => {
     });
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
     console.log(`[p2ploan] ${lender.name} 借款 $${offer.amount} 給 ${borrower.name}（月息 $${monthlyInterest}）`);
+  });
+
+  // ----------------------------------------------------------
+  // P2P 借貸：「主動請求借款」（loanRequest / loanRequestResponse）
+  // 借款人發起 → 指定的貸款方可以接受/拒絕
+  // ----------------------------------------------------------
+  socket.on('loanRequest', (payload: { targetPlayerId: string; amount: number; monthlyRate: number }) => {
+    const gs = getRoomState(socket);
+    if (!gs) return;
+    const roomId = gs.gameId;
+
+    const borrower = gs.players.get(socket.id);
+    const lender = gs.players.get(payload.targetPlayerId);
+    if (!borrower || !lender) { socket.emit('error', { message: '玩家不存在。' }); return; }
+    if (!lender.isAlive) { socket.emit('error', { message: '對方已出局。' }); return; }
+    if (borrower.id === lender.id) { socket.emit('error', { message: '不能向自己借款。' }); return; }
+    if (!Number.isFinite(payload.amount) || payload.amount <= 0) {
+      socket.emit('error', { message: '借款金額必須為正數。' }); return;
+    }
+    if (payload.monthlyRate < 0 || payload.monthlyRate > 0.1) {
+      socket.emit('error', { message: '月利率需在 0–10% 之間。' }); return;
+    }
+    // 借款人現有無擔保負債 + 此次借款不可超過信用上限
+    const _existingUnsecured = (() => {
+      const securedIds = new Set(
+        borrower.assets.map((a) => a.linkedLiabilityId).filter((id): id is string => Boolean(id))
+      );
+      return borrower.liabilities.filter((l) => !securedIds.has(l.id))
+        .reduce((s, l) => s + l.totalDebt, 0);
+    })();
+    const { getLoanLimit } = require('./gameConfig');
+    const maxLoan = getLoanLimit(borrower.creditScore);
+    if (_existingUnsecured + payload.amount > maxLoan) {
+      socket.emit('error', {
+        message: `超過你的借款上限 $${maxLoan.toLocaleString()}（已用 $${_existingUnsecured.toLocaleString()}）。`,
+      });
+      return;
+    }
+
+    const requestId = `lr-${Date.now()}`;
+    if (!gs.pendingLoanRequests) gs.pendingLoanRequests = {};
+    gs.pendingLoanRequests[requestId] = {
+      borrowerId: socket.id, lenderId: payload.targetPlayerId,
+      amount: payload.amount, monthlyRate: payload.monthlyRate, createdAt: Date.now(),
+    };
+
+    emitToRoom(roomId, 'loanRequestReceived', {
+      requestId,
+      borrowerId: socket.id, borrowerName: borrower.name,
+      lenderId: payload.targetPlayerId, lenderName: lender.name,
+      amount: payload.amount, monthlyRate: payload.monthlyRate,
+    });
+    console.log(`[loanRequest] ${borrower.name} 請求 ${lender.name} 借款 $${payload.amount}（月利率 ${(payload.monthlyRate * 100).toFixed(2)}%）`);
+  });
+
+  socket.on('loanRequestResponse', (payload: { requestId: string; accepted: boolean }) => {
+    const gs = getRoomState(socket);
+    if (!gs) return;
+    const roomId = gs.gameId;
+
+    const req = gs.pendingLoanRequests?.[payload.requestId];
+    if (!req) { socket.emit('error', { message: '借款請求已過期。' }); return; }
+
+    // 安全性：只有「指定的貸款方」可以接受／拒絕
+    if (socket.id !== req.lenderId) {
+      socket.emit('error', { message: '此借款請求不是給你的，無權回應。' });
+      return;
+    }
+
+    const lender = gs.players.get(socket.id);
+    const borrower = gs.players.get(req.borrowerId);
+    if (!lender || !borrower) return;
+
+    delete gs.pendingLoanRequests![payload.requestId];
+
+    if (!payload.accepted) {
+      emitToRoom(roomId, 'loanRequestDeclined', {
+        requestId: payload.requestId,
+        borrowerId: req.borrowerId,
+        lenderId: socket.id,
+      });
+      return;
+    }
+
+    if (lender.cash < req.amount) {
+      socket.emit('error', { message: '你的現金已不足以提供此筆借款。' });
+      return;
+    }
+
+    // 資金轉移
+    lender.cash -= req.amount;
+    borrower.cash += req.amount;
+
+    const loanId = `p2p-${Date.now()}`;
+    const monthlyInterest = Math.round(req.amount * req.monthlyRate);
+
+    lender.assets.push({
+      id: loanId,
+      name: `借出給 ${borrower.name}`,
+      type: 'Business' as import('./gameConstants').AssetType,
+      cost: req.amount,
+      currentValue: req.amount,
+      monthlyCashflow: monthlyInterest,
+    });
+
+    borrower.liabilities.push({
+      id: loanId,
+      name: `向 ${lender.name} 借款`,
+      totalDebt: req.amount,
+      monthlyPayment: monthlyInterest,
+    });
+
+    emitToRoom(roomId, 'loanAccepted', {
+      loanId,
+      lenderId: socket.id, lenderName: lender.name,
+      borrowerId: req.borrowerId, borrowerName: borrower.name,
+      amount: req.amount, monthlyRate: req.monthlyRate, monthlyInterest,
+      initiatedBy: 'borrower',
+    });
+    emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+    console.log(`[loanRequestAccepted] ${lender.name} 同意借款 $${req.amount} 給 ${borrower.name}（月息 $${monthlyInterest}）`);
   });
 
   // ----------------------------------------------------------
@@ -1917,6 +2083,7 @@ io.on('connection', (socket: Socket) => {
     gs.paydayPlanningConfirmed = new Set();
     gs.pendingPartnershipOffers = {};
     gs.pendingLoanOffers = {};
+    gs.pendingLoanRequests = {};
     gs.activeAuctions = {};
 
     // 重置牌組
@@ -2516,15 +2683,16 @@ async function handleLandingSquare(
 
     switch (ftSqType) {
       case FastTrackSquareType.PaydayBonus: {
+        // ⚠ 修正：playerRoll 的 passedPaydays 已經呼叫 triggerPayday + paydayCount++ 了，
+        // 此處不再重複加 monthlyCashflow / paydayCount，只做「外圈發薪日專屬獎勵」：
+        //   1. 資產總值 × 1% 紅利現金（applyFastTrackPaydayBonus）
+        //   2. 所有資產 currentValue × 1.15 增值（applyFastTrackAppreciation）
         const bonus = applyFastTrackPaydayBonus(player);
-        const cf = player.monthlyCashflow;
-        player.cash += cf;
-        player.paydayCount += 1;
         applyFastTrackAppreciation(player);
-        emitCellEvent(socket, roomId, player.name, 'FT 發薪日', `💰 外圈發薪日！現金流 $${cf.toLocaleString()} + 資產增值獎勵。`);
+        emitCellEvent(socket, roomId, player.name, 'FT 發薪日獎勵', `💰 外圈發薪日獎勵！紅利現金 +$${bonus.toLocaleString()} + 全資產 +15% 增值。`);
         emitToRoom(roomId, 'fastTrackPayday', {
           playerId: player.id, playerName: player.name,
-          cashflow: cf, bonus, cashAfter: player.cash,
+          cashflow: 0, bonus, cashAfter: player.cash,
         });
         break;
       }
@@ -2701,8 +2869,23 @@ async function handleLandingSquare(
         const pool = DISEASE_CRISIS_EVENTS ?? [];
         if (pool.length > 0) {
           const c = pool[Math.floor(Math.random() * pool.length)];
-          emitCellEvent(socket, roomId, player.name, 'FT 危機事件', `⚠️ 外圈危機：${c.title}！`);
-          socket.emit('fastTrackCrisisCard', { crisis: c });
+          // ⚠ 修正：之前只 emit 卡片給前端，沒套用實際效果（cash/turnsToSkip 都不扣）
+          const _ftcCB = player.cash; const _ftcFB = player.monthlyCashflow; const _ftcNWB = calcNetWorth(player);
+          const crisisResult = applyCrisisCard(player, c);
+          emitCellEvent(socket, roomId, player.name, 'FT 危機事件',
+            `⚠️ 外圈危機：${c.title}！${crisisResult.wasInsured ? '保險豁免' : `現金 -$${crisisResult.effectiveCost.toLocaleString()}`}，跳過 ${crisisResult.turnsLost} 回合`);
+          logPlayerEvent(player, gs, 'crisis', `外圈危機：${c.title}`, _ftcCB, _ftcFB, _ftcNWB, { cardId: c.id, cardTitle: c.title, deathTriggered: crisisResult.deathTriggered });
+          if (crisisResult.deathTriggered) {
+            handlePlayerDeath(player, gs);
+            emitToRoom(roomId, 'playerDied', {
+              playerId: player.id,
+              playerName: player.name,
+              cause: '外圈危機',
+              crisis: c,
+            });
+          } else {
+            socket.emit('fastTrackCrisisCard', { crisis: c, result: crisisResult });
+          }
         } else {
           emitCellEvent(socket, roomId, player.name, 'FT 危機事件', '✅ 危機牌庫已空，平安通過。');
         }
@@ -2750,7 +2933,14 @@ async function handleLandingSquare(
         const { DISEASE_CRISIS_EVENTS: diseasePool } = require('./gameCards');
         const diseaseCard = diseasePool[Math.floor(Math.random() * diseasePool.length)];
         const hpBefore = player.stats.health;
-        player.stats.health = Math.max(0, player.stats.health - 20);
+        const justBedFT = applyHPChange(player, -20);
+        if (justBedFT) {
+          emitToRoom(roomId, 'playerBedridden', {
+            playerId: player.id,
+            playerName: player.name,
+            age: Math.round(getCurrentAge(gs)),
+          });
+        }
         const crisisResult = applyCrisisCard(player, diseaseCard);
         emitCellEvent(socket, roomId, player.name, 'FT 疾病危機', `🏥 疾病危機：${diseaseCard.title}！HP -20，請確認保險狀態。`);
         if (crisisResult.deathTriggered) {
@@ -2786,6 +2976,14 @@ async function handleLandingSquare(
   switch (squareType) {
     case SquareType.Payday:
       emitCellEvent(socket, roomId, player.name, '發薪日', '💰 發薪日到了！領取薪水，並規劃投資與生活安排。');
+      break;
+
+    case SquareType.SecondLife:
+      // 解鎖邏輯由 playerRoll 內 crossedCell24 偵測處理；停在此格只發提示訊息
+      emitCellEvent(socket, roomId, player.name, '第二人生',
+        player.hasPassedSecondLife
+          ? '🌟 第二人生格！被動收入 ≥ 支出即可脫出老鼠賽跑。'
+          : '🌟 你抵達了第二人生格！從此符合脫出老鼠賽跑的條件。');
       break;
 
     case SquareType.Baby: {
@@ -2971,70 +3169,76 @@ async function handleLandingSquare(
           effect: { type: 'dealAccepted', card: chosen },
         });
       } else {
-        // 玩家A放棄 → 廣播競標給所有玩家（20 秒）
-        drawnCards.forEach((c) => deck.discard(c));
+        // 玩家A放棄 → 廣播競標給所有玩家（每張抽到的牌各開一場 20 秒拍賣）
         emitToRoom(roomId, 'cardApplied', {
           playerId: player.id,
           squareType,
           effect: { type: 'dealDeclined' },
         });
 
-        const auctionCard = drawnCards[0];
-        const minBid = auctionCard.asset.downPayment ?? auctionCard.asset.cost ?? 0;
-        const auctionId = `auction-${Date.now()}`;
-        const auctionEndTime = Date.now() + 20000;
+        // ⚠ 修正：以前 NT≥5 抽 2 張時只拍賣 drawnCards[0]，drawnCards[1] 直接消失
         if (!gs.activeAuctions) gs.activeAuctions = {};
-        gs.activeAuctions[auctionId] = {
-          dealCardId: auctionCard.id,
-          startTime: Date.now(), endTime: auctionEndTime,
-          highestBid: 0, minBid,
-          triggeredBy: player.id, triggeredByName: player.name,
-          cardInfo: { name: auctionCard.title, monthlyCashflow: auctionCard.asset.monthlyCashflow ?? 0, downPayment: minBid },
-        };
 
-        socket.to(roomId).emit('dealAuctionStarted', {
-          auctionId, triggeredBy: player.id, triggeredByName: player.name,
-          card: {
-            id: auctionCard.id,
-            name: auctionCard.title,
-            description: auctionCard.description,
-            minBid,
-            monthlyCashflow: auctionCard.asset.monthlyCashflow,
-          },
-          endsAt: auctionEndTime,
-        });
+        drawnCards.forEach((auctionCard, idx) => {
+          const minBid = auctionCard.asset.downPayment ?? auctionCard.asset.cost ?? 0;
+          const auctionId = `auction-${Date.now()}-${idx}`;
+          const auctionEndTime = Date.now() + 20000;
+          gs.activeAuctions![auctionId] = {
+            dealCardId: auctionCard.id,
+            startTime: Date.now(), endTime: auctionEndTime,
+            highestBid: 0, minBid,
+            triggeredBy: player.id, triggeredByName: player.name,
+            cardInfo: { name: auctionCard.title, monthlyCashflow: auctionCard.asset.monthlyCashflow ?? 0, downPayment: minBid },
+          };
 
-        // 20 秒後結算
-        setTimeout(() => {
-          const auction = gs.activeAuctions?.[auctionId];
-          if (!auction) return;
-          delete gs.activeAuctions![auctionId];
+          socket.to(roomId).emit('dealAuctionStarted', {
+            auctionId, triggeredBy: player.id, triggeredByName: player.name,
+            card: {
+              id: auctionCard.id,
+              name: auctionCard.title,
+              description: auctionCard.description,
+              minBid,
+              monthlyCashflow: auctionCard.asset.monthlyCashflow,
+            },
+            endsAt: auctionEndTime,
+          });
 
-          if (auction.highestBidderId && auction.highestBid >= minBid) {
-            const winner = gs.players.get(auction.highestBidderId);
-            if (winner && winner.cash >= auction.highestBid) {
-              const _wCB = winner.cash; const _wFB = winner.monthlyCashflow; const _wNWB = calcNetWorth(winner);
-              winner.cash -= auction.highestBid;
-              player.cash += auction.highestBid;
-              acceptDealCard(winner, auctionCard);
-              logPlayerEvent(winner, gs, 'asset_buy', `競標得標：${auctionCard.title}（月現金流 ${(auctionCard.asset.monthlyCashflow ?? 0) >= 0 ? '+' : ''}$${auctionCard.asset.monthlyCashflow ?? 0}）`, _wCB, _wFB, _wNWB, { cardId: auctionCard.id, cardTitle: auctionCard.title });
+          // 20 秒後結算
+          setTimeout(() => {
+            const auction = gs.activeAuctions?.[auctionId];
+            if (!auction) return;
+            delete gs.activeAuctions![auctionId];
+
+            if (auction.highestBidderId && auction.highestBid >= minBid) {
+              const winner = gs.players.get(auction.highestBidderId);
+              if (winner && winner.cash >= auction.highestBid) {
+                const _wCB = winner.cash; const _wFB = winner.monthlyCashflow; const _wNWB = calcNetWorth(winner);
+                winner.cash -= auction.highestBid;
+                player.cash += auction.highestBid;
+                acceptDealCard(winner, auctionCard);
+                logPlayerEvent(winner, gs, 'asset_buy', `競標得標：${auctionCard.title}（月現金流 ${(auctionCard.asset.monthlyCashflow ?? 0) >= 0 ? '+' : ''}$${auctionCard.asset.monthlyCashflow ?? 0}）`, _wCB, _wFB, _wNWB, { cardId: auctionCard.id, cardTitle: auctionCard.title });
+                emitToRoom(roomId, 'dealAuctionEnded', {
+                  auctionId,
+                  winnerId: auction.highestBidderId,
+                  winnerName: auction.highestBidderName,
+                  winningBid: auction.highestBid,
+                  cardName: auctionCard.title,
+                  hadBids: true,
+                });
+                emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+                deck.discard(auctionCard);
+              } else {
+                deck.discard(auctionCard);
+              }
+            } else {
               emitToRoom(roomId, 'dealAuctionEnded', {
-                auctionId,
-                winnerId: auction.highestBidderId,
-                winnerName: auction.highestBidderName,
-                winningBid: auction.highestBid,
-                cardName: auctionCard.title,
-                hadBids: true,
+                auctionId, winnerId: null, winnerName: null,
+                winningBid: 0, cardName: auctionCard.title, hadBids: false,
               });
-              emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+              deck.discard(auctionCard);
             }
-          } else {
-            emitToRoom(roomId, 'dealAuctionEnded', {
-              auctionId, winnerId: null, winnerName: null,
-              winningBid: 0, cardName: auctionCard.title, hadBids: false,
-            });
-          }
-        }, 20000);
+          }, 20000);
+        });
       }
       break;
     }
@@ -3062,8 +3266,12 @@ async function handleLandingSquare(
       const currentAge = getCurrentAge(gs);
       const stage = getLifeStage(currentAge);
 
+      // 危機觸發機率公式（修正前 1.0/2.2≈45% 過低，年輕期幾乎都閃過）：
+      //   trigger = clamp(freqMultiplier × 0.65, 0.6, 1.0)
+      // Youth: 65%, Family: 78%, Transition: 97%, Retirement+: 100%
       const freqMultiplier = CRISIS_FREQ_BY_STAGE[stage];
-      if (Math.random() > Math.min(1, freqMultiplier / 2.2)) {
+      const triggerProb = Math.max(0.6, Math.min(1, freqMultiplier * 0.65));
+      if (Math.random() > triggerProb) {
         emitCellEvent(socket, roomId, player.name, '危機事件', '🍀 恭喜！這次危機擦身而過，平安無事。');
         emitToRoom(roomId, 'cardApplied', {
           playerId: player.id,

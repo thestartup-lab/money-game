@@ -82,6 +82,7 @@ export default function FinancialStatement({ player }: Props) {
           {player.expenses.carLoanPayment > 0 && <><span className="text-gray-400">車貸</span><span className="negative text-right">{fmt(player.expenses.carLoanPayment)}</span></>}
           {player.expenses.childExpenses > 0 && <><span className="text-gray-400">子女</span><span className="negative text-right">{fmt(player.expenses.childExpenses)}</span></>}
           {player.expenses.insurancePremiums > 0 && <><span className="text-gray-400">保費</span><span className="negative text-right">{fmt(player.expenses.insurancePremiums)}</span></>}
+          {(player.expenses.unsecuredLoanPayments ?? 0) > 0 && <><span className="text-gray-400" title="應急借款、進修貸款、P2P、投資槓桿借款等月付">借款月付</span><span className="negative text-right">{fmt(player.expenses.unsecuredLoanPayments ?? 0)}</span></>}
           {player.expenses.otherExpenses > 0 && <><span className="text-gray-400">其他</span><span className="negative text-right">{fmt(player.expenses.otherExpenses)}</span></>}
         </div>
       </div>
