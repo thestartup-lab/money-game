@@ -957,6 +957,16 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
+    // 驗證目標職業是否在合法的轉職清單中（同象限 + 資格符合）
+    const allowedIds = (buildAvailableProfessions(player) as Array<{ id: string }>).map((p) => p.id);
+    if (!allowedIds.includes(payload.newProfessionId)) {
+      socket.emit('careerChangeResult', {
+        success: false,
+        message: '無法轉職至此職業（不符合資格或非同象限）。',
+      });
+      return;
+    }
+
     const _ccCB = player.cash; const _ccFB = player.monthlyCashflow; const _ccNWB = calcNetWorth(player);
     const result = executeCareerChange(player, payload.newProfessionId);
     socket.emit('careerChangeResult', result);
@@ -3154,9 +3164,20 @@ function buildAffordableOptions(player: Player): object {
 }
 
 function buildAvailableProfessions(player: Player): object[] {
-  return PROFESSIONS
-    .filter((p) => p.id !== player.profession.id)
-    .map((p) => ({ id: p.id, name: p.name, salary: p.startingSalary }));
+  // 轉職規則：
+  // 1. 必須與玩家當前職業同象限（E 留 E、S 留 S，避免跨象限亂跳）
+  // 2. 排除目前職業
+  // 3. 沿用 getAvailableProfessions 的資格條件（academicMin、socialMin、advancedOnly）
+  const myQuadrant = player.profession.quadrant;
+  const eligible = getAvailableProfessions(player);
+  return eligible
+    .filter((p) => p.id !== player.profession.id && p.quadrant === myQuadrant)
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      quadrant: p.quadrant,
+      salary: p.startingSalary,
+    }));
 }
 
 // ============================================================

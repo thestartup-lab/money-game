@@ -135,16 +135,29 @@ export default function PlayerPage() {
       }
     });
     s.on('disconnect', () => setConnected(false));
-    s.on('error', (p: { message: string }) => { setError(p.message); setRollingLocked(false); });
+    s.on('error', (p: { message: string }) => {
+      setError(p.message);
+      setRollingLocked(false);
+      // 若伺服器端遺失了我們的房間記錄（Railway 重啟、idle 重置等），
+      // 主動把使用者帶回加入頁，避免一直停留在已失效的遊戲畫面
+      if (p.message?.includes('尚未加入') || p.message?.includes('房間') && p.message?.includes('不存在')) {
+        localStorage.removeItem('baisuiGame');
+        setGameState(null);
+        setView('join');
+      }
+    });
 
     // 重連成功
     s.on('rejoinSuccess', () => {
       addNotification('✅ 重連成功，已恢復遊戲資料！');
     });
 
-    // 重連失敗（資料已過期或房間不存在）
-    s.on('rejoinFailed', () => {
+    // 重連失敗（資料已過期或房間不存在 — 通常是後端重啟導致）
+    s.on('rejoinFailed', (p?: { message?: string }) => {
       localStorage.removeItem('baisuiGame');
+      setGameState(null);
+      setView('join');
+      setError(p?.message ?? '伺服器資料已過期，請重新加入房間。');
     });
 
     s.on('gameStateUpdate', (gs: GameState) => {

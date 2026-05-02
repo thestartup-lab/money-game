@@ -128,8 +128,10 @@ export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPla
               { key: 'networkInvest' as const,  label: `人脈拓展 NT +1（現 ${data.currentStats.network}）`,                                   opt: data.affordableOptions.networkInvest, icon: '🤝' },
             ].map(({ key, label, opt, icon }) => {
               const checked = checks[key];
-              const canAfford = playerCash - (checked ? 0 : opt.cost) - totalCost + (checked ? opt.cost : 0) >= 0;
-              const disabled = !opt.available || (!checked && remaining < opt.cost);
+              // FQ 升滿（10/10）時 cost 為 null，視為 0 並強制 disabled
+              const cost = opt.cost ?? 0;
+              const canAfford = playerCash - (checked ? 0 : cost) - totalCost + (checked ? cost : 0) >= 0;
+              const disabled = !opt.available || (!checked && remaining < cost);
               return (
                 <label
                   key={key}
