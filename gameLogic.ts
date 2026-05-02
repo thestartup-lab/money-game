@@ -85,7 +85,9 @@ export function calculateCurrentSalary(player: Player): number {
       return min + Math.round(Math.random() * (max - min));
     }
     case 'nt_driven':
-      return Math.round(stats.network * (profession.salaryPerNT ?? 400));
+      // total = salaryBase + NT × salaryPerNT（salaryBase 為 0 時即原本「純佣金」邏輯）
+      return (profession.salaryBase ?? 0) +
+        Math.round(stats.network * (profession.salaryPerNT ?? 400));
     case 'sk_driven':
       return profession.startingSalary +
         Math.round(stats.careerSkill * (profession.salaryPerSK ?? 50));

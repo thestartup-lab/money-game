@@ -358,11 +358,12 @@ export const PROFESSIONS: Profession[] = [
 
   {
     id: 'salesperson',
-    name: '無底薪業務員',
+    name: '低底薪業務員',
     quadrant: 'S',
     salaryType: 'nt_driven',
-    startingSalary: 0,          // 展示用基準；實際每發薪日 = NT × salaryPerNT
-    salaryPerNT: 6_000,         // NT=1→$6,000; NT=5→$30,000; NT=10→$60,000
+    startingSalary: 12_000,     // 展示用基準（底薪）；實際 = base + NT × salaryPerNT
+    salaryBase: 12_000,         // 底薪保底（避免 NT=1 月份直接破產）
+    salaryPerNT: 6_000,         // NT=1→$18,000; NT=5→$42,000; NT=10→$72,000
     startingTaxes: 0,
     startingHomeMortgage: 4_500,
     startingCarLoan: 2_200,
@@ -457,7 +458,8 @@ export const PROFESSIONS: Profession[] = [
     name: '保險業務員',
     quadrant: 'S',
     salaryType: 'nt_driven',
-    startingSalary: 0,
+    startingSalary: 8_000,
+    salaryBase: 8_000,           // 底薪 + 佣金；NT=1→$14,800, NT=10→$76,000
     salaryPerNT: 6_800,
     startingTaxes: 0,
     startingHomeMortgage: 3_800,
@@ -472,7 +474,8 @@ export const PROFESSIONS: Profession[] = [
     name: '房仲業務員',
     quadrant: 'S',
     salaryType: 'nt_driven',
-    startingSalary: 0,
+    startingSalary: 8_000,
+    salaryBase: 8_000,           // 底薪 + 佣金；NT=1→$15,500, NT=10→$83,000
     salaryPerNT: 7_500,
     startingTaxes: 0,
     startingHomeMortgage: 4_500,
@@ -487,7 +490,8 @@ export const PROFESSIONS: Profession[] = [
     name: '直銷業務員',
     quadrant: 'S',
     salaryType: 'nt_driven',
-    startingSalary: 0,
+    startingSalary: 5_000,
+    salaryBase: 5_000,           // 底薪 + 佣金；NT=1→$10,700, NT=10→$62,000
     salaryPerNT: 5_700,
     startingTaxes: 0,
     startingHomeMortgage: 3_000,
@@ -615,7 +619,8 @@ export const PROFESSIONS: Profession[] = [
     name: '財務顧問',
     quadrant: 'S',
     salaryType: 'nt_driven',
-    startingSalary: 0,
+    startingSalary: 22_000,
+    salaryBase: 22_000,          // 底薪 + 佣金；NT=1→$32,500, NT=10→$127,000
     salaryPerNT: 10_500,
     startingTaxes: 0,
     startingHomeMortgage: 9_000,
@@ -652,17 +657,17 @@ export const PROFESSIONS: Profession[] = [
     salaryType: 'fixed',
     startingSalary: 0,           // 收入完全來自事業現金流
     startingTaxes: 0,
-    startingHomeMortgage: 6_000,
-    startingCarLoan: 2_200,
-    startingCreditCard: 1_200,
-    startingOtherExpenses: 7_500,
+    startingHomeMortgage: 4_500,  // 平衡：原 6,000 → 4,500
+    startingCarLoan: 1_500,       // 平衡：原 2,200 → 1,500
+    startingCreditCard: 900,      // 平衡：原 1,200 → 900
+    startingOtherExpenses: 4_500, // 平衡：原 7,500 → 4,500
     startingCash: 18_000,
     startingAssets: [
       {
         name: '小型餐廳事業',
         type: AssetType.Business,
         cost: 1_200_000,
-        monthlyCashflow: 12_000,  // 月淨收入（已扣貸款月付 $6,000）
+        monthlyCashflow: 15_000,  // 平衡：原 12,000 → 15,000（已扣貸款月付 $6,000）
         currentValue: 1_200_000,
         liabilityName: '事業創業貸款',
         liabilityAmount: 975_000,

@@ -88,6 +88,12 @@ export interface Profession {
   maxSalary?: number;
   /** nt_driven 專用：每 1 NT 帶來的月收入 */
   salaryPerNT?: number;
+  /**
+   * nt_driven 專用：底薪基數（保底）。
+   * 公式：total = salaryBase + NT × salaryPerNT
+   * 用於避免 NT=1 起手月份直接破產。
+   */
+  salaryBase?: number;
   /** sk_driven 專用：每 1 SK 點在 startingSalary 之上增加的月收入 */
   salaryPerSK?: number;
 
