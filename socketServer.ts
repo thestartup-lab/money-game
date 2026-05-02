@@ -48,6 +48,8 @@ import {
   SECOND_LIFE_CELL,
   STOCK_DCA_MONTHLY_RETURN_RATE,
   SKILL_CAREER_CHANGE_THRESHOLD,
+  getLoanLimit,
+  getLoanRate,
 } from './gameConfig';
 import {
   MEDICAL_INSURANCE_PREMIUM,
@@ -2471,26 +2473,49 @@ async function handleLandingSquare(
         emitCellEvent(socket, roomId, player.name, 'FT 大交易', `💼 外圈大型投資機會：${deal.title}！`);
         pauseGameClock(gs);
         emitToRoom(roomId, 'gamePaused', { reason: '外圈大型交易', currentAge: Math.round(getCurrentAge(gs) * 10) / 10 });
+        const _ftExistingLoan = player.liabilities.reduce((s, l) => s + l.totalDebt, 0);
+        const _ftLoanAvailable = Math.max(0, getLoanLimit(player.creditScore) - _ftExistingLoan);
         socket.emit('fastTrackDealCard', {
           squareType: ftSqType,
           deal,
           isFastTrack: true,
+          creditScore: player.creditScore,
+          loanAvailable: _ftLoanAvailable,
         });
         // 等待玩家決策（30 秒逾時自動略過）
         const ftDealDecision = await waitForCardDecision(socket, 30000);
         resumeGameClock(gs);
         emitToRoom(roomId, 'gameResumed', { resumedAt: new Date() });
         const ftCost = deal.asset.downPayment ?? deal.asset.cost;
-        if (ftDealDecision?.accept === true && player.cash >= ftCost) {
-          acceptDealCard(player, deal);
-          emitCellEvent(socket, roomId, player.name, 'FT 大交易', `✅ 成交！${deal.title} 月現金流 +$${deal.asset.monthlyCashflow.toLocaleString()}`);
-          emitToRoom(roomId, 'cardApplied', {
-            playerId: player.id,
-            squareType: ftSqType,
-            effect: { type: 'dealAccepted', card: deal },
-          });
-        } else if (ftDealDecision?.accept === true) {
-          socket.emit('error', { message: `現金不足，無法購買 ${deal.title}（需 $${ftCost.toLocaleString()}）。` });
+        if (ftDealDecision?.accept === true) {
+          // 先處理槓桿借款（如果玩家選擇）
+          if (ftDealDecision.useLeverage === true && player.cash < ftCost) {
+            const shortfall = ftCost - player.cash;
+            const lvResult = takeLeverageLoan(player, shortfall, deal.title);
+            if (!lvResult.success) {
+              socket.emit('error', { message: `投資槓桿借款失敗：${lvResult.message}` });
+              break;
+            }
+            socket.emit('loanTaken', {
+              liabilityId: lvResult.liabilityId,
+              loanType: 'leverage',
+              amount: lvResult.amount,
+              monthlyPayment: lvResult.monthlyPayment,
+              newCreditScore: lvResult.newCreditScore,
+            });
+          }
+
+          if (player.cash >= ftCost) {
+            acceptDealCard(player, deal);
+            emitCellEvent(socket, roomId, player.name, 'FT 大交易', `✅ 成交！${deal.title} 月現金流 +$${deal.asset.monthlyCashflow.toLocaleString()}`);
+            emitToRoom(roomId, 'cardApplied', {
+              playerId: player.id,
+              squareType: ftSqType,
+              effect: { type: 'dealAccepted', card: deal },
+            });
+          } else {
+            socket.emit('error', { message: `現金不足，無法購買 ${deal.title}（需 $${ftCost.toLocaleString()}）。` });
+          }
         }
         break;
       }
@@ -2821,7 +2846,16 @@ async function handleLandingSquare(
         downPayment: c.asset.downPayment ?? c.asset.cost,
         monthlyCashflow: c.asset.monthlyCashflow,
       }));
-      socket.emit('dealCardsDrawn', { cards: cardsForClient, canPickTwo: drawCount > 1, playerCash: player.cash });
+      // 計算玩家當前可用「投資槓桿借款」額度（給前端決定是否提供「借款購買」選項）
+      const _existingLoanTotal = player.liabilities.reduce((s, l) => s + l.totalDebt, 0);
+      const _loanAvailable = Math.max(0, getLoanLimit(player.creditScore) - _existingLoanTotal);
+      socket.emit('dealCardsDrawn', {
+        cards: cardsForClient,
+        canPickTwo: drawCount > 1,
+        playerCash: player.cash,
+        creditScore: player.creditScore,
+        loanAvailable: _loanAvailable,
+      });
       const decision = await waitForCardDecision(socket);
 
       if (decision && decision.accepted) {
@@ -2832,6 +2866,26 @@ async function handleLandingSquare(
           : drawnCards[0];
 
         const downPayment = chosen.asset.downPayment ?? chosen.asset.cost ?? 0;
+
+        // 若玩家選擇「用槓桿借款購買」，先補上現金缺口
+        if (decision.useLeverage === true && player.cash < downPayment) {
+          const shortfall = downPayment - player.cash;
+          const lvResult = takeLeverageLoan(player, shortfall, chosen.title);
+          if (!lvResult.success) {
+            socket.emit('error', { message: `投資槓桿借款失敗：${lvResult.message}` });
+            drawnCards.forEach((c) => deck.discard(c));
+            emitToRoom(roomId, 'cardApplied', { playerId: player.id, squareType, effect: { type: 'dealDeclined' } });
+            break;
+          }
+          socket.emit('loanTaken', {
+            liabilityId: lvResult.liabilityId,
+            loanType: 'leverage',
+            amount: lvResult.amount,
+            monthlyPayment: lvResult.monthlyPayment,
+            newCreditScore: lvResult.newCreditScore,
+          });
+        }
+
         if (player.cash < downPayment) {
           socket.emit('error', { message: `現金不足，無法完成此交易（需 $${downPayment.toLocaleString()}，目前 $${player.cash.toLocaleString()}）。` });
           drawnCards.forEach((c) => deck.discard(c));

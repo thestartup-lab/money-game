@@ -119,63 +119,105 @@ export default function EventCard({ event, onDecision, onDismiss }: EventCardPro
         </>
       )}
 
-      {event.kind === 'deal_pick' && (
-        <>
-          <div className="text-green-400 font-bold text-base">📋 交易機會</div>
-          <div className="flex justify-between text-sm mb-1">
-            <span className="text-gray-400">手頭現金</span>
-            <span className="font-bold text-emerald-400">${event.playerCash.toLocaleString()}</span>
-          </div>
-          <p className="text-xs text-gray-400">選擇一張交易牌或拒絕</p>
-          <div className="space-y-2">
-            {event.cards.map((card) => {
-              const canAfford = event.playerCash >= (card.downPayment ?? 0);
-              const remaining = event.playerCash - (card.downPayment ?? 0);
-              return (
+      {event.kind === 'deal_pick' && (() => {
+        const creditScore = event.creditScore ?? 600;
+        const loanAvailable = event.loanAvailable ?? 0;
+        const baseRate =
+          creditScore >= 750 ? 0.005 :
+          creditScore >= 650 ? 0.008 :
+          creditScore >= 550 ? 0.012 : 0.020;
+        const leverageRate = baseRate * 0.8;
+
+        const selected = event.cards.find((c) => c.id === selectedCardId);
+        const selectedDownPayment = selected?.downPayment ?? 0;
+        const selectedShortfall = Math.max(0, selectedDownPayment - event.playerCash);
+        const canUseLeverageForSelected = selected != null && selectedShortfall > 0 && selectedShortfall <= loanAvailable;
+        const leverageMonthly = Math.max(1, Math.round(selectedShortfall * leverageRate));
+
+        return (
+          <>
+            <div className="text-green-400 font-bold text-base">📋 交易機會</div>
+            <div className="flex justify-between text-sm mb-1">
+              <span className="text-gray-400">手頭現金</span>
+              <span className="font-bold text-emerald-400">${event.playerCash.toLocaleString()}</span>
+            </div>
+            {event.creditScore != null && (
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-gray-500">信用分 {event.creditScore}（槓桿利率 {(leverageRate * 100).toFixed(2)}%/月）</span>
+                <span className="text-gray-500">可借 ${loanAvailable.toLocaleString()}</span>
+              </div>
+            )}
+            <p className="text-xs text-gray-400">選擇一張交易牌；現金不足可用「投資槓桿借款」補差額（不扣信用）</p>
+            <div className="space-y-2">
+              {event.cards.map((card) => {
+                const dp = card.downPayment ?? 0;
+                const canAffordCash = event.playerCash >= dp;
+                const shortfall = Math.max(0, dp - event.playerCash);
+                const canAffordLeverage = !canAffordCash && shortfall > 0 && shortfall <= loanAvailable;
+                const selectable = canAffordCash || canAffordLeverage;
+                const remaining = event.playerCash - dp;
+                return (
+                  <button
+                    key={card.id}
+                    className={`w-full text-left p-3 rounded-xl border text-sm transition-colors ${
+                      selectedCardId === card.id
+                        ? 'border-green-400 bg-green-900'
+                        : canAffordCash
+                          ? 'border-gray-600 bg-gray-700 hover:border-green-500'
+                          : canAffordLeverage
+                            ? 'border-emerald-700 bg-gray-800 hover:border-emerald-500'
+                            : 'border-red-800 bg-gray-800 opacity-60 cursor-not-allowed'
+                    }`}
+                    onClick={() => selectable && setSelectedCardId(card.id)}
+                    disabled={!selectable}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-white">{card.name}</span>
+                      {!canAffordCash && canAffordLeverage && <span className="text-[10px] text-emerald-400">可槓桿購買</span>}
+                      {!canAffordCash && !canAffordLeverage && <span className="text-xs text-red-400">超出借款上限</span>}
+                    </div>
+                    {card.description && <div className="text-gray-400 text-xs mb-1">{card.description}</div>}
+                    <div className="text-gray-300 text-xs">
+                      頭期款：<span className={canAffordCash ? 'text-yellow-300' : 'text-orange-300'}>${dp.toLocaleString()}</span>
+                      {'  '}月現金流：
+                      <span className={card.monthlyCashflow >= 0 ? 'text-green-400' : 'text-red-400'}>
+                        {card.monthlyCashflow >= 0 ? '+' : ''}${(card.monthlyCashflow ?? 0).toLocaleString()}
+                      </span>
+                    </div>
+                    {canAffordCash && selectedCardId === card.id && (
+                      <div className="text-xs text-gray-400 mt-0.5">付現後剩餘：<span className="text-emerald-400">${remaining.toLocaleString()}</span></div>
+                    )}
+                    {!canAffordCash && canAffordLeverage && selectedCardId === card.id && (
+                      <div className="text-[11px] text-emerald-300 mt-0.5">
+                        差額 ${shortfall.toLocaleString()} 借款 → 月付 ${Math.max(1, Math.round(shortfall * leverageRate)).toLocaleString()}（{(leverageRate * 100).toFixed(2)}%/月，不扣信用）
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {canUseLeverageForSelected ? (
                 <button
-                  key={card.id}
-                  className={`w-full text-left p-3 rounded-xl border text-sm transition-colors ${
-                    selectedCardId === card.id
-                      ? 'border-green-400 bg-green-900'
-                      : canAfford
-                        ? 'border-gray-600 bg-gray-700 hover:border-green-500'
-                        : 'border-red-800 bg-gray-800 opacity-60 cursor-not-allowed'
-                  }`}
-                  onClick={() => canAfford && setSelectedCardId(card.id)}
-                  disabled={!canAfford}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-white">{card.name}</span>
-                    {!canAfford && <span className="text-xs text-red-400">現金不足</span>}
-                  </div>
-                  {card.description && <div className="text-gray-400 text-xs mb-1">{card.description}</div>}
-                  <div className="text-gray-300 text-xs">
-                    頭期款：<span className={canAfford ? 'text-yellow-300' : 'text-red-400'}>${(card.downPayment ?? 0).toLocaleString()}</span>
-                    {'  '}月現金流：
-                    <span className={card.monthlyCashflow >= 0 ? 'text-green-400' : 'text-red-400'}>
-                      {card.monthlyCashflow >= 0 ? '+' : ''}${(card.monthlyCashflow ?? 0).toLocaleString()}
-                    </span>
-                  </div>
-                  {canAfford && selectedCardId === card.id && (
-                    <div className="text-xs text-gray-400 mt-0.5">支付後剩餘：<span className="text-emerald-400">${remaining.toLocaleString()}</span></div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              className={`py-2 rounded-xl text-sm ${selectedCardId ? 'bg-green-700 hover:bg-green-600 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}
-              disabled={!selectedCardId}
-              onClick={() => selectedCardId && onDecision({ accepted: true, selectedCardId })}
-            >接受交易</button>
-            <button
-              className="py-2 rounded-xl text-sm bg-gray-700 hover:bg-gray-600 text-white"
-              onClick={() => onDecision({ accepted: false })}
-            >拒絕</button>
-          </div>
-        </>
-      )}
+                  className="py-2 rounded-xl text-sm bg-emerald-700 hover:bg-emerald-600 text-white"
+                  onClick={() => onDecision({ accepted: true, selectedCardId, useLeverage: true })}
+                  title={`借 $${selectedShortfall.toLocaleString()}，月付 $${leverageMonthly.toLocaleString()}`}
+                >🚀 槓桿借款購買</button>
+              ) : (
+                <button
+                  className={`py-2 rounded-xl text-sm ${selectedCardId && event.playerCash >= selectedDownPayment ? 'bg-green-700 hover:bg-green-600 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}
+                  disabled={!(selectedCardId && event.playerCash >= selectedDownPayment)}
+                  onClick={() => selectedCardId && onDecision({ accepted: true, selectedCardId })}
+                >接受交易</button>
+              )}
+              <button
+                className="py-2 rounded-xl text-sm bg-gray-700 hover:bg-gray-600 text-white"
+                onClick={() => onDecision({ accepted: false })}
+              >拒絕</button>
+            </div>
+          </>
+        );
+      })()}
 
       {event.kind === 'charity' && (
         <>

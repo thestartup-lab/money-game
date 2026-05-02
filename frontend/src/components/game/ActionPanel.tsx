@@ -62,6 +62,7 @@ interface Props {
   onSocialEvent: () => void;
   onBuyInsurance: (type: 'medical' | 'life' | 'property') => void;
   onTakeEmergencyLoan: (amount: number) => void;
+  onTakeLeverageLoan: (amount: number, targetAssetName: string) => void;
   onInvestStockDCA: (amount: number) => void;
   onLoanOffer: (targetId: string, amount: number, monthlyRate: number) => void;
   onSellAsset: (assetId: string) => void;
@@ -79,6 +80,7 @@ export default function ActionPanel({
   onSocialEvent,
   onBuyInsurance,
   onTakeEmergencyLoan,
+  onTakeLeverageLoan,
   onInvestStockDCA,
   onLoanOffer,
   onSellAsset,
@@ -90,6 +92,8 @@ export default function ActionPanel({
   const [showTravelPanel, setShowTravelPanel] = useState(false);
   const [insuranceConfirm, setInsuranceConfirm] = useState<'medical' | 'life' | 'property' | null>(null);
   const [showLoanPanel, setShowLoanPanel] = useState(false);
+  const [showLeveragePanel, setShowLeveragePanel] = useState(false);
+  const [leverageAssetName, setLeverageAssetName] = useState('');
   const [showDCAPanel, setShowDCAPanel] = useState(false);
   const [showP2PPanel, setShowP2PPanel] = useState(false);
   const [p2pTarget, setP2pTarget] = useState('');
@@ -360,6 +364,76 @@ export default function ActionPanel({
               onClick={() => setShowLoanPanel(true)}
             >
               🏦 申請應急借款
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── 投資槓桿借款（八折利率、不扣信用，僅限購買投資資產） ──── */}
+      {!isGameOver && (
+        <div className="card">
+          <div className="flex justify-between items-center mb-2">
+            <p className="text-xs text-gray-400">投資槓桿借款</p>
+            <span className="text-xs text-gray-500">
+              利率 {(loanRate * 0.8 * 100).toFixed(2)}%/月（不扣信用）
+            </span>
+          </div>
+
+          {showLeveragePanel ? (
+            <div className="space-y-2">
+              <p className="text-[11px] text-gray-400">
+                專為投資資產設計：享八折利率、不扣信用值。請輸入打算購買的資產名稱備註。
+              </p>
+              <div className="flex justify-between text-xs text-gray-400 mb-1">
+                <span>可借上限：${fmt(availableLoan)}</span>
+                <span>現有負債：${fmt(existingLoanTotal)}</span>
+              </div>
+              <input
+                type="text"
+                value={leverageAssetName}
+                onChange={(e) => setLeverageAssetName(e.target.value)}
+                placeholder="目標資產名稱（例：3房公寓）"
+                className="w-full rounded-lg bg-gray-700 border border-gray-600 text-white text-sm px-2 py-1.5"
+                maxLength={30}
+              />
+              {availableLoan <= 0 ? (
+                <p className="text-xs text-red-400 text-center py-2">已達借款上限，無法再借</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  {LOAN_AMOUNTS.filter((a) => a <= availableLoan).map((amt) => {
+                    const monthly = Math.max(1, Math.round(amt * loanRate * 0.8));
+                    const disabled = !leverageAssetName.trim();
+                    return (
+                      <button
+                        key={amt}
+                        disabled={disabled}
+                        onClick={() => {
+                          onTakeLeverageLoan(amt, leverageAssetName.trim() || '投資資產');
+                          setShowLeveragePanel(false);
+                          setLeverageAssetName('');
+                        }}
+                        className={`rounded-lg py-2 px-3 text-left text-sm border transition-colors ${
+                          disabled
+                            ? 'bg-gray-800 border-gray-700 text-gray-500 cursor-not-allowed'
+                            : 'bg-emerald-950 border-emerald-800 text-emerald-200 hover:bg-emerald-900'
+                        }`}
+                      >
+                        <div className="font-semibold">${fmt(amt)}</div>
+                        <div className="text-[10px] text-emerald-400">月付 ${fmt(monthly)}</div>
+                        <div className="text-[10px] text-gray-400">剩 ${fmt(player.cash + amt)}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <button className="text-xs text-gray-400 underline" onClick={() => { setShowLeveragePanel(false); setLeverageAssetName(''); }}>取消</button>
+            </div>
+          ) : (
+            <button
+              className="w-full rounded-xl py-2 text-sm bg-emerald-700 hover:bg-emerald-600 text-white font-semibold"
+              onClick={() => setShowLeveragePanel(true)}
+            >
+              🚀 投資槓桿借款
             </button>
           )}
         </div>

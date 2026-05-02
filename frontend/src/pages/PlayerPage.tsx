@@ -339,8 +339,14 @@ export default function PlayerPage() {
     s.on('crisisNTSkipAvailable', (p: { card: { title: string; description: string; baseCost: number }; network?: number; timeoutMs: number }) => {
       setActiveEvent({ kind: 'crisis_nt_skip', title: p.card.title, description: p.card.description, baseCost: p.card.baseCost, network: p.network ?? 0, timeoutMs: p.timeoutMs });
     });
-    s.on('dealCardsDrawn', (p: { cards: Array<{ id: string; name: string; description?: string; downPayment: number; monthlyCashflow: number }>; playerCash: number }) => {
-      setActiveEvent({ kind: 'deal_pick', cards: p.cards, playerCash: p.playerCash ?? 0 });
+    s.on('dealCardsDrawn', (p: { cards: Array<{ id: string; name: string; description?: string; downPayment: number; monthlyCashflow: number }>; playerCash: number; creditScore?: number; loanAvailable?: number }) => {
+      setActiveEvent({
+        kind: 'deal_pick',
+        cards: p.cards,
+        playerCash: p.playerCash ?? 0,
+        creditScore: p.creditScore,
+        loanAvailable: p.loanAvailable,
+      });
     });
     s.on('charityCardPending', (p: { amount: number }) => {
       setActiveEvent({ kind: 'charity', amount: p.amount });
@@ -992,6 +998,7 @@ export default function PlayerPage() {
                 onSocialEvent={() => emit('attendSocialEvent')}
                 onBuyInsurance={(t) => emit('buyInsurance', { insuranceType: t })}
                 onTakeEmergencyLoan={(amt) => emit('takeEmergencyLoan', { amount: amt })}
+                onTakeLeverageLoan={(amt, name) => emit('takeLeverageLoan', { amount: amt, targetAssetName: name })}
                 onInvestStockDCA={(amt) => emit('investStockDCA', { amount: amt })}
                 onLoanOffer={(targetId, amount, monthlyRate) => emit('loanOffer', { targetPlayerId: targetId, amount, monthlyRate })}
                 onSellAsset={(assetId) => emit('sellAsset', { assetId })}
