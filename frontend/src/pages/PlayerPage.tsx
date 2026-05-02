@@ -893,6 +893,9 @@ export default function PlayerPage() {
               <div className="text-yellow-300 font-bold text-sm">
                 {personalAge.toFixed(1)} 歲
               </div>
+              <div className="text-[10px] text-gray-500 leading-tight">
+                起始 {myPlayer.startAge ?? '?'} ｜時鐘 {gameState.currentAge.toFixed(1)}
+              </div>
               {gameState.isPaused && <div className="text-orange-400 text-xs">⏸ 暫停</div>}
               <div className={`text-xs font-bold ${myPlayer.monthlyCashflow >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                 {myPlayer.monthlyCashflow >= 0 ? '+' : ''}${fmt(myPlayer.monthlyCashflow)}/月
