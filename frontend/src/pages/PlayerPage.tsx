@@ -970,7 +970,7 @@ export default function PlayerPage() {
             <CollapsePanel title="行動" defaultOpen={false}>
               <ActionPanel
                 player={myPlayer}
-                currentAge={gameState.currentAge}
+                currentAge={personalAge}
                 otherPlayers={gameState.players.filter((p) => p.id !== myId && p.isAlive).map((p) => ({ id: p.id, name: p.name }))}
                 onTravel={(destId) => emit('goTravel', { destinationId: destId })}
                 onSocialEvent={() => emit('attendSocialEvent')}
