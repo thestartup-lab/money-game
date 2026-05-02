@@ -18,19 +18,19 @@
 
 /* ── 主棋盤容器（底圖由 JS 動態設定）──────────────────────── */
 /*
- * 父層 .gameboard-scroll 是 flex container；
- * 棋盤同時用 max-width:100% 與 max-height:100% 受限，
- * 配合 aspect-ratio: 16/9，瀏覽器會自動計算「能放入容器的最大 16:9 矩形」，
- * 不會超出容器，下方也不會被切掉。
+ * 用 height:100% 撐滿父容器高度，width 由 aspect-ratio 自動推算（≈ height × 16/9）。
+ * 並用 max-width:100% 防止寬度超過父容器；當寬度頂到 100% 時，aspect-ratio 會把高度
+ * 反推縮小，因此寬高永遠 fit 在父容器內，且保持 16:9 不被切掉。
  */
 .gameboard-wrapper {
   position: relative;
+  height: 100%;
+  width: auto;
   aspect-ratio: 16 / 9;
   max-width: 100%;
-  max-height: 100%;
   margin: 0 auto;
 
-  background-size: contain;
+  background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
 
