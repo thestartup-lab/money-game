@@ -82,6 +82,8 @@ export default function DisplayScreen() {
   const diceAnimRef = useRef<DiceRollData | null>(null);
   const pendingCenterEventsRef = useRef<{ evt: CellEvent; autoDismissMs?: number }[]>([]);
   const [positionOverride, setPositionOverride] = useState<Map<string, number>>(new Map());
+  // 外圈位置 override（FastTrack 階段擲骰動畫期間鎖定 fastTrackPosition）
+  const [positionOverrideOuter, setPositionOverrideOuter] = useState<Map<string, number>>(new Map());
 
   const addTicker = (msg: string) => setTicker((prev) => [msg, ...prev].slice(0, 6));
 
@@ -175,12 +177,15 @@ export default function DisplayScreen() {
       });
     });
 
-    s.on('playerRolled', (p: { playerId: string; playerName: string; colorIndex: number; dice: number[]; total: number; oldPosition: number; newPosition: number }) => {
+    s.on('playerRolled', (p: { playerId: string; playerName: string; colorIndex: number; dice: number[]; total: number; oldPosition: number; newPosition: number; isInFastTrack?: boolean }) => {
       const data = { ...p, key: Date.now() };
       setDiceAnim(data);
       diceAnimRef.current = data;
       // 動畫期間先把該玩家位置鎖回 oldPosition，等骰子停才實際移動
-      setPositionOverride((prev) => {
+      // 內外圈使用獨立的 override map，避免錯位
+      const isOuter = p.isInFastTrack ?? false;
+      const overrideMap = isOuter ? setPositionOverrideOuter : setPositionOverride;
+      overrideMap((prev) => {
         const next = new Map(prev);
         next.set(p.playerId, p.oldPosition);
         return next;
@@ -270,7 +275,13 @@ export default function DisplayScreen() {
         addTicker(`🔔 ${p.cardName ?? '交易'} 競標流標，無人出價`);
       }
     });
-    return () => { s.disconnect(); };
+    return () => {
+      s.disconnect();
+      // 清理元件內所有計時器，避免 unmount 後背景仍 setState
+      if (auctionCountdownRef.current) clearInterval(auctionCountdownRef.current);
+      if (centerEventTimer.current) clearTimeout(centerEventTimer.current);
+      if (paydayDismissTimer.current) clearTimeout(paydayDismissTimer.current);
+    };
   }, []);
 
   // 每秒本地遞減倒數計時（暫停時停止）
@@ -388,9 +399,9 @@ export default function DisplayScreen() {
   const boardPlayers: BoardPlayer[] = gameState.players.map((p, i) => ({
     id: p.id,
     name: p.name,
-    // 骰子動畫期間，鎖定在 oldPosition；動畫結束後才更新為實際 currentPosition
+    // 骰子動畫期間，鎖定在 oldPosition；動畫結束後才更新為實際位置
     position: positionOverride.get(p.id) ?? p.currentPosition,
-    fastTrackPosition: p.fastTrackPosition ?? 0,
+    fastTrackPosition: positionOverrideOuter.get(p.id) ?? p.fastTrackPosition ?? 0,
     isInFastTrack: p.isInFastTrack ?? false,
     isMe: false,
     colorIndex: i % 6,
@@ -561,6 +572,13 @@ export default function DisplayScreen() {
                 // 釋放位置鎖：玩家現在才「實際移動」到新格子
                 if (finished) {
                   setPositionOverride((prev) => {
+                    if (!prev.has(finished.playerId)) return prev;
+                    const next = new Map(prev);
+                    next.delete(finished.playerId);
+                    return next;
+                  });
+                  setPositionOverrideOuter((prev) => {
+                    if (!prev.has(finished.playerId)) return prev;
                     const next = new Map(prev);
                     next.delete(finished.playerId);
                     return next;

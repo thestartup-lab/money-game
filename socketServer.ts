@@ -49,6 +49,12 @@ import {
   STOCK_DCA_MONTHLY_RETURN_RATE,
   SKILL_CAREER_CHANGE_THRESHOLD,
 } from './gameConfig';
+import {
+  MEDICAL_INSURANCE_PREMIUM,
+  LIFE_INSURANCE_PREMIUM,
+  PROPERTY_INSURANCE_PREMIUM,
+  PER_CHILD_EXPENSE,
+} from './gameConstants';
 import { ADMIN_GLOBAL_EVENT_MAP } from './adminEvents';
 import {
   applyPaydayPlan,
@@ -212,6 +218,13 @@ function logPlayerEvent(
  * getter 值（totalIncome 等）需手動展開，Map 無法直接序列化。
  */
 function serializePlayer(p: Player): object {
+  // 計算保費與孩子支出（後端 Player.totalExpenses getter 內的細項，補給前端報表使用）
+  const insurancePremiums =
+    (p.insurance.hasMedicalInsurance ? MEDICAL_INSURANCE_PREMIUM : 0) +
+    (p.insurance.hasLifeInsurance ? LIFE_INSURANCE_PREMIUM : 0) +
+    (p.insurance.hasPropertyInsurance ? PROPERTY_INSURANCE_PREMIUM : 0);
+  const childExpenses = p.numberOfChildren * PER_CHILD_EXPENSE;
+
   return {
     id: p.id,
     name: p.name,
@@ -222,7 +235,7 @@ function serializePlayer(p: Player): object {
     isAlive: p.isAlive,
     cash: p.cash,
     salary: p.salary,
-    expenses: p.expenses,
+    expenses: { ...p.expenses, insurancePremiums, childExpenses },
     assets: p.assets,
     liabilities: p.liabilities,
     insurance: p.insurance,
@@ -249,6 +262,11 @@ function serializePlayer(p: Player): object {
     travelPenaltyRemaining: p.travelPenaltyRemaining,
     isInFastTrack: p.isInFastTrack,
     hasPassedSecondLife: p.hasPassedSecondLife,
+    fastTrackPosition: p.fastTrackPosition,
+    visitedDestinations: p.visitedDestinations ?? [],
+    legacyBonusPoints: p.legacyBonusPoints ?? 0,
+    skipFirstPayday: p.skipFirstPayday ?? false,
+    isDisconnected: p.isDisconnected ?? false,
     pre20Done: p.pre20Done,
     actionTokensThisPayday: p.actionTokensThisPayday,
     hasFlexibleSchedule: p.profession.hasFlexibleSchedule,
@@ -644,20 +662,24 @@ io.on('connection', (socket: Socket) => {
         diceFaces.push(Math.floor(Math.random() * 6) + 1);
       }
       const rolled = diceFaces.reduce((a, b) => a + b, 0);
-      const oldPos = player.currentPosition;
+      // 內外圈使用不同位置欄位；先把移動前的位置記下，再呼叫 movePlayer
+      const wasInFastTrack = player.isInFastTrack;
+      const oldPos = wasInFastTrack ? player.fastTrackPosition : player.currentPosition;
       const { passedPaydays, requiresPaydayPlanning } = movePlayer(player, rolled);
+      const newPos = wasInFastTrack ? player.fastTrackPosition : player.currentPosition;
 
       console.log(
         `[playerRoll] ${player.name}（${roomId}）擲出 ${rolled}（${diceFaces.join('+')}），` +
-          `移動至位置 ${player.currentPosition}，` +
+          `移動至${wasInFastTrack ? '外圈' : '內圈'}位置 ${newPos}，` +
           `路過發薪日：${passedPaydays.length > 0 ? passedPaydays.join(', ') : '無'}`
       );
 
       socket.emit('rollResult', {
         diceCount,
         rolled,
-        newPosition: player.currentPosition,
+        newPosition: newPos,
         passedPaydays,
+        isInFastTrack: wasInFastTrack,
       });
 
       // 廣播給整個房間（含 DisplayScreen），讓大螢幕播放骰子動畫
@@ -669,7 +691,8 @@ io.on('connection', (socket: Socket) => {
         dice: diceFaces,
         total: rolled,
         oldPosition: oldPos,
-        newPosition: player.currentPosition,
+        newPosition: newPos,
+        isInFastTrack: wasInFastTrack,
       });
 
       // --- 3–4. 每個發薪日：暫停時鐘 → 全員規劃 → 發薪 → 繳稅 ---
@@ -877,9 +900,9 @@ io.on('connection', (socket: Socket) => {
       }
 
       // --- 5c. FastTrack 資產增值 ---
-      if (gs.gamePhase === GamePhase.FastTrack && player.isAlive && player.isInFastTrack) {
-        applyFastTrackAppreciation(player);
-      }
+      // 注意：FT 資產增值由「踩到外圈發薪格」時於 handleLandingSquare 觸發
+      // （applyFastTrackAppreciation 註解：每個 triggerPayday 後呼叫）。
+      // 過去這裡也呼叫一次，造成同一回合重複增值；已移除。
 
       // --- 6. 廣播最終遊戲狀態 & 推進回合 ---
       gs.advanceToNextTurn();
@@ -889,12 +912,11 @@ io.on('connection', (socket: Socket) => {
       socket.emit('error', { message: '擲骰處理時發生錯誤，請重新整理頁面。' });
       // 發送一個空的 rollResult 讓前端解除 rollingLocked
       socket.emit('rollResult', { diceCount: 1, rolled: 0, newPosition: -1, passedPaydays: [] });
+      // 不強制 advanceToNextTurn —— 此時玩家可能已移動但發薪流程未完成，
+      // 強制換回合會讓狀態與下家流程錯亂；交給管理員手動干預（或玩家重新整理）。
       try {
         const gs2 = getRoomState(socket);
-        if (gs2) {
-          gs2.advanceToNextTurn();
-          emitToRoom(gs2.gameId, 'gameStateUpdate', serializeGameState(gs2));
-        }
+        if (gs2) emitToRoom(gs2.gameId, 'gameStateUpdate', serializeGameState(gs2));
       } catch (_) { /* ignore */ }
     }
     }
@@ -1641,6 +1663,8 @@ io.on('connection', (socket: Socket) => {
     const sender = gs.players.get(socket.id);
     const target = gs.players.get(payload.targetPlayerId);
     if (!sender || !target) return;
+    if (!sender.isAlive) { socket.emit('error', { message: '已出局玩家無法送祝賀。' }); return; }
+    if (!target.isAlive) { socket.emit('error', { message: '對方已離世，無法送上祝賀。' }); return; }
     const CONGRATS_AMOUNT = 7_500;
     if (sender.cash < CONGRATS_AMOUNT) { socket.emit('error', { message: `現金不足（需 $${CONGRATS_AMOUNT.toLocaleString()}）。` }); return; }
 

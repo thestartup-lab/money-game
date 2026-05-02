@@ -32,6 +32,23 @@ export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPla
   // 使用 ref 保存最新的 handleSubmit，避免計時器閉包過期
   const handleSubmitRef = useRef<() => void>(() => {});
 
+  // 每次切換到「另一個發薪日表單」（同回合多發薪、重連等）時重置倒數
+  useEffect(() => {
+    setSecondsLeft(Math.ceil((data.timeoutMs ?? 30000) / 1000));
+    // 切換表單時重置選項（避免上一發薪的勾選殘留到下一筆）
+    setChecks({
+      fqUpgrade: false,
+      healthBoost: false,
+      healthMaint: false,
+      skillTraining: false,
+      networkInvest: false,
+    });
+    setDcaAmount(0);
+    setBuyIns([]);
+    setLifeChoice({ type: 'none' });
+    setShowTravelList(false);
+  }, [data.paydayPosition, data.paydayIndex, data.timeoutMs]);
+
   useEffect(() => {
     const interval = setInterval(() => {
       setSecondsLeft((prev) => {
@@ -44,7 +61,7 @@ export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPla
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [data.paydayPosition, data.paydayIndex]);
 
   const totalCost = useMemo(() => {
     let cost = 0;
