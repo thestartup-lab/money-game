@@ -80,6 +80,7 @@ export default function PlayerPage() {
   const [activeAuction, setActiveAuction] = useState<ActiveAuction | null>(null);
   const [auctionBid, setAuctionBid] = useState('');
   const [partnershipOffer, setPartnershipOffer] = useState<PartnershipOffer | null>(null);
+  const [partnershipChoice, setPartnershipChoice] = useState<{ availablePartners: { id: string; name: string }[] } | null>(null);
   const [loanOffer, setLoanOffer] = useState<LoanOffer | null>(null);
   const [loanRequest, setLoanRequest] = useState<LoanRequest | null>(null);
 
@@ -293,11 +294,18 @@ export default function PlayerPage() {
       addNotification(`💰 ${p.bidderName} 出價 $${fmt(p.bidAmount)}`);
       setActiveAuction((prev) => prev ? { ...prev, highestBid: p.newHighest, highestBidderName: p.bidderName } : prev);
     });
+    s.on('partnershipOpportunity', (p: { availablePartners: { id: string; name: string }[] }) => {
+      addNotification('🤝 合夥機會！選擇一位玩家發起合夥邀請');
+      setPartnershipChoice(p);
+    });
     s.on('partnershipOfferReceived', (p: { offerId: string; offerorName: string; targetId: string }) => {
       if (p.targetId === s.id) {
         addNotification(`🤝 ${p.offerorName} 邀請你合夥投資！`);
         setPartnershipOffer(p);
       }
+    });
+    s.on('partnershipDeclined', (p: { offerorId: string; targetId: string }) => {
+      if (p.offerorId === s.id) addNotification('❌ 對方婉拒了合夥邀請。');
     });
     s.on('partnershipAccepted', (p: { offerorName: string; targetName: string; dividend?: number; passiveSum?: number }) => {
       const dividendText = p.dividend
@@ -305,6 +313,7 @@ export default function PlayerPage() {
         : '';
       addNotification(`✅ 合夥成功：${p.offerorName} & ${p.targetName}（+15 體驗值${dividendText}）`);
       setPartnershipOffer(null);
+      setPartnershipChoice(null);
     });
     s.on('loanOfferReceived', (p: { offerId: string; lenderName: string; borrowerId: string; amount: number; monthlyRate: number }) => {
       if (p.borrowerId === s.id) {
@@ -1278,9 +1287,36 @@ export default function PlayerPage() {
           {partnershipOffer && (
             <div className="mx-4 my-2 rounded-xl border border-green-600 bg-green-900 p-3 space-y-2">
               <p className="text-green-200 font-semibold text-sm">🤝 {partnershipOffer.offerorName} 邀請你合夥！</p>
+              <p className="text-green-300 text-xs">合作成功雙方各得 +15 體驗值，並依雙方被動收入總和獲得 3% 一次性分紅。</p>
               <div className="flex gap-2">
                 <button className="btn-primary text-sm flex-1" onClick={() => { emit('partnershipResponse', { offerId: partnershipOffer.offerId, accepted: true }); setPartnershipOffer(null); }}>✅ 接受</button>
                 <button className="btn-secondary text-sm" onClick={() => { emit('partnershipResponse', { offerId: partnershipOffer.offerId, accepted: false }); setPartnershipOffer(null); }}>❌ 拒絕</button>
+              </div>
+            </div>
+          )}
+          {partnershipChoice && (
+            <div className="mx-4 my-2 rounded-xl border border-emerald-600 bg-emerald-900 p-3 space-y-2">
+              <p className="text-emerald-200 font-semibold text-sm">🤝 合夥機會！選擇一位夥伴發起邀請</p>
+              <p className="text-emerald-300 text-xs">合作成功雙方各得 +15 體驗值 + 雙方被動收入 × 3% 分紅（$3K-$50K）</p>
+              <div className="flex flex-wrap gap-2">
+                {partnershipChoice.availablePartners.map((partner) => (
+                  <button
+                    key={partner.id}
+                    className="btn-primary text-sm flex-1 min-w-[40%]"
+                    onClick={() => {
+                      emit('partnershipOffer', { targetPlayerId: partner.id });
+                      setPartnershipChoice(null);
+                    }}
+                  >
+                    邀請 {partner.name}
+                  </button>
+                ))}
+                <button
+                  className="btn-secondary text-sm w-full"
+                  onClick={() => setPartnershipChoice(null)}
+                >
+                  略過
+                </button>
               </div>
             </div>
           )}

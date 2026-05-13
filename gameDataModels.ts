@@ -262,7 +262,8 @@ export type PlayerEventType =
   | 'franchise'
   | 'death'
   | 'bucket_goal_achieved'
-  | 'life_milestone';
+  | 'life_milestone'
+  | 'lucky_card';
 
 /**
  * 記錄玩家人生中每個關鍵決策與事件的快照。

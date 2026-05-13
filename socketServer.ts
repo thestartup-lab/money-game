@@ -3493,8 +3493,8 @@ async function handleLandingSquare(
         const _lkNWB = calcNetWorth(player);
         const lkResult = applyLuckyCard(player, lucky);
         logPlayerEvent(
-          player, gs, 'payday',
-          `機運卡：${lucky.title}（+$${lkResult.cashGain.toLocaleString()}）`,
+          player, gs, 'lucky_card',
+          `🍀 機運卡：${lucky.title}（+$${lkResult.cashGain.toLocaleString()}）`,
           _lkCB, _lkFB, _lkNWB,
           { cardId: lucky.id, cashGain: lkResult.cashGain }
         );
