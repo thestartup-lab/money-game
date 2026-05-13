@@ -211,6 +211,12 @@ export default function PlayerPage() {
       setPre20Step('done');
     });
 
+    // 主持人「強制開始」時，未完成 Pre-20 的玩家會被自動補齊全部步驟
+    s.on('autoCompleteApplied', (p: { profession: { name: string; quadrant: string }; cash: number; socialClass: string }) => {
+      addNotification(`⚡ 主持人強制開始！系統已為你自動投胎為「${p.socialClass}」、分配職業：${p.profession.name}（${p.profession.quadrant} 象限），現金 $${fmt(p.cash)}`);
+      setPre20Step('done');
+    });
+
     s.on('rollResult', (p: { rolled: number; newPosition: number }) => {
       setLastRoll(p);
       setRollingLocked(false);

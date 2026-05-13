@@ -371,6 +371,21 @@ export default function AdminPage() {
                 </button>
               </div>
             )}
+            {isStartable && notReadyPlayers.length > 0 && (
+              <button
+                className="w-full bg-amber-700 hover:bg-amber-600 text-white text-xs font-semibold py-2 px-3 rounded-xl transition-colors"
+                title="為未完成 Pre-20 的玩家自動分配（隨機投胎 + 預設配點 + E 象限職業）並開始"
+                onClick={() => {
+                  const names = notReadyPlayers.map((p) => p.name).join('、');
+                  if (window.confirm(`系統會為以下 ${notReadyPlayers.length} 位玩家自動分配「中等社會階層 / E 象限隨機職業」：\n${names}\n\n確定強制開始？`)) {
+                    emit('startGame', { durationMinutes, force: true });
+                    addLog(`強制開始：自動補齊 ${notReadyPlayers.length} 位玩家的 Pre-20`);
+                  }
+                }}
+              >
+                ⚡ 強制開始（為 {notReadyPlayers.length} 位玩家自動補齊）
+              </button>
+            )}
             {isRunning && (
               <div className="flex gap-2">
                 {isPaused

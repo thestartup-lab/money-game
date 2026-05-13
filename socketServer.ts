@@ -196,6 +196,86 @@ function calcNetWorth(p: Player): number {
 }
 
 /**
+ * 「強制開始」時為未完成 Pre-20 的玩家自動補齊全部流程：
+ *   1. 若沒投胎：隨機抽社會階層、套用 cash bonus 與 growth points
+ *   2. 若沒分配成長點：依預設比例（學業 40% / 體能 30% / 社交 20% / 資源 10%）自動配
+ *   3. 若沒選職業：隨機分配 E 象限職業，注入薪資與起始現金
+ *
+ * 此函數會直接修改 player 並 emit 通知，呼叫方僅需在最後一次 emit gameStateUpdate。
+ */
+function autoCompletePre20(player: Player, gs: GameState, roomId: string): void {
+  // ---- 步驟 1：投胎（若還沒做）----
+  // 判斷依據：growthPointsRemaining 為 0 表示還沒呼叫 rollSocialClass
+  const hasRolled = player.growthPointsRemaining > 0
+    || player.growthStats.academic + player.growthStats.health + player.growthStats.social + player.growthStats.resource > 0;
+  if (!hasRolled) {
+    const sc = rollSocialClass();
+    const config = SOCIAL_CLASS_CONFIG[sc];
+    player.socialClass = sc;
+    player.growthPointsRemaining = config.growthPoints;
+    player.cash += config.startingCashBonus;
+    console.log(`[autoComplete] ${player.name} 自動投胎為「${config.label}」`);
+  }
+
+  // ---- 步驟 2：分配成長點（若還有剩）----
+  if (player.growthPointsRemaining > 0) {
+    const total = player.growthPointsRemaining;
+    const academic = Math.floor(total * 0.40);
+    const health = Math.floor(total * 0.30);
+    const social = Math.floor(total * 0.20);
+    const resource = total - academic - health - social;
+    const cashBefore = player.cash;
+    applyGrowthStats(player, { academic, health, social, resource });
+    const resourceCashGain = player.cash - cashBefore;
+    console.log(`[autoComplete] ${player.name} 自動配點：學業${academic}/體能${health}/社交${social}/資源${resource}`);
+    if (resourceCashGain > 0) {
+      console.log(`[autoComplete] ${player.name} 資源點轉現金 +$${resourceCashGain.toLocaleString()}`);
+    }
+  }
+
+  // ---- 步驟 3：分配職業（若還沒選）----
+  if (!player.pre20Done || player.profession.id === '__placeholder__') {
+    const pool = [...E_PROFESSION_POOLS.basic];
+    const randomId = pool[Math.floor(Math.random() * pool.length)];
+    const chosen = PROFESSIONS.find((p) => p.id === randomId);
+    if (chosen) {
+      const previous = player.profession;
+      if (previous && previous.id !== '__placeholder__') {
+        player.cash -= previous.startingCash;
+      }
+      player.cash += chosen.startingCash;
+      player.profession = chosen;
+      player.salary = chosen.startingSalary;
+      player.expenses.taxes = chosen.startingTaxes;
+      player.expenses.homeMortgagePayment = chosen.startingHomeMortgage;
+      player.expenses.carLoanPayment = chosen.startingCarLoan;
+      player.expenses.creditCardPayment = chosen.startingCreditCard;
+      player.expenses.otherExpenses = chosen.startingOtherExpenses;
+      player.actionTokensThisPayday = chosen.hasFlexibleSchedule ? Infinity : 1;
+      player.startAge = 22;
+      player.pre20Done = true;
+      console.log(`[autoComplete] ${player.name} 自動分配職業：${chosen.name}（E 象限）`);
+    }
+  }
+
+  // 通知該玩家「已自動補齊」（前端會收到後跳轉到遊戲畫面）
+  io.to(player.id).emit('autoCompleteApplied', {
+    playerName: player.name,
+    socialClass: player.socialClass,
+    profession: { id: player.profession.id, name: player.profession.name, quadrant: player.profession.quadrant },
+    growthStats: player.growthStats,
+    cash: player.cash,
+  });
+  emitToRoom(roomId, 'playerReady', {
+    playerId: player.id,
+    playerName: player.name,
+    professionName: player.profession.name,
+    quadrant: player.profession.quadrant,
+    allPlayersReady: [...gs.players.values()].every((p) => p.pre20Done),
+  });
+}
+
+/**
  * 檢查玩家夢想清單，達成則 emit `bucketGoalAchieved`，全部達成額外發送 `bucketListAllDone`。
  * 在外圈玩家發生重要事件後呼叫（payday、charity、結婚、生子、買資產、FQ 升級…）。
  *
@@ -2323,14 +2403,26 @@ io.on('connection', (socket: Socket) => {
     }
 
     // pre20Done 為硬性條件：任何在線玩家未完成職業選擇都不允許開始
-    // （斷線中的玩家不擋，他們重連會自動恢復；force 不再略過此檢查，避免玩家還沒選就被開局）
+    // （斷線中的玩家不擋，他們重連會自動恢復）
+    // force=true 時主持人選擇「強制開始」：為未完成 Pre-20 的玩家自動補齊
+    //   1. 隨機投胎社會階層（套用 cash bonus 與 growth points）
+    //   2. 自動分配成長點（學業/體能/社交/資源 平均分配）
+    //   3. 隨機 E 象限職業
+    // 注意：與舊版 force 不同，這裡會把玩家正常推進到「真正的職業」而非 placeholder。
     const notReady = [...gs.players.values()].filter((p) => !p.pre20Done && !p.isDisconnected);
     if (notReady.length > 0) {
-      const names = notReady.map((p) => p.name).join('、');
-      socket.emit('error', {
-        message: `以下玩家尚未完成職業選擇：${names}。請等他們完成後再開始（為避免誤開局，已停用「強制略過」）。`,
-      });
-      return;
+      if (!payload?.force) {
+        const names = notReady.map((p) => p.name).join('、');
+        socket.emit('error', {
+          message: `以下玩家尚未完成職業選擇：${names}。可請他們完成或按「強制開始」由系統自動分配。`,
+        });
+        return;
+      }
+      // 強制開始：為未完成玩家自動跑完 Pre-20
+      for (const p of notReady) {
+        autoCompletePre20(p, gs, roomId);
+      }
+      console.log(`[startGame:force] ${notReady.length} 位玩家未完成 Pre-20，已自動補齊`);
     }
 
     const minutes = payload?.durationMinutes ?? 90;
