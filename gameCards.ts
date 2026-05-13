@@ -127,18 +127,37 @@ export interface DoodadCard {
   cost: number;
 }
 
-/** 市場行情卡（影響現有資產市值） */
+/**
+ * 機運卡（意外之財）— 一次性現金進帳的小確幸事件。
+ * 解決早期玩家除了薪水之外幾乎沒有進現金管道的問題。
+ * 落到「小交易」格時有 30% 機率改抽機運卡（取代當次小交易）。
+ */
+export interface LuckyCard {
+  id: string;
+  title: string;
+  description: string;
+  /** 一次性入帳金額（固定值或上下界） */
+  cashGain: number;
+  /** 隨機浮動上限（若提供，實際金額為 cashGain ~ cashGain + randomBonus 之間隨機） */
+  randomBonus?: number;
+  /** 是否需 academic 點數加成（學識高者退稅較多）— 玩家 academic 每點額外 +5% */
+  academicScaling?: boolean;
+}
+
+/** 市場行情卡（影響現有資產市值或發放股息） */
 export interface MarketCard {
   id: string;
   title: string;
   description: string;
   /** 受影響的資產類型 */
   targetAssetType: AssetType;
-  effect: 'PriceIncrease' | 'PriceDecrease' | 'SellOpportunity';
+  effect: 'PriceIncrease' | 'PriceDecrease' | 'SellOpportunity' | 'Dividend';
   /** 市值倍數（例如 2 表示翻倍，0.5 表示腰斬） */
   priceMultiplier?: number;
   /** 以固定價格出售的機會（SellOpportunity 時使用） */
   fixedPriceOffer?: number;
+  /** 股息發放比率：持倉市值 × dividendRate 直接入帳現金（Dividend 時使用） */
+  dividendRate?: number;
 }
 
 /** 添丁卡（numberOfChildren += 1，由 gameLogic 套用） */
@@ -213,6 +232,16 @@ export class Deck<T extends { id: string }> {
     this.discardPile.push(card);
   }
 
+  /**
+   * 偷看下一張將被抽到的牌（不改變牌堆狀態）。
+   * 用於高 FQ 玩家的「股市內幕」能力預知下一張 MarketCard。
+   * 若抽牌堆已空，會回傳 null（不主動洗棄牌堆，避免改變遊戲狀態）。
+   */
+  peek(): T | null {
+    if (this.drawPile.length === 0) return null;
+    return this.drawPile[this.drawPile.length - 1] ?? null;
+  }
+
   /** 將所有牌（含棄牌堆）重新洗牌並還原到抽牌堆 */
   reset(originalCards: T[]): void {
     this.discardPile = [];
@@ -249,13 +278,13 @@ export const SMALL_DEALS: DealCard[] = [
   {
     id: 'sd-002',
     title: '科技股票（每股 $15）',
-    description: '新興科技公司股票，低價入手，等待市場行情。',
+    description: '新興科技公司股票，低價入手，配發小額股息並等待市場行情。',
     dealType: 'SmallDeal',
     asset: {
       name: '科技公司股票',
       assetType: AssetType.Stock,
       cost: 15_000,
-      monthlyCashflow: 0,
+      monthlyCashflow: 60,
     },
   },
   {
@@ -342,7 +371,7 @@ export const SMALL_DEALS: DealCard[] = [
       name: '能源公司股票',
       assetType: AssetType.Stock,
       cost: 75_000,
-      monthlyCashflow: 450,
+      monthlyCashflow: 600,
     },
   },
   {
@@ -494,6 +523,42 @@ export const BIG_DEALS: DealCard[] = [
     },
   },
   {
+    id: 'bd-009',
+    title: '高股息藍籌股組合（金融類）',
+    description: '銀行金控龍頭股，年配息率約 6%，現金流穩定。',
+    dealType: 'BigDeal',
+    asset: {
+      name: '金融藍籌股組合',
+      assetType: AssetType.Stock,
+      cost: 600_000,
+      monthlyCashflow: 3_000,
+    },
+  },
+  {
+    id: 'bd-010',
+    title: '高成長科技股（半導體）',
+    description: '半導體龍頭股，配息率較低但市值波動大，可期待大行情。',
+    dealType: 'BigDeal',
+    asset: {
+      name: '半導體龍頭股',
+      assetType: AssetType.Stock,
+      cost: 750_000,
+      monthlyCashflow: 1_500,
+    },
+  },
+  {
+    id: 'bd-011',
+    title: '海外 ETF 大筆建倉',
+    description: '一次性建立美股 S&P500 ETF 倉位，月配息穩定。',
+    dealType: 'BigDeal',
+    asset: {
+      name: '美股 ETF',
+      assetType: AssetType.Stock,
+      cost: 450_000,
+      monthlyCashflow: 1_800,
+    },
+  },
+  {
     id: 'bd-008',
     title: '海景別墅出租',
     description: '海濱豪華別墅，長租客為外派高管，租金極高。',
@@ -598,6 +663,184 @@ export const DOODADS: DoodadCard[] = [
   },
 ];
 
+/**
+ * 機運卡牌組（12 張）— 落到「小交易」格時 30% 機率改抽此堆。
+ * 用來補足早期玩家「只有薪水」的進現金管道單一問題。
+ * 平均期望值約 $9,000，與小交易首付平均水準對齊但偏小。
+ */
+export const LUCKY_CARDS: LuckyCard[] = [
+  {
+    id: 'lk-001',
+    title: '中發票二獎',
+    description: '統一發票對中三獎，意外之財進帳。',
+    cashGain: 4_000,
+    randomBonus: 4_000,
+  },
+  {
+    id: 'lk-002',
+    title: '退稅入帳',
+    description: '今年所得稅退稅入帳，學識高者多認列扣除額。',
+    cashGain: 6_000,
+    randomBonus: 6_000,
+    academicScaling: true,
+  },
+  {
+    id: 'lk-003',
+    title: '年終獎金',
+    description: '公司業績亮眼，發了一筆年終獎金。',
+    cashGain: 12_000,
+    randomBonus: 12_000,
+  },
+  {
+    id: 'lk-004',
+    title: '長輩紅包',
+    description: '逢年過節長輩給的厚紅包。',
+    cashGain: 3_000,
+    randomBonus: 3_000,
+  },
+  {
+    id: 'lk-005',
+    title: '信用卡 Cashback',
+    description: '高額消費回饋金一次撥入帳戶。',
+    cashGain: 2_000,
+    randomBonus: 4_000,
+  },
+  {
+    id: 'lk-006',
+    title: '撿到錢包',
+    description: '路上撿到錢包送派出所，過期無人認領歸還給你。',
+    cashGain: 1_500,
+    randomBonus: 3_000,
+  },
+  {
+    id: 'lk-007',
+    title: '副業接案進帳',
+    description: '週末接的小案子順利交件，業主很滿意。',
+    cashGain: 8_000,
+    randomBonus: 8_000,
+  },
+  {
+    id: 'lk-008',
+    title: '股票股利發放',
+    description: '持有的個股配發股利現金入帳（無需持股，視為一次性紅利）。',
+    cashGain: 5_000,
+    randomBonus: 10_000,
+  },
+  {
+    id: 'lk-009',
+    title: '保單分紅',
+    description: '舊保單到期分紅入帳。',
+    cashGain: 4_500,
+    randomBonus: 4_500,
+  },
+  {
+    id: 'lk-010',
+    title: '中樂透小獎',
+    description: '剛好對中三個號碼，小確幸獎金入帳。',
+    cashGain: 6_000,
+    randomBonus: 18_000,
+  },
+  {
+    id: 'lk-011',
+    title: '二手變現',
+    description: '把家裡閒置的物品上網拍賣，意外賣出好價錢。',
+    cashGain: 3_500,
+    randomBonus: 5_000,
+  },
+  {
+    id: 'lk-012',
+    title: '朋友還錢',
+    description: '多年前借出去早就忘了的錢，朋友突然還了。',
+    cashGain: 5_000,
+    randomBonus: 5_000,
+  },
+];
+
+/**
+ * 特殊拍賣牌組（6 張）— 由主持人觸發的多人競標限時資產。
+ * 設計理念：起標金額顯著低於市場行情、但月現金流／市值優於同級小交易，
+ * 讓玩家有積極競標的動機，鼓勵流動現金 → 資產轉換。
+ *
+ * 觸發路徑：AdminPage → triggerSpecialAuction → 廣播 dealAuctionStarted。
+ */
+export const SPECIAL_AUCTION_DEALS: DealCard[] = [
+  {
+    id: 'sa-001',
+    title: '【特殊拍賣】低點佔點股（科技藍籌）',
+    description: '科技龍頭股票暴跌恐慌中拋售出來，限時拍賣，能搶到就賺到。',
+    dealType: 'BigDeal',
+    asset: {
+      name: '科技藍籌（折扣股）',
+      assetType: AssetType.Stock,
+      cost: 60_000,
+      monthlyCashflow: 800,
+    },
+  },
+  {
+    id: 'sa-002',
+    title: '【特殊拍賣】倍型加盟事業',
+    description: '熱門連鎖加盟主持有者急售，原始投資 $300K 現以 $150K 起標。',
+    dealType: 'BigDeal',
+    asset: {
+      name: '倍型加盟事業',
+      assetType: AssetType.Business,
+      cost: 150_000,
+      monthlyCashflow: 4_500,
+    },
+  },
+  {
+    id: 'sa-003',
+    title: '【特殊拍賣】法拍三房豪宅',
+    description: '銀行法拍精華地段三房物件，起標僅市價 7 折。',
+    dealType: 'BigDeal',
+    asset: {
+      name: '法拍三房豪宅',
+      assetType: AssetType.RealEstate,
+      cost: 1_500_000,
+      downPayment: 90_000,
+      monthlyCashflow: 6_000,
+      liabilityName: '法拍房貸款',
+      liabilityAmount: 1_410_000,
+    },
+  },
+  {
+    id: 'sa-004',
+    title: '【特殊拍賣】稀有古董',
+    description: '私人收藏家急用現金釋出珍稀古董，可能還會增值。',
+    dealType: 'BigDeal',
+    asset: {
+      name: '稀有古董',
+      assetType: AssetType.Other,
+      cost: 75_000,
+      monthlyCashflow: 0,
+    },
+  },
+  {
+    id: 'sa-005',
+    title: '【特殊拍賣】離岸風電 REITs',
+    description: '基礎建設 REITs，限量釋出，現金流穩定。',
+    dealType: 'BigDeal',
+    asset: {
+      name: '風電 REITs',
+      assetType: AssetType.RealEstate,
+      cost: 240_000,
+      monthlyCashflow: 2_400,
+    },
+  },
+  {
+    id: 'sa-006',
+    title: '【特殊拍賣】黃金實體條塊',
+    description: '銀行庫存實體黃金抛售，數量有限，先搶先贏。',
+    dealType: 'BigDeal',
+    asset: {
+      name: '實體黃金條塊',
+      assetType: AssetType.Commodity,
+      cost: 90_000,
+      monthlyCashflow: 0,
+    },
+  },
+];
+
 /** 慈善捐款卡（單張，落在慈善格時使用） */
 export const CHARITY_CARD: CharityCard = {
   id: 'ch-001',
@@ -672,6 +915,72 @@ export const MARKET_CARDS: MarketCard[] = [
     targetAssetType: AssetType.RealEstate,
     effect: 'SellOpportunity',
     fixedPriceOffer: 1_800_000,
+  },
+  // ── 新增：股票股息系列（讓持股玩家有實質現金入帳） ──
+  {
+    id: 'mk-009',
+    title: '股票季度配息',
+    description: '上市公司公布季度配息，所有股票持有者依持倉市值 5% 領取現金股利。',
+    targetAssetType: AssetType.Stock,
+    effect: 'Dividend',
+    dividendRate: 0.05,
+  },
+  {
+    id: 'mk-010',
+    title: '科技巨頭加碼配息',
+    description: '科技龍頭破紀錄配息，所有股票持倉現金 8% 入帳。',
+    targetAssetType: AssetType.Stock,
+    effect: 'Dividend',
+    dividendRate: 0.08,
+  },
+  {
+    id: 'mk-011',
+    title: '國際資金流入台股',
+    description: '外資瘋狂買盤湧入，所有股票市值上漲 30%。',
+    targetAssetType: AssetType.Stock,
+    effect: 'PriceIncrease',
+    priceMultiplier: 1.3,
+  },
+  {
+    id: 'mk-012',
+    title: '通膨警報來襲',
+    description: '美國 CPI 創新高，市場恐慌賣壓出籠，所有股票市值下跌 25%。',
+    targetAssetType: AssetType.Stock,
+    effect: 'PriceDecrease',
+    priceMultiplier: 0.75,
+  },
+  // ── 房地產／事業／商品的補充配息與波動 ──
+  {
+    id: 'mk-013',
+    title: 'REITs 季度配息',
+    description: '不動產投資信託基金配息，所有房地產持倉市值 4% 入帳。',
+    targetAssetType: AssetType.RealEstate,
+    effect: 'Dividend',
+    dividendRate: 0.04,
+  },
+  {
+    id: 'mk-014',
+    title: '事業年度分紅',
+    description: '所投資事業年度結算分紅，所有事業持倉市值 6% 入帳。',
+    targetAssetType: AssetType.Business,
+    effect: 'Dividend',
+    dividendRate: 0.06,
+  },
+  {
+    id: 'mk-015',
+    title: '黃金避險買盤',
+    description: '地緣政治緊張，黃金等大宗商品市值上漲 40%。',
+    targetAssetType: AssetType.Commodity,
+    effect: 'PriceIncrease',
+    priceMultiplier: 1.4,
+  },
+  {
+    id: 'mk-016',
+    title: '原物料供應過剩',
+    description: '需求疲弱導致大宗商品價格大跌 30%。',
+    targetAssetType: AssetType.Commodity,
+    effect: 'PriceDecrease',
+    priceMultiplier: 0.7,
   },
 ];
 

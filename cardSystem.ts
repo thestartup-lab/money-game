@@ -7,6 +7,7 @@ import {
   CharityCard,
   DownsizingCard,
   RelationshipCard,
+  LuckyCard,
 } from './gameCards';
 import { HP_DANGER_THRESHOLD, HP_STRONG_THRESHOLD } from './gameConfig';
 import { addLifeExperience } from './gameLogic';
@@ -19,6 +20,12 @@ export interface DoodadResult {
   card: DoodadCard;
   cashDeducted: number;
   monthlyExpenseIncrease: number;
+}
+
+export interface LuckyResult {
+  card: LuckyCard;
+  /** 實際入帳金額（含隨機浮動與學識加成） */
+  cashGain: number;
 }
 
 export interface CrisisResult {
@@ -40,6 +47,12 @@ export interface MarketResult {
     assetName: string;
     oldCost: number;
     newCost: number;
+  }[];
+  /** Dividend 效果時：每位收益者的現金入帳明細 */
+  dividendsPaid?: {
+    playerId: string;
+    playerName: string;
+    cashGain: number;
   }[];
 }
 
@@ -76,6 +89,23 @@ export function applyBabyCard(player: Player): void {
 }
 
 /**
+ * 套用機運卡效果（一次性現金入帳）。
+ * - cashGain：基本金額
+ * - randomBonus：上下界隨機浮動（0 ~ randomBonus）
+ * - academicScaling：每點 academic +5% 加成（鼓勵學識點數）
+ */
+export function applyLuckyCard(player: Player, card: LuckyCard): LuckyResult {
+  const randomPart = card.randomBonus ? Math.round(Math.random() * card.randomBonus) : 0;
+  const baseAmount = card.cashGain + randomPart;
+  const academicBonus = card.academicScaling
+    ? Math.round(baseAmount * (player.growthStats.academic * 0.05))
+    : 0;
+  const totalGain = baseAmount + academicBonus;
+  player.cash += totalGain;
+  return { card, cashGain: totalGain };
+}
+
+/**
  * 套用裁員卡效果。
  * 設定 downsizingTurnsLeft，triggerPayday 中薪資將計為 0 並遞減。
  */
@@ -88,11 +118,33 @@ export function applyDownsizingCard(player: Player, card: DownsizingCard): void 
  * 影響所有玩家符合 targetAssetType 的資產**市值（currentValue）**。
  * cost（購入成本）保持不變，出售時以 currentValue 計算獲利。
  * SellOpportunity 類型不改變市值，由前端通知玩家自行決定是否出售。
+ * Dividend 類型直接依持倉市值 × dividendRate 發放現金（不影響市值）。
  */
 export function applyMarketCard(gameState: GameState, card: MarketCard): MarketResult {
   const result: MarketResult = { card, affectedAssets: [] };
 
   if (card.effect === 'SellOpportunity') {
+    return result;
+  }
+
+  // Dividend 路徑：直接依持倉市值 × rate 發放現金，不改變 currentValue
+  if (card.effect === 'Dividend') {
+    const rate = card.dividendRate ?? 0;
+    result.dividendsPaid = [];
+    gameState.players.forEach((player) => {
+      const totalValue = player.assets
+        .filter((a) => a.type === card.targetAssetType)
+        .reduce((sum, a) => sum + (a.currentValue ?? a.cost), 0);
+      const cashGain = Math.round(totalValue * rate);
+      if (cashGain > 0) {
+        player.cash += cashGain;
+        result.dividendsPaid!.push({
+          playerId: player.id,
+          playerName: player.name,
+          cashGain,
+        });
+      }
+    });
     return result;
   }
 
@@ -177,7 +229,9 @@ export function applyCharityDonation(
   if (!donate) return;
   const donationAmount = Math.round(player.salary * card.donationPercentage);
   if (donationAmount <= 0) return;
-  player.cash -= Math.min(donationAmount, player.cash);
+  const actualPaid = Math.min(donationAmount, player.cash);
+  player.cash -= actualPaid;
+  player.charityTotal = (player.charityTotal ?? 0) + actualPaid;
   player.bonusDice = card.bonusDiceCount;
 }
 

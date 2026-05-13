@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import './GameBoard.css';
 
 // ============================================================
@@ -99,12 +99,29 @@ export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
   const [boardView, setBoardView] = useState<'inner' | 'outer'>('inner');
   const [calibrate, setCalibrate] = useState(false);
 
+  // 自動切換：跟隨「當前回合玩家」所在的圈
+  // 設計：當輪到外圈玩家時自動切到外圈、輪回內圈玩家時切回內圈。
+  // useEffect 只在換人時觸發，使用者本回合內手動切後不會被搶回去（直到下次換人）。
+  useEffect(() => {
+    if (!currentTurnPlayerId) return;
+    const turnPlayer = players.find((p) => p.id === currentTurnPlayerId);
+    if (!turnPlayer) return;
+    setBoardView(turnPlayer.isInFastTrack ? 'outer' : 'inner');
+    // 注意：依賴只放 currentTurnPlayerId，避免 players 陣列每幀變動觸發
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTurnPlayerId]);
+
+  const setBoardViewManual = setBoardView;
+
   const bgImage = boardView === 'inner' ? "url('/1.png')" : "url('/2.png')";
   const isOuter = boardView === 'outer';
   const posTable = isOuter ? OUTER_CELL_POSITIONS : INNER_CELL_POSITIONS;
 
   const visiblePlayers = players.filter((p) =>
     boardView === 'inner' ? !p.isInFastTrack : p.isInFastTrack
+  );
+  const otherTrackPlayers = players.filter((p) =>
+    boardView === 'inner' ? p.isInFastTrack : !p.isInFastTrack
   );
 
   return (
@@ -117,7 +134,7 @@ export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
         {/* ══ 切換按鈕 ══ */}
         <button
           className="board-view-toggle"
-          onClick={() => setBoardView((v) => v === 'inner' ? 'outer' : 'inner')}
+          onClick={() => setBoardViewManual(boardView === 'inner' ? 'outer' : 'inner')}
         >
           {boardView === 'inner' ? 'FastTrack ▶' : '◀ 老鼠賽跑'}
         </button>
@@ -129,6 +146,16 @@ export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
         >
           {calibrate ? '關閉校準' : '🔧 校準'}
         </button>
+
+        {/* ══ 對方圈 mini-map（當對方圈有玩家時才顯示）══ */}
+        {!calibrate && otherTrackPlayers.length > 0 && (
+          <MiniMap
+            isOuter={!isOuter}
+            players={otherTrackPlayers}
+            currentTurnPlayerId={currentTurnPlayerId}
+            onClick={() => setBoardViewManual(isOuter ? 'inner' : 'outer')}
+          />
+        )}
 
         {/* ══ 校準模式：顯示所有格子編號 + 座標 ══ */}
         {calibrate && posTable.map(([l, t], idx) => (
@@ -247,8 +274,8 @@ export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
                     <div className="board-player-stat-label">所在位置</div>
                     <div className="board-player-stat-value board-player-pos-value">
                       {p.isInFastTrack
-                        ? `外圈 #${p.fastTrackPosition % 16}`
-                        : `內圈 #${p.position % 25}`}
+                        ? `外圈 #${p.fastTrackPosition % OUTER_CELL_POSITIONS.length}`
+                        : `內圈 #${p.position % INNER_CELL_POSITIONS.length}`}
                     </div>
                   </div>
                 </div>
@@ -267,6 +294,109 @@ export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
             </div>
           );
         })()}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// MiniMap：對方圈玩家位置概覽
+// ── 設計理念：當有玩家進到外圈但其他人還在內圈時，主畫面只能顯示一邊。
+//    這個 SVG 縮圖以圓形軌道呈現對方圈，玩家以小色點標示位置；
+//    點擊整個 mini-map 即切換主畫面到該圈。
+// ============================================================
+interface MiniMapProps {
+  isOuter: boolean;
+  players: BoardPlayer[];
+  currentTurnPlayerId?: string;
+  onClick: () => void;
+}
+
+function MiniMap({ isOuter, players, currentTurnPlayerId, onClick }: MiniMapProps) {
+  const cellCount = isOuter ? 17 : 25;
+  // 內圈標準發薪日格 index（每隔 6 格）
+  const paydayIndices = isOuter ? new Set([0, 4, 8, 12]) : new Set([0, 6, 12, 18]);
+
+  // SVG viewBox 100x100，軌道圓心 50,50；半徑 40
+  const cx = 50, cy = 50, r = 40;
+
+  // 把每格繪在等間距的圓周上（從 12 點鐘方向順時針）
+  const cellAt = (idx: number): { x: number; y: number } => {
+    const angle = (2 * Math.PI * idx) / cellCount - Math.PI / 2;
+    return {
+      x: cx + Math.cos(angle) * r,
+      y: cy + Math.sin(angle) * r,
+    };
+  };
+
+  return (
+    <div
+      className="board-minimap"
+      onClick={onClick}
+      title={`點擊切換到${isOuter ? '外圈' : '內圈'}主畫面`}
+    >
+      <div className="board-minimap-title">
+        {isOuter ? '🚀 外圈動態' : '🏃 內圈動態'}
+      </div>
+      <svg className="board-minimap-svg" viewBox="0 0 100 100">
+        {/* 軌道格子（小圓圈） */}
+        {Array.from({ length: cellCount }).map((_, idx) => {
+          const { x, y } = cellAt(idx);
+          return (
+            <circle
+              key={`cell-${idx}`}
+              cx={x}
+              cy={y}
+              r={2.2}
+              className={`board-minimap-cell${paydayIndices.has(idx) ? ' payday' : ''}`}
+            />
+          );
+        })}
+
+        {/* 玩家棋子（按格子分組分散） */}
+        {(() => {
+          const groups = new Map<number, BoardPlayer[]>();
+          for (const p of players) {
+            const idx = isOuter
+              ? p.fastTrackPosition % 17
+              : p.position % 25;
+            if (!groups.has(idx)) groups.set(idx, []);
+            groups.get(idx)!.push(p);
+          }
+          return players.map((p) => {
+            const idx = isOuter
+              ? p.fastTrackPosition % 17
+              : p.position % 25;
+            const { x, y } = cellAt(idx);
+            const group = groups.get(idx)!;
+            const slot = group.indexOf(p);
+            const total = group.length;
+            // 多人同格時環繞排列
+            let ox = 0, oy = 0;
+            if (total > 1) {
+              const ang = (2 * Math.PI * slot) / total - Math.PI / 2;
+              ox = Math.cos(ang) * 2.5;
+              oy = Math.sin(ang) * 2.5;
+            }
+            const color = PLAYER_COLORS[p.colorIndex % 6];
+            const active = p.id === currentTurnPlayerId;
+            return (
+              <circle
+                key={p.id}
+                cx={x + ox}
+                cy={y + oy}
+                r={active ? 3.0 : 2.4}
+                fill={color}
+                className={`board-minimap-token${active ? ' active' : ''}`}
+              >
+                <title>{p.name}（{isOuter ? '外圈' : '內圈'} #{idx}）</title>
+              </circle>
+            );
+          });
+        })()}
+      </svg>
+      <div className="board-minimap-count">
+        {players.length} 人在此 · 點擊切換
       </div>
     </div>
   );

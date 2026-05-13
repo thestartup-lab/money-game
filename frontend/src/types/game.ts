@@ -103,6 +103,8 @@ export interface Player {
   lifeExperience: number;
   hasContinuedEducation: boolean;
   startAge: number;
+  /** 顯示用個人年齡 = max(startAge, 全域時鐘)，由後端算好；舊版 server 沒有此欄位故為 optional */
+  personalAge?: number;
   isMarried: boolean;
   marriageBonus: number;
   relationshipPoints: number;
@@ -130,6 +132,23 @@ export interface Player {
   monthlyCashflow: number;
   nextFQUpgradeCost: number | null;
   eventLog: PlayerEvent[];
+  /** A1：累積慈善捐款金額（含內外圈所有捐款） */
+  charityTotal?: number;
+  /** B1：人生夢想清單（進外圈時隨機抽 3 個） */
+  bucketList?: { id: string; claimed: boolean; claimedAt?: number }[];
+  /** B2：已通過的人生里程碑（40/60/80 歲） */
+  milestonesPassed?: { age40: boolean; age60: boolean; age80: boolean };
+}
+
+/** 夢想清單中單一目標的詳細資料（後端 bucketListAssigned 事件帶入） */
+export interface BucketGoalDetail {
+  id: string;
+  emoji: string;
+  title: string;
+  description: string;
+  legacyReward: number;
+  lifeExpReward: number;
+  cashReward: number;
 }
 
 export interface GameState {
@@ -322,6 +341,16 @@ export interface PaydayFormData {
   stockDCAPortfolioValue: number;
   timeoutMs: number;
   travelDestinations?: Array<{ id: string; name: string; region: string; cost: number; lifeExpGained: number }>;
+  /** 股市內幕（FQ ≥ 7 才會收到）：下一張將觸發的市場行情卡預告 */
+  marketTip?: {
+    title: string;
+    description: string;
+    targetAssetType: string;
+    effect: 'PriceIncrease' | 'PriceDecrease' | 'SellOpportunity' | 'Dividend';
+    priceMultiplier?: number;
+    dividendRate?: number;
+    fixedPriceOffer?: number;
+  } | null;
 }
 
 /** 發薪日規劃表單的送出 payload */

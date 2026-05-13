@@ -30,6 +30,14 @@ export const FAST_TRACK_PAYDAY_BONUS_RATE = 0.01;
 /** 股票定期定額每發薪日複利增長率（模擬指數基金長期報酬）*/
 export const STOCK_DCA_MONTHLY_RETURN_RATE = 0.005;
 
+/**
+ * 股票定期定額每月配息率（模擬台股約 3% 年化殖利率）。
+ * 與 STOCK_DCA_MONTHLY_RETURN_RATE 並存：增值反映在 currentValue，
+ * 配息反映在 monthlyCashflow（每次 payday 動態更新），
+ * 讓股票資產對 totalPassiveIncome 有實質貢獻、且受 FQ 乘數加成。
+ */
+export const STOCK_DCA_MONTHLY_DIVIDEND_RATE = 0.0025;
+
 /** 股票定期定額可選投入金額選項 */
 export const STOCK_DCA_AMOUNTS = [15_000, 30_000, 75_000] as const;
 
@@ -886,6 +894,25 @@ export const EDUCATION_LOAN_AMOUNT = 450_000;
 export const EDUCATION_LOAN_MONTHLY = 9_000;
 /** 選擇「繼續進修」後初始 FQ 加成（在成長點數映射基礎上額外加） */
 export const EDUCATION_FQ_BONUS = 1;
+
+// ============================================================
+// 婚禮禮金 / 添丁紅包（一次性現金入帳）
+// 補充早期玩家除了薪水之外的進現金管道。
+// ============================================================
+
+/** 各種結婚路徑的禮金（一次性入帳） */
+export const MARRIAGE_GIFT: Record<'love' | 'matchmaker' | 'arranged' | 'window', number> = {
+  love:       8_000,   // 自由戀愛求婚：親友賀禮
+  matchmaker: 6_000,   // 媒人撮合：媒妁禮金
+  arranged:   0,       // 買賣婚姻已花大錢，不再加碼
+  window:    12_000,   // 緣分窗口（自然戀愛 DRS）：最盛大的婚禮
+};
+/** 結婚禮金的隨機浮動上限（0 ~ X 浮動） */
+export const MARRIAGE_GIFT_RANDOM_BONUS = 5_000;
+/** 添丁時長輩賀禮（一次性入帳） */
+export const CHILD_GIFT_BASE = 3_000;
+/** 添丁紅包的隨機浮動上限 */
+export const CHILD_GIFT_RANDOM_BONUS = 3_000;
 
 // ============================================================
 // 百歲人生：生命體驗值各事件加分常量

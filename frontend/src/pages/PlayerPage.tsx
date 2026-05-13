@@ -37,8 +37,20 @@ const GROWTH_FIELDS: { key: 'academic' | 'health' | 'social' | 'resource'; label
   { key: 'academic', label: '學業', desc: '影響可選職業資格與職涯技能初始值' },
   { key: 'health',   label: '體能', desc: '影響初始 HP 健康值' },
   { key: 'social',   label: '社交', desc: '影響初始 NT 人脈值' },
-  { key: 'resource', label: '資源', desc: '影響起始現金與財商初始值' },
+  { key: 'resource', label: '資源', desc: '每點 +$3,000 起始現金；亦是 B/I 象限門檻' },
 ];
+
+// B1：人生夢想清單顯示資料（與後端 BUCKET_LIST_GOALS 對應）
+const BUCKET_GOAL_LABELS: Record<string, { emoji: string; title: string; desc: string }> = {
+  world_traveler:     { emoji: '🌍', title: '環遊世界',     desc: '造訪 5 個不同的旅遊目的地' },
+  philanthropist:     { emoji: '❤️', title: '慈善家',       desc: '累積慈善捐款達 $200,000' },
+  tycoon:             { emoji: '💰', title: '財富自由',     desc: '淨資產達到 $5,000,000' },
+  family_man:         { emoji: '👨\u200d👩\u200d👧', title: '溫暖家庭',     desc: '結婚並擁有至少 2 個孩子' },
+  cashflow_king:      { emoji: '👑', title: '被動收入之王', desc: '月被動收入達 $30,000 以上' },
+  real_estate_baron:  { emoji: '🏘️', title: '不動產大亨',   desc: '同時擁有 3 個以上不動產' },
+  high_fq:            { emoji: '🧠', title: '財商達人',     desc: '財商等級提升到 8 以上' },
+  long_life:          { emoji: '🎂', title: '長壽人生',     desc: '健康存活到 80 歲' },
+};
 
 // ── 常數與型別 ──
 
@@ -179,9 +191,12 @@ export default function PlayerPage() {
       setGrowthAlloc({ academic: 0, health: 0, social: 0, resource: 0 });
     });
 
-    s.on('growthStatsApplied', (p: { stats: unknown; availableProfessions: AvailableProfession[]; canContinueEducation: boolean }) => {
+    s.on('growthStatsApplied', (p: { stats: unknown; availableProfessions: AvailableProfession[]; canContinueEducation: boolean; resourceCashGain?: number }) => {
       setAvailableProfessions(p.availableProfessions);
       setCanEducation(p.canContinueEducation);
+      if (p.resourceCashGain && p.resourceCashGain > 0) {
+        addNotification(`💰 資源點數轉換：起始現金 +$${fmt(p.resourceCashGain)}`);
+      }
       setPre20Step('career');
     });
 
@@ -251,10 +266,15 @@ export default function PlayerPage() {
         setCongratulatableEvent({ targetId: p.playerId ?? '', targetName: p.playerName, event: '結婚' });
       }
     });
-    s.on('dealAuctionStarted', (p: { auctionId: string; triggeredBy: string; triggeredByName: string; endsAt: number; card?: { id: string; name: string; description?: string; minBid: number; monthlyCashflow?: number }; }) => {
-      if (p.triggeredBy === s.id) return;
+    s.on('dealAuctionStarted', (p: { auctionId: string; triggeredBy: string; triggeredByName: string; endsAt: number; isSpecialAuction?: boolean; card?: { id: string; name: string; description?: string; minBid: number; monthlyCashflow?: number }; }) => {
+      // 特殊拍賣由主持人觸發，所有玩家都應該收到（包含主持人也不過濾，因主持人不是玩家）
+      if (!p.isSpecialAuction && p.triggeredBy === s.id) return;
       const minBid = p.card?.minBid ?? 0;
-      addNotification(`🔔 ${p.triggeredByName} 放棄交易！20 秒內可出價搶標（起標 $${minBid.toLocaleString()}）`);
+      const durationSec = Math.max(1, Math.round((p.endsAt - Date.now()) / 1000));
+      const prefix = p.isSpecialAuction
+        ? `🔨 主持人開啟特殊拍賣！${durationSec} 秒內可搶標`
+        : `🔔 ${p.triggeredByName} 放棄交易！${durationSec} 秒內可出價搶標`;
+      addNotification(`${prefix}（${p.card?.name ?? ''}，起標 $${minBid.toLocaleString()}）`);
       setActiveAuction({ ...p, minBid, highestBid: 0 });
     });
     s.on('dealAuctionEnded', (p: { auctionId: string; winnerId?: string | null; winnerName?: string | null; winningBid: number; cardName?: string; hadBids?: boolean }) => {
@@ -279,8 +299,11 @@ export default function PlayerPage() {
         setPartnershipOffer(p);
       }
     });
-    s.on('partnershipAccepted', (p: { offerorName: string; targetName: string }) => {
-      addNotification(`✅ 合夥成功：${p.offerorName} & ${p.targetName}（+15 體驗值）`);
+    s.on('partnershipAccepted', (p: { offerorName: string; targetName: string; dividend?: number; passiveSum?: number }) => {
+      const dividendText = p.dividend
+        ? `，合作分紅 +$${p.dividend.toLocaleString()}/人（雙方被動 $${(p.passiveSum ?? 0).toLocaleString()}）`
+        : '';
+      addNotification(`✅ 合夥成功：${p.offerorName} & ${p.targetName}（+15 體驗值${dividendText}）`);
       setPartnershipOffer(null);
     });
     s.on('loanOfferReceived', (p: { offerId: string; lenderName: string; borrowerId: string; amount: number; monthlyRate: number }) => {
@@ -402,6 +425,21 @@ export default function PlayerPage() {
       addNotification(`📈 投入 $${fmt(p.amount)}，股票組合總值 $${fmt(p.newPortfolioValue)}`);
     });
 
+    s.on('luckyCardDrawn', (p: { card: { title: string; description: string }; cashGain: number; newCash: number }) => {
+      addNotification(`🍀 ${p.card.title}：+$${fmt(p.cashGain)}（${p.card.description}）`);
+    });
+
+    s.on('marketCardApplied', (p: { card: { title: string; effect: string }; dividendsPaid?: { playerId: string; playerName: string; cashGain: number }[] }) => {
+      const myDiv = p.dividendsPaid?.find((d) => d.playerId === s.id);
+      if (myDiv) {
+        addNotification(`💰 市場配息「${p.card.title}」：+$${fmt(myDiv.cashGain)}`);
+      } else if (p.card.effect === 'Dividend') {
+        addNotification(`💼 ${p.card.title}（你目前沒有對應持倉，未領到配息）`);
+      } else {
+        addNotification(`📈 市場行情：${p.card.title}`);
+      }
+    });
+
     s.on('careerChangeUnlocked', (p: { message: string; availableProfessions: AvailableProfession[] }) => {
       setCareerChangeData(p);
       addNotification('🎯 技能值達到頂峰！現在可以轉職了，請在行動面板中選擇新職業。');
@@ -423,6 +461,36 @@ export default function PlayerPage() {
     });
     s.on('milestoneAnnounced', (p: { playerName: string; milestone: string; description: string }) => {
       addNotification(`🏆 ${p.description}`);
+    });
+
+    // B1：人生夢想清單分配 / 達成
+    s.on('bucketListAssigned', (p: { goals: { id: string; emoji: string; title: string; description: string }[] }) => {
+      const list = p.goals.map((g) => `${g.emoji} ${g.title}`).join('、');
+      addNotification(`🎯 進入外圈！抽到夢想清單：${list}`);
+    });
+    s.on('bucketGoalAchieved', (p: { playerId: string; playerName: string; goalEmoji: string; goalTitle: string; legacyReward: number; lifeExpReward: number; cashReward: number }) => {
+      if (p.playerId === s.id) {
+        const cash = p.cashReward > 0 ? `、+$${fmt(p.cashReward)}` : '';
+        addNotification(`🎯 達成夢想 ${p.goalEmoji} ${p.goalTitle}！+傳承 ${p.legacyReward}、+體驗 ${p.lifeExpReward}${cash}`);
+      } else {
+        addNotification(`🎯 ${p.playerName} 達成「${p.goalEmoji} ${p.goalTitle}」！`);
+      }
+    });
+    s.on('bucketListAllDone', (p: { playerId: string; playerName: string; bonus: { legacy: number; lifeExp: number; cash: number } }) => {
+      if (p.playerId === s.id) {
+        addNotification(`🌟 完成所有夢想！額外獎勵：傳承 +${p.bonus.legacy}、體驗 +${p.bonus.lifeExp}、現金 +$${fmt(p.bonus.cash)}`);
+      } else {
+        addNotification(`🌟 ${p.playerName} 完成全部人生夢想！`);
+      }
+    });
+
+    // B2：人生里程碑（40/60/80 歲）
+    s.on('lifeMilestoneReached', (p: { playerId: string; playerName: string; age: number; theme: string; emoji: string; legacyGain: number; lifeExpGain: number; cashGain: number }) => {
+      if (p.playerId === s.id) {
+        addNotification(`${p.emoji} ${p.age} 歲人生回顧：${p.theme}！+傳承 ${p.legacyGain}、+體驗 ${p.lifeExpGain}、+$${fmt(p.cashGain)}`);
+      } else {
+        addNotification(`${p.emoji} ${p.playerName} 跨越 ${p.age} 歲：${p.theme}！`);
+      }
     });
 
     s.on('gameClock', (p: { currentAge: number }) => {
@@ -913,15 +981,18 @@ export default function PlayerPage() {
 
   // ── GAME VIEW ──
   if ((view === 'game' || view === 'gameover') && myPlayer && gameState) {
-    // 找到目前格子
-    const pos = myPlayer.currentPosition;
-    const cellConfig = myPlayer.isInFastTrack
-      ? outerCircleConfig[pos % outerCircleConfig.length]
-      : innerCircleConfig[pos % innerCircleConfig.length];
+    // 找到目前格子（快車道時用 fastTrackPosition，內圈時用 currentPosition）
+    const isOnFastTrack = !!myPlayer.isInFastTrack;
+    const trackConfig = isOnFastTrack ? outerCircleConfig : innerCircleConfig;
+    const rawPos = isOnFastTrack
+      ? (myPlayer.fastTrackPosition ?? 0)
+      : (myPlayer.currentPosition ?? 0);
+    const pos = trackConfig.length > 0 ? rawPos % trackConfig.length : 0;
+    const cellConfig = trackConfig[pos];
 
-    // 顯示用年齡：取伺服器全局時鐘與玩家起始年齡的較大值
-    // 選擇進修的玩家 startAge=25，遊戲剛開始時時鐘仍為20，應顯示25而非20
-    const personalAge = Math.max(myPlayer.startAge ?? 20, gameState.currentAge);
+    // 顯示用年齡：優先取後端算好的 personalAge；舊版 server 退回前端計算
+    const personalAge =
+      myPlayer.personalAge ?? Math.max(myPlayer.startAge ?? 20, gameState.currentAge);
 
     // 計算通知數量
     const notifCount = notifications.length;
@@ -991,9 +1062,6 @@ export default function PlayerPage() {
               <div className="text-yellow-300 font-bold text-sm">
                 {personalAge.toFixed(1)} 歲
               </div>
-              <div className="text-[10px] text-gray-500 leading-tight">
-                起始 {myPlayer.startAge ?? '?'} ｜時鐘 {gameState.currentAge.toFixed(1)}
-              </div>
               {gameState.isPaused && <div className="text-orange-400 text-xs">⏸ 暫停</div>}
               <div className={`text-xs font-bold ${myPlayer.monthlyCashflow >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                 {myPlayer.monthlyCashflow >= 0 ? '+' : ''}${fmt(myPlayer.monthlyCashflow)}/月
@@ -1011,7 +1079,7 @@ export default function PlayerPage() {
               <div className="text-5xl mb-2">{cellConfig.icon}</div>
               <div className="text-white font-bold text-lg">{cellConfig.name}</div>
               <div className="text-gray-400 text-xs mt-0.5">
-                {myPlayer.isInFastTrack ? '外圈' : '內圈'} 第 {pos + 1} 格
+                {isOnFastTrack ? '外圈' : '內圈'} 第 {pos + 1} 格 / 共 {trackConfig.length} 格
               </div>
               {cellConfig.description && (
                 <div className="mt-2 text-xs text-emerald-300 bg-emerald-950/50 rounded-xl px-3 py-2 text-left">
@@ -1072,6 +1140,68 @@ export default function PlayerPage() {
               <button className="btn-primary text-sm w-full" onClick={() => { setView('analysis'); emit('requestPlayerAnalysis'); }}>
                 查看我的人生分析
               </button>
+            </div>
+          )}
+
+          {/* B1：人生夢想清單 / B2：里程碑 / A1：慈善累積 */}
+          {!isGameOver && (myPlayer.isInFastTrack || (myPlayer.charityTotal ?? 0) > 0) && (
+            <div className="mx-4 mb-2 rounded-2xl border border-purple-800 bg-purple-950/50 p-3">
+              <div className="text-purple-200 font-bold text-sm mb-2 flex items-center justify-between">
+                <span>🌟 人生成就</span>
+                {(myPlayer.charityTotal ?? 0) > 0 && (
+                  <span className="text-pink-300 text-xs font-normal">
+                    ❤️ 累積慈善 ${fmt(myPlayer.charityTotal ?? 0)}
+                  </span>
+                )}
+              </div>
+
+              {/* 里程碑進度 */}
+              {(() => {
+                const passed = myPlayer.milestonesPassed ?? { age40: false, age60: false, age80: false };
+                const ages: { key: 'age40' | 'age60' | 'age80'; emoji: string; age: number }[] = [
+                  { key: 'age40', emoji: '🌱', age: 40 },
+                  { key: 'age60', emoji: '🍂', age: 60 },
+                  { key: 'age80', emoji: '🌟', age: 80 },
+                ];
+                return (
+                  <div className="flex gap-2 mb-2">
+                    {ages.map((m) => {
+                      const done = passed[m.key];
+                      const reached = personalAge >= m.age;
+                      return (
+                        <div key={m.key}
+                          className={`flex-1 text-center text-xs px-2 py-1 rounded-lg border ${done ? 'bg-yellow-900/40 border-yellow-700 text-yellow-300' : reached ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
+                          <div className="text-base">{m.emoji}</div>
+                          <div className="font-bold">{m.age} 歲</div>
+                          <div className="text-[10px]">{done ? '已通過' : reached ? '處理中' : '未到'}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {/* 夢想清單 */}
+              {myPlayer.isInFastTrack && (myPlayer.bucketList?.length ?? 0) > 0 && (
+                <div className="space-y-1">
+                  <div className="text-purple-300 text-xs">🎯 人生夢想清單</div>
+                  {(myPlayer.bucketList ?? []).map((entry) => {
+                    const meta = BUCKET_GOAL_LABELS[entry.id];
+                    if (!meta) return null;
+                    return (
+                      <div key={entry.id}
+                        className={`flex items-center gap-2 px-2 py-1 rounded-lg text-xs ${entry.claimed ? 'bg-emerald-900/40 border border-emerald-700' : 'bg-gray-800 border border-gray-700'}`}>
+                        <span className="text-base">{meta.emoji}</span>
+                        <span className={`flex-1 ${entry.claimed ? 'text-emerald-200 line-through' : 'text-gray-200'}`}>
+                          <span className="font-bold">{meta.title}</span>
+                          <span className="ml-1 text-gray-400">— {meta.desc}</span>
+                        </span>
+                        {entry.claimed && <span className="text-emerald-300">✓</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 

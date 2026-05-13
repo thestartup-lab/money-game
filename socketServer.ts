@@ -42,6 +42,8 @@ import {
   SOCIAL_CLASS_CONFIG, DEFAULT_GAME_DURATION_MS,
   MIN_GAME_DURATION_MS, MAX_GAME_DURATION_MS,
   LIFE_EXP, LIFE_EVENT_WINDOWS,
+  MARRIAGE_GIFT, MARRIAGE_GIFT_RANDOM_BONUS,
+  CHILD_GIFT_BASE, CHILD_GIFT_RANDOM_BONUS,
   HP_ACTIVITY_THRESHOLDS,
   HOST_ACTIVATION_DRS_BONUS,
   CRISIS_FREQ_BY_STAGE,
@@ -49,6 +51,7 @@ import {
   QUADRANT_SELECT_THRESHOLDS, FRANCHISE_CASH_THRESHOLD, PROFESSIONS,
   SECOND_LIFE_CELL,
   STOCK_DCA_MONTHLY_RETURN_RATE,
+  STOCK_DCA_MONTHLY_DIVIDEND_RATE,
   SKILL_CAREER_CHANGE_THRESHOLD,
   getLoanLimit,
   getLoanRate,
@@ -85,6 +88,7 @@ import {
   BIG_DEALS,
   DOODADS,
   MARKET_CARDS,
+  LUCKY_CARDS,
 } from './gameCards';
 import {
   applyDoodadCard,
@@ -97,7 +101,13 @@ import {
   handlePlayerDeath,
   checkRatRaceEscape,
   applyRelationshipCard,
+  applyLuckyCard,
 } from './cardSystem';
+import {
+  assignBucketList,
+  evaluateBucketList,
+  getBucketGoal,
+} from './bucketList';
 
 // ============================================================
 // 伺服器初始化
@@ -186,6 +196,155 @@ function calcNetWorth(p: Player): number {
 }
 
 /**
+ * 檢查玩家夢想清單，達成則 emit `bucketGoalAchieved`，全部達成額外發送 `bucketListAllDone`。
+ * 在外圈玩家發生重要事件後呼叫（payday、charity、結婚、生子、買資產、FQ 升級…）。
+ *
+ * 注意：未進入外圈的玩家（bucketList 為空）不會觸發任何事件。
+ */
+function checkBucketGoals(
+  player: Player,
+  gs: GameState,
+  roomId: string,
+  socket: import('socket.io').Socket
+): void {
+  if (!player.bucketList || player.bucketList.length === 0) return;
+  const result = evaluateBucketList(player, gs);
+  if (result.newlyClaimed.length === 0) return;
+
+  for (const goal of result.newlyClaimed) {
+    emitCellEvent(
+      socket,
+      roomId,
+      player.name,
+      '夢想達成',
+      `${goal.emoji} 完成夢想：${goal.title}！+傳承 ${goal.legacyReward}、+體驗 ${goal.lifeExpReward}${goal.cashReward ? `、+現金 $${goal.cashReward.toLocaleString()}` : ''}。`
+    );
+    emitToRoom(roomId, 'bucketGoalAchieved', {
+      playerId: player.id,
+      playerName: player.name,
+      goalId: goal.id,
+      goalTitle: goal.title,
+      goalEmoji: goal.emoji,
+      legacyReward: goal.legacyReward,
+      lifeExpReward: goal.lifeExpReward,
+      cashReward: goal.cashReward ?? 0,
+    });
+    logPlayerEvent(
+      player,
+      gs,
+      'bucket_goal_achieved',
+      `🎯 夢想達成：${goal.title}（傳承 +${goal.legacyReward}）`,
+      player.cash - (goal.cashReward ?? 0),
+      player.monthlyCashflow,
+      calcNetWorth(player) - (goal.cashReward ?? 0),
+      { goalId: goal.id, legacyReward: goal.legacyReward }
+    );
+  }
+
+  if (result.allDone && result.perfectBonus) {
+    emitCellEvent(
+      socket,
+      roomId,
+      player.name,
+      '人生圓滿',
+      `🌟 完成所有夢想！額外獎勵：傳承 +${result.perfectBonus.legacy}、體驗 +${result.perfectBonus.lifeExp}、現金 +$${result.perfectBonus.cash.toLocaleString()}。`
+    );
+    emitToRoom(roomId, 'bucketListAllDone', {
+      playerId: player.id,
+      playerName: player.name,
+      bonus: result.perfectBonus,
+    });
+  }
+}
+
+/**
+ * 人生里程碑檢查（40 / 60 / 80 歲）。
+ * 玩家年齡跨越關卡時觸發人生回顧事件，依當下狀態自動加分。
+ *
+ * 在 payday 結算後呼叫（年齡會隨遊戲時鐘前進）。
+ */
+function checkLifeMilestones(
+  player: Player,
+  gs: GameState,
+  roomId: string,
+  socket: import('socket.io').Socket
+): void {
+  if (!player.milestonesPassed) {
+    player.milestonesPassed = { age40: false, age60: false, age80: false };
+  }
+  const personalAge = Math.max(player.startAge ?? 20, getCurrentAge(gs));
+
+  type Milestone = { age: 40 | 60 | 80; key: 'age40' | 'age60' | 'age80'; emoji: string; theme: string };
+  const list: Milestone[] = [
+    { age: 40, key: 'age40', emoji: '🌱', theme: '中年成就' },
+    { age: 60, key: 'age60', emoji: '🍂', theme: '黃金歲月' },
+    { age: 80, key: 'age80', emoji: '🌟', theme: '長壽傳承' },
+  ];
+
+  for (const m of list) {
+    if (player.milestonesPassed[m.key] || personalAge < m.age) continue;
+    player.milestonesPassed[m.key] = true;
+
+    // 依當下狀態給人生回顧加分（家庭/事業/財富/體驗）
+    const review = {
+      family: 0,
+      wealth: 0,
+      health: 0,
+      legacy: 0,
+      cash: 0,
+      lifeExp: 0,
+    };
+    if (player.isMarried) review.family += 10;
+    if (player.numberOfChildren >= 1) review.family += 5 * player.numberOfChildren;
+    if (calcNetWorth(player) >= 1_000_000) review.wealth += 10;
+    if (calcNetWorth(player) >= 5_000_000) review.wealth += 15;
+    if ((player.stats?.health ?? 0) >= 70) review.health += 10;
+    if ((player.charityTotal ?? 0) >= 50_000) review.legacy += 10;
+    if (player.totalPassiveIncome >= 10_000) review.wealth += 10;
+
+    // 統合：legacy/lifeExp 加成
+    const legacyGain = review.family + review.wealth + review.health + review.legacy;
+    const lifeExpGain = 20; // 每個里程碑固定 +20 體驗
+    const cashGain = m.age >= 60 ? 30_000 : 15_000; // 60+ 歲多給點養老金紅利
+    player.legacyBonusPoints = (player.legacyBonusPoints ?? 0) + legacyGain;
+    player.lifeExperience = (player.lifeExperience ?? 0) + lifeExpGain;
+    player.cash += cashGain;
+
+    emitCellEvent(
+      socket,
+      roomId,
+      player.name,
+      `${m.emoji} ${m.age} 歲人生回顧`,
+      `${m.theme}！家庭 +${review.family}、財富 +${review.wealth}、健康 +${review.health}、慈善 +${review.legacy}（傳承 +${legacyGain}、體驗 +${lifeExpGain}、現金 +$${cashGain.toLocaleString()}）`
+    );
+    emitToRoom(roomId, 'lifeMilestoneReached', {
+      playerId: player.id,
+      playerName: player.name,
+      age: m.age,
+      theme: m.theme,
+      emoji: m.emoji,
+      review,
+      legacyGain,
+      lifeExpGain,
+      cashGain,
+    });
+    logPlayerEvent(
+      player,
+      gs,
+      'life_milestone',
+      `${m.emoji} ${m.age} 歲人生回顧：傳承 +${legacyGain}、體驗 +${lifeExpGain}、現金 +$${cashGain.toLocaleString()}`,
+      player.cash - cashGain,
+      player.monthlyCashflow,
+      calcNetWorth(player) - cashGain,
+      { age: m.age, ...review, legacyGain, lifeExpGain, cashGain }
+    );
+
+    // 跨越里程碑可能讓「長壽人生」夢想達標
+    checkBucketGoals(player, gs, roomId, socket);
+  }
+}
+
+/**
  * 在玩家事件日誌中記錄一筆快照。
  * 應在事件「執行後」呼叫，cashBefore/cashflowBefore 由呼叫者在執行前捕捉。
  */
@@ -200,7 +359,7 @@ function logPlayerEvent(
   meta?: Record<string, unknown>
 ): void {
   const event: PlayerEvent = {
-    age: Math.round(getCurrentAge(gs) * 10) / 10,
+    age: Math.round(Math.max(player.startAge ?? 20, getCurrentAge(gs)) * 10) / 10,
     type,
     description,
     cashBefore,
@@ -221,8 +380,13 @@ function logPlayerEvent(
 /**
  * 將 Player 轉換為可安全 JSON 序列化的純物件。
  * getter 值（totalIncome 等）需手動展開，Map 無法直接序列化。
+ *
+ * 第二個參數 gs 用來算 personalAge（顯示用個人年齡 = max(startAge, 全域時鐘)），
+ * 讓所有前端讀同一個欄位即可，避免「進修玩家從 25 起算」與「全域時鐘 20」對不上。
  */
-function serializePlayer(p: Player): object {
+function serializePlayer(p: Player, gs: GameState): object {
+  const personalAge = Math.round(Math.max(p.startAge ?? 20, getCurrentAge(gs)) * 10) / 10;
+
   // 計算保費與孩子支出（後端 Player.totalExpenses getter 內的細項，補給前端報表使用）
   const insurancePremiums =
     (p.insurance.hasMedicalInsurance ? MEDICAL_INSURANCE_PREMIUM : 0) +
@@ -266,6 +430,7 @@ function serializePlayer(p: Player): object {
     lifeExperience: p.lifeExperience,
     hasContinuedEducation: p.hasContinuedEducation,
     startAge: p.startAge ?? 20,
+    personalAge,
     isMarried: p.isMarried,
     marriageBonus: p.marriageBonus,
     relationshipPoints: p.relationshipPoints,
@@ -289,6 +454,9 @@ function serializePlayer(p: Player): object {
     monthlyCashflow: p.monthlyCashflow,
     nextFQUpgradeCost: getFQUpgradeCost(p.stats.financialIQ),
     eventLog: p.eventLog,
+    charityTotal: p.charityTotal ?? 0,
+    bucketList: p.bucketList ?? [],
+    milestonesPassed: p.milestonesPassed ?? { age40: false, age60: false, age80: false },
   };
 }
 
@@ -298,7 +466,7 @@ function serializeGameState(gs: GameState): object {
   return {
     gameId: gs.gameId,
     roomId: gs.gameId,
-    players: Array.from(gs.players.values()).map(serializePlayer),
+    players: Array.from(gs.players.values()).map((p) => serializePlayer(p, gs)),
     playerOrder: gs.playerOrder,
     currentPlayerTurnId: gs.currentPlayerTurnId,
     gamePhase: gs.gamePhase,
@@ -746,6 +914,26 @@ io.on('connection', (socket: Socket) => {
               cost: d.cost, lifeExpGained: d.lifeExpGained, salaryPenalty: d.salaryPenalty,
             }));
 
+          // 股市內幕：FQ 達門檻者可預知下一張 MarketCard，提前布局
+          const { FQ_INSIDER_THRESHOLD } = require('./gameConstants') as typeof import('./gameConstants');
+          const marketTip =
+            player.stats.financialIQ >= FQ_INSIDER_THRESHOLD
+              ? (() => {
+                  const next = gs.marketDeck.peek();
+                  return next
+                    ? {
+                        title: next.title,
+                        description: next.description,
+                        targetAssetType: next.targetAssetType,
+                        effect: next.effect,
+                        priceMultiplier: next.priceMultiplier,
+                        dividendRate: next.dividendRate,
+                        fixedPriceOffer: next.fixedPriceOffer,
+                      }
+                    : null;
+                })()
+              : null;
+
           socket.emit('paydayPlanningRequired', {
             paydayPosition: paydayPos,
             paydayIndex: paydayIdx + 1,
@@ -757,6 +945,7 @@ io.on('connection', (socket: Socket) => {
             stockDCAPortfolioValue: player.assets.find((a) => a.id === 'stock-dca')?.currentValue ?? 0,
             travelDestinations: eligibleDestinations,
             timeoutMs: PAYDAY_PLANNING_TIMEOUT_MS,
+            marketTip,
           });
 
           const plan = await waitForPaydayPlan(socket, player);
@@ -828,24 +1017,30 @@ io.on('connection', (socket: Socket) => {
             continue;  // 跳過本次發薪日其餘處理，但繼續執行後續流程（advanceToNextTurn 等）
           }
 
+          // 股票定期定額：發薪日「先算股息（進入 totalIncome）」→ payday 結算 → 後算增值
+          // 設計：dcaAsset.monthlyCashflow = currentValue × dividendRate，
+          //       triggerPayday 會把它與其他被動收入一起套 FQ 乘數加進現金。
+          //       增值部分仍只反映在 currentValue 上（賣出才兌現）。
+          // 修正歷史 bug：之前 monthlyCashflow=0 導致股票對 totalPassiveIncome 沒貢獻。
+          const dcaAsset = player.assets.find((a) => a.id === 'stock-dca');
+          let dcaDividend = 0;
+          if (dcaAsset) {
+            const valueBeforeGrowth = dcaAsset.currentValue ?? dcaAsset.cost;
+            dcaDividend = Math.round(valueBeforeGrowth * STOCK_DCA_MONTHLY_DIVIDEND_RATE);
+            dcaAsset.monthlyCashflow = dcaDividend;
+          }
+
           triggerPayday(player, gs, maintenanceDone);
           logPlayerEvent(player, gs, 'payday', `發薪日（第 ${player.paydayCount} 次）`, _pdCashBefore, _pdFlowBefore, _pdNWBefore);
 
-          // 股票定期定額：每次發薪日 stock-dca 資產複利增長
-          // ⚠ 修正：以前同時做 cash += growth 並設 monthlyCashflow = growth，
-          // triggerPayday 內 totalIncome 也會把 monthlyCashflow 加進現金 → 雙重計入。
-          // 現改為「只反映在資產 currentValue 上，不直接加現金、不設 monthlyCashflow」。
-          // 玩家想要兌現增值請走 sellAsset。
-          const dcaAsset = player.assets.find((a) => a.id === 'stock-dca');
+          // 增值部分（不影響現金，只動 currentValue）
           if (dcaAsset) {
             const prevVal = dcaAsset.currentValue ?? dcaAsset.cost;
             dcaAsset.currentValue = Math.round(prevVal * (1 + STOCK_DCA_MONTHLY_RETURN_RATE));
             const growth = dcaAsset.currentValue - prevVal;
-            // 保持 monthlyCashflow 為 0（DCA 是純增值資產，不是現金流資產）
-            dcaAsset.monthlyCashflow = 0;
-            if (growth > 0) {
-              emitCellEvent(socket, roomId, player.name, '股票增值',
-                `📈 指數基金月複利 +$${growth.toLocaleString()}（資產增值），總值 $${dcaAsset.currentValue.toLocaleString()}`);
+            if (growth > 0 || dcaDividend > 0) {
+              emitCellEvent(socket, roomId, player.name, '股票收益',
+                `📈 指數基金股息 +$${dcaDividend.toLocaleString()}／增值 +$${growth.toLocaleString()}（市值 $${dcaAsset.currentValue.toLocaleString()}）`);
             }
           }
 
@@ -915,6 +1110,22 @@ io.on('connection', (socket: Socket) => {
         player.isInFastTrack = true;
         gs.gamePhase = GamePhase.FastTrack;
         addLifeExperience(player, LIFE_EXP.FAST_TRACK_ENTER);
+
+        // B1：進入外圈時隨機抽 3 個人生夢想目標
+        assignBucketList(player, 3);
+        const goalDetails = player.bucketList
+          .map((e) => getBucketGoal(e.id))
+          .filter((g): g is NonNullable<typeof g> => !!g)
+          .map((g) => ({
+            id: g.id,
+            emoji: g.emoji,
+            title: g.title,
+            description: g.description,
+            legacyReward: g.legacyReward,
+            lifeExpReward: g.lifeExpReward,
+            cashReward: g.cashReward ?? 0,
+          }));
+
         logPlayerEvent(player, gs, 'rat_race_escaped', `脫出老鼠賽跑！被動收入 $${player.totalPassiveIncome.toLocaleString()} ≥ 支出 $${player.totalExpenses.toLocaleString()}`, _rrCB, _rrFB, _rrNWB, { passiveIncome: player.totalPassiveIncome, totalExpenses: player.totalExpenses });
         emitToRoom(roomId, 'ratRaceEscaped', {
           playerId: player.id,
@@ -923,13 +1134,27 @@ io.on('connection', (socket: Socket) => {
           totalExpenses: player.totalExpenses,
           lifeExpGained: LIFE_EXP.FAST_TRACK_ENTER,
           canCongratulate: true,   // 前端可顯示祝賀按鈕
+          bucketList: goalDetails,
         });
+        socket.emit('bucketListAssigned', { goals: goalDetails });
+
+        // 立刻檢查一次：高被動收入、長壽等可能在進外圈當下就達成
+        checkBucketGoals(player, gs, roomId, socket);
       }
 
       // --- 5c. FastTrack 資產增值 ---
       // 注意：FT 資產增值由「踩到外圈發薪格」時於 handleLandingSquare 觸發
       // （applyFastTrackAppreciation 註解：每個 triggerPayday 後呼叫）。
       // 過去這裡也呼叫一次，造成同一回合重複增值；已移除。
+
+      // --- 5d. B2 人生里程碑 + B1 夢想清單檢查 ---
+      // 每次擲骰結束後（含 payday、落格、FastTrack 進入），檢查當前玩家：
+      //   1. 跨越 40/60/80 歲是否觸發里程碑事件
+      //   2. 任何夢想目標是否達成（外圈玩家才有 bucketList）
+      if (player.isAlive) {
+        checkLifeMilestones(player, gs, roomId, socket);
+        checkBucketGoals(player, gs, roomId, socket);
+      }
 
       // --- 6. 廣播最終遊戲狀態 & 推進回合 ---
       gs.advanceToNextTurn();
@@ -1282,6 +1507,115 @@ io.on('connection', (socket: Socket) => {
   });
 
   // ----------------------------------------------------------
+  // 觸發特殊拍賣 (triggerSpecialAuction) — 主持人專用
+  // 從 SPECIAL_AUCTION_DEALS 牌組隨機抽 1 張，廣播給所有玩家進入 30 秒競標。
+  // 起標金額 = downPayment ?? cost；得標者扣現金後該資產直接寫入持有，
+  // 起標金額會以「無主來源」（沒有原持有者）銷毀，等同新發行的特殊資產。
+  // ----------------------------------------------------------
+  socket.on('triggerSpecialAuction', (payload: { roomId?: string; cardId?: string }) => {
+    const gs = (payload?.roomId ? rooms.get(payload.roomId) : null) ?? getRoomState(socket);
+    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    const roomId = gs.gameId;
+
+    if (socket.id !== gs.adminSocketId) {
+      if (payload?.roomId && gs.adminSocketId) {
+        gs.adminSocketId = socket.id;
+        socketRoomMap.set(socket.id, roomId);
+        socket.join(roomId);
+      } else {
+        socket.emit('error', { message: '權限不足：僅管理員可觸發特殊拍賣。' });
+        return;
+      }
+    }
+
+    const { SPECIAL_AUCTION_DEALS } = require('./gameCards') as typeof import('./gameCards');
+    const pool: DealCard[] = SPECIAL_AUCTION_DEALS;
+    const auctionCard = payload?.cardId
+      ? (pool.find((c) => c.id === payload.cardId) ?? pool[Math.floor(Math.random() * pool.length)])
+      : pool[Math.floor(Math.random() * pool.length)];
+
+    if (!auctionCard) {
+      socket.emit('error', { message: '特殊拍賣牌組已空。' });
+      return;
+    }
+
+    if (!gs.activeAuctions) gs.activeAuctions = {};
+    const minBid = auctionCard.asset.downPayment ?? auctionCard.asset.cost ?? 0;
+    const auctionId = `special-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const durationMs = 30_000;
+    const auctionEndTime = Date.now() + durationMs;
+
+    gs.activeAuctions[auctionId] = {
+      dealCardId: auctionCard.id,
+      startTime: Date.now(),
+      endTime: auctionEndTime,
+      highestBid: 0,
+      minBid,
+      // 特殊拍賣沒有「原持有者」（資產由銀行/市場新發行），triggeredBy 設為主持人
+      triggeredBy: '__admin__',
+      triggeredByName: '主持人',
+      cardInfo: {
+        name: auctionCard.title,
+        monthlyCashflow: auctionCard.asset.monthlyCashflow ?? 0,
+        downPayment: minBid,
+      },
+    };
+
+    emitToRoom(roomId, 'dealAuctionStarted', {
+      auctionId,
+      triggeredBy: '__admin__',
+      triggeredByName: '主持人',
+      isSpecialAuction: true,
+      card: {
+        id: auctionCard.id,
+        name: auctionCard.title,
+        description: auctionCard.description,
+        minBid,
+        monthlyCashflow: auctionCard.asset.monthlyCashflow,
+      },
+      endsAt: auctionEndTime,
+    });
+
+    setTimeout(() => {
+      const auction = gs.activeAuctions?.[auctionId];
+      if (!auction) return;
+      delete gs.activeAuctions![auctionId];
+
+      if (auction.highestBidderId && auction.highestBid >= minBid) {
+        const winner = gs.players.get(auction.highestBidderId);
+        if (winner && winner.cash >= auction.highestBid) {
+          const _wCB = winner.cash; const _wFB = winner.monthlyCashflow; const _wNWB = calcNetWorth(winner);
+          winner.cash -= auction.highestBid;
+          // 特殊拍賣：得標金額蒸發（市場新發行），不轉給任何玩家
+          acceptDealCard(winner, auctionCard);
+          logPlayerEvent(
+            winner, gs, 'asset_buy',
+            `特殊拍賣得標：${auctionCard.title}（月現金流 ${(auctionCard.asset.monthlyCashflow ?? 0) >= 0 ? '+' : ''}$${auctionCard.asset.monthlyCashflow ?? 0}）`,
+            _wCB, _wFB, _wNWB,
+            { cardId: auctionCard.id, cardTitle: auctionCard.title, isSpecialAuction: true }
+          );
+          emitToRoom(roomId, 'dealAuctionEnded', {
+            auctionId,
+            winnerId: auction.highestBidderId,
+            winnerName: auction.highestBidderName,
+            winningBid: auction.highestBid,
+            cardName: auctionCard.title,
+            hadBids: true,
+            isSpecialAuction: true,
+          });
+          emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+        }
+      } else {
+        emitToRoom(roomId, 'dealAuctionEnded', {
+          auctionId, winnerId: null, winnerName: null,
+          winningBid: 0, cardName: auctionCard.title, hadBids: false,
+          isSpecialAuction: true,
+        });
+      }
+    }, durationMs);
+  });
+
+  // ----------------------------------------------------------
   // 百歲人生：開局流程事件
   // ----------------------------------------------------------
 
@@ -1330,7 +1664,9 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
+    const _gsCashBefore = player.cash;
     applyGrowthStats(player, { academic, health, social, resource });
+    const resourceCashGain = player.cash - _gsCashBefore;
 
     const availableProfessions = getAvailableProfessions(player).map((p) => ({
       id: p.id,
@@ -1345,6 +1681,7 @@ io.on('connection', (socket: Socket) => {
       stats: player.stats,
       availableProfessions,
       canContinueEducation: true,
+      resourceCashGain,
     });
 
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
@@ -1431,6 +1768,15 @@ io.on('connection', (socket: Socket) => {
       socket.emit('error', { message: '職業分配失敗，請重試。' });
       return;
     }
+
+    // 處理 placeholder 職業情境：玩家進房時 createPlayer 已用佔位職業（cash=0、薪資=0），
+    // 此處才把「真正選定的職業」startingCash 注入。
+    // 若先前已指派過真實職業（例如重複呼叫 selectQuadrant），先扣回舊的 startingCash 避免疊加。
+    const previousProfession = player.profession;
+    if (previousProfession && previousProfession.id !== '__placeholder__') {
+      player.cash -= previousProfession.startingCash;
+    }
+    player.cash += chosen.startingCash;
 
     player.profession = chosen;
     player.salary = chosen.startingSalary;
@@ -1639,12 +1985,32 @@ io.on('connection', (socket: Socket) => {
     offeror.lifeExperience += 15;
     target.lifeExperience += 15;
 
+    // A1：合作分紅 — 雙方被動收入總和 × 3% 一次性現金（最低 $3,000、最高 $50,000）
+    const passiveSum = offeror.totalPassiveIncome + target.totalPassiveIncome;
+    const dividend = Math.max(3_000, Math.min(50_000, Math.round(passiveSum * 0.03)));
+    offeror.cash += dividend;
+    target.cash += dividend;
+    logPlayerEvent(
+      offeror, gs, 'asset_buy',
+      `🤝 與 ${target.name} 合夥分紅 +$${dividend.toLocaleString()}（雙方被動收入總和 $${passiveSum.toLocaleString()}）`,
+      offeror.cash - dividend, offeror.monthlyCashflow, calcNetWorth(offeror) - dividend,
+      { partnerId: target.id, partnerName: target.name, dividend }
+    );
+    logPlayerEvent(
+      target, gs, 'asset_buy',
+      `🤝 與 ${offeror.name} 合夥分紅 +$${dividend.toLocaleString()}（雙方被動收入總和 $${passiveSum.toLocaleString()}）`,
+      target.cash - dividend, target.monthlyCashflow, calcNetWorth(target) - dividend,
+      { partnerId: offeror.id, partnerName: offeror.name, dividend }
+    );
+
     emitToRoom(roomId, 'partnershipAccepted', {
       offerorId: offer.offerorId, offerorName: offeror.name,
       targetId: socket.id,        targetName: target.name,
+      dividend,
+      passiveSum,
     });
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
-    console.log(`[partnership] ${offeror.name} 與 ${target.name} 合夥成功`);
+    console.log(`[partnership] ${offeror.name} 與 ${target.name} 合夥成功，分紅 $${dividend}`);
   });
 
   // ----------------------------------------------------------
@@ -1956,16 +2322,15 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
-    if (!payload?.force) {
-      // 斷線中的玩家不擋開始（他們已不在現場，重連會自動恢復；若 10 分鐘未回來會自動移除）
-      const notReady = [...gs.players.values()].filter((p) => !p.pre20Done && !p.isDisconnected);
-      if (notReady.length > 0) {
-        const names = notReady.map((p) => p.name).join('、');
-        socket.emit('error', {
-          message: `以下玩家尚未完成職業選擇：${names}。請等他們完成，或按「強制」按鈕忽略。`,
-        });
-        return;
-      }
+    // pre20Done 為硬性條件：任何在線玩家未完成職業選擇都不允許開始
+    // （斷線中的玩家不擋，他們重連會自動恢復；force 不再略過此檢查，避免玩家還沒選就被開局）
+    const notReady = [...gs.players.values()].filter((p) => !p.pre20Done && !p.isDisconnected);
+    if (notReady.length > 0) {
+      const names = notReady.map((p) => p.name).join('、');
+      socket.emit('error', {
+        message: `以下玩家尚未完成職業選擇：${names}。請等他們完成後再開始（為避免誤開局，已停用「強制略過」）。`,
+      });
+      return;
     }
 
     const minutes = payload?.durationMinutes ?? 90;
@@ -2282,13 +2647,19 @@ io.on('connection', (socket: Socket) => {
     socket.emit('marriageResult', result);
 
     if (result.success) {
-      logPlayerEvent(player, gs, 'marriage', `結婚（${type === 'love' ? '愛情' : '媒人'}），月收入加成 +$${result.marriageBonus}`, _mCB, _mFB, _mNWB, { marriageType: type, marriageBonus: result.marriageBonus, lifeExpGained: result.lifeExpGained });
+      // 結婚禮金（一次性現金入帳）
+      const giftBase = MARRIAGE_GIFT[type] ?? 0;
+      const giftRandom = giftBase > 0 ? Math.round(Math.random() * MARRIAGE_GIFT_RANDOM_BONUS) : 0;
+      const marriageGift = giftBase + giftRandom;
+      if (marriageGift > 0) player.cash += marriageGift;
+      logPlayerEvent(player, gs, 'marriage', `結婚（${type === 'love' ? '愛情' : '媒人'}），月收入加成 +$${result.marriageBonus}，禮金 +$${marriageGift.toLocaleString()}`, _mCB, _mFB, _mNWB, { marriageType: type, marriageBonus: result.marriageBonus, lifeExpGained: result.lifeExpGained, marriageGift });
       emitToRoom(gs.gameId, 'marriageAnnouncement', {
         playerId: player.id,
         playerName: player.name,
         marriageType: type,
         marriageBonus: result.marriageBonus,
         lifeExpGained: result.lifeExpGained,
+        marriageGift,
         canCongratulate: true,
       });
       emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
@@ -2719,21 +3090,27 @@ async function handleLandingSquare(
         emitToRoom(roomId, 'gameResumed', { resumedAt: new Date() });
         const ftCost = deal.asset.downPayment ?? deal.asset.cost;
         if (ftDealDecision?.accept === true) {
-          // 先處理槓桿借款（如果玩家選擇）
-          if (ftDealDecision.useLeverage === true && player.cash < ftCost) {
-            const shortfall = ftCost - player.cash;
-            const lvResult = takeLeverageLoan(player, shortfall, deal.title);
-            if (!lvResult.success) {
-              socket.emit('error', { message: `投資槓桿借款失敗：${lvResult.message}` });
-              break;
+          // 先處理槓桿借款（現金不足→借差額；現金已足且選 leverage→主動槓桿借款留現金）
+          if (ftDealDecision.useLeverage === true && ftCost > 0) {
+            const _ftAvailableLoan = getAvailableLoan(player);
+            const ftBorrow =
+              player.cash < ftCost
+                ? ftCost - player.cash
+                : Math.min(ftCost, _ftAvailableLoan);
+            if (ftBorrow > 0) {
+              const lvResult = takeLeverageLoan(player, ftBorrow, deal.title);
+              if (!lvResult.success) {
+                socket.emit('error', { message: `投資槓桿借款失敗：${lvResult.message}` });
+                break;
+              }
+              socket.emit('loanTaken', {
+                liabilityId: lvResult.liabilityId,
+                loanType: 'leverage',
+                amount: lvResult.amount,
+                monthlyPayment: lvResult.monthlyPayment,
+                newCreditScore: lvResult.newCreditScore,
+              });
             }
-            socket.emit('loanTaken', {
-              liabilityId: lvResult.liabilityId,
-              loanType: 'leverage',
-              amount: lvResult.amount,
-              monthlyPayment: lvResult.monthlyPayment,
-              newCreditScore: lvResult.newCreditScore,
-            });
           }
 
           if (player.cash >= ftCost) {
@@ -2766,13 +3143,15 @@ async function handleLandingSquare(
         const charityAmount = Math.round(player.monthlyCashflow * 0.1);
         if (player.cash >= charityAmount && charityAmount > 0) {
           player.cash -= charityAmount;
+          player.charityTotal = (player.charityTotal ?? 0) + charityAmount;
           player.lifeExperience += 15;
           player.legacyBonusPoints += 5;
-          emitCellEvent(socket, roomId, player.name, 'FT 慈善', `❤️ 外圈慈善！捐出 $${charityAmount.toLocaleString()}，獲得生命體驗 +15、傳承 +5。`);
+          emitCellEvent(socket, roomId, player.name, 'FT 慈善', `❤️ 外圈慈善！捐出 $${charityAmount.toLocaleString()}，累積慈善 $${player.charityTotal.toLocaleString()}，生命體驗 +15、傳承 +5。`);
           emitToRoom(roomId, 'fastTrackCharity', {
             playerId: player.id, playerName: player.name,
-            amount: charityAmount, legacyBonus: 5,
+            amount: charityAmount, legacyBonus: 5, charityTotal: player.charityTotal,
           });
+          checkBucketGoals(player, gs, roomId, socket);
         } else {
           emitCellEvent(socket, roomId, player.name, 'FT 慈善', '❤️ 外圈慈善格，現金不足或現金流為零，跳過捐款。');
         }
@@ -2845,11 +3224,11 @@ async function handleLandingSquare(
       case FastTrackSquareType.GlobalWave: {
         const { MARKET_CARDS } = require('./gameCards');
         const evt = MARKET_CARDS[Math.floor(Math.random() * MARKET_CARDS.length)];
-        for (const p of gs.players.values()) {
-          if (p.isAlive) applyMarketCard(gs, evt);
-        }
+        // applyMarketCard 內部已遍歷所有玩家，呼叫一次即可（之前 for 迴圈會造成 N 倍效果）
+        applyMarketCard(gs, evt);
         emitCellEvent(socket, roomId, player.name, 'FT 全球浪潮', `🌊 全球市場波動：${evt.title}，影響所有玩家資產！`);
         emitToRoom(roomId, 'globalWaveEvent', { triggeredBy: player.name, event: evt });
+        emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
         break;
       }
       case FastTrackSquareType.Partnership: {
@@ -3006,12 +3385,15 @@ async function handleLandingSquare(
         const _byCB = player.cash; const _byFB = player.monthlyCashflow; const _byNWB = calcNetWorth(player);
         applyBabyCard(player);
         addLifeExperience(player, LIFE_EXP.HAVE_CHILD);
-        logPlayerEvent(player, gs, 'child', `添丁！第 ${player.numberOfChildren} 個孩子`, _byCB, _byFB, _byNWB, { childCount: player.numberOfChildren });
-        emitCellEvent(socket, roomId, player.name, '添丁', `👶 恭喜！迎來第 ${player.numberOfChildren} 個孩子。`);
+        // 添丁紅包（長輩賀禮，一次性現金入帳）
+        const childGift = CHILD_GIFT_BASE + Math.round(Math.random() * CHILD_GIFT_RANDOM_BONUS);
+        player.cash += childGift;
+        logPlayerEvent(player, gs, 'child', `添丁！第 ${player.numberOfChildren} 個孩子，長輩紅包 +$${childGift.toLocaleString()}`, _byCB, _byFB, _byNWB, { childCount: player.numberOfChildren, childGift });
+        emitCellEvent(socket, roomId, player.name, '添丁', `👶 恭喜！迎來第 ${player.numberOfChildren} 個孩子，長輩紅包 +$${childGift.toLocaleString()}！`);
         emitToRoom(roomId, 'cardApplied', {
           playerId: player.id,
           squareType,
-          effect: { type: 'baby', numberOfChildren: player.numberOfChildren, lifeExpGained: LIFE_EXP.HAVE_CHILD },
+          effect: { type: 'baby', numberOfChildren: player.numberOfChildren, lifeExpGained: LIFE_EXP.HAVE_CHILD, childGift },
         });
       } else {
         if (!player.isMarried && Math.random() < LIFE_EVENT_WINDOWS.marriage.baseProbability) {
@@ -3067,14 +3449,65 @@ async function handleLandingSquare(
       }
       const result = applyMarketCard(gs, card);
       gs.marketDeck.discard(card);
-      emitToRoom(roomId, 'marketCardApplied', { card, affectedAssets: result.affectedAssets });
-      emitCellEvent(socket, roomId, player.name, '市場行情', `📈 市場行情：${card.title}`);
+      emitToRoom(roomId, 'marketCardApplied', {
+        card,
+        affectedAssets: result.affectedAssets,
+        dividendsPaid: result.dividendsPaid,
+      });
+      // Dividend：給每位收益者一次現金事件記錄，方便事後檢視
+      if (result.dividendsPaid && result.dividendsPaid.length > 0) {
+        for (const div of result.dividendsPaid) {
+          const recipient = gs.players.get(div.playerId);
+          if (!recipient) continue;
+          logPlayerEvent(
+            recipient, gs, 'payday',
+            `市場配息：${card.title}（+$${div.cashGain.toLocaleString()}）`,
+            recipient.cash - div.cashGain,
+            recipient.monthlyCashflow,
+            calcNetWorth(recipient) - div.cashGain,
+            { cardId: card.id, dividendAmount: div.cashGain }
+          );
+        }
+        const summary = result.dividendsPaid
+          .map((d) => `${d.playerName} +$${d.cashGain.toLocaleString()}`)
+          .join('、');
+        emitCellEvent(socket, roomId, player.name, '市場行情',
+          `💰 ${card.title}：${summary}`);
+      } else {
+        emitCellEvent(socket, roomId, player.name, '市場行情', `📈 市場行情：${card.title}`);
+      }
+      emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
       break;
     }
 
     case SquareType.SmallDeal:
     case SquareType.BigDeal: {
       const dealTypeName = squareType === SquareType.BigDeal ? '大交易' : '小交易';
+
+      // 機運卡分支：小交易格 30% 機率改抽機運卡（一次性現金入帳，無需玩家決策）
+      // 用來補足早期玩家「只有薪水」的進現金管道
+      if (squareType === SquareType.SmallDeal && Math.random() < 0.3) {
+        const lucky = LUCKY_CARDS[Math.floor(Math.random() * LUCKY_CARDS.length)];
+        const _lkCB = player.cash;
+        const _lkFB = player.monthlyCashflow;
+        const _lkNWB = calcNetWorth(player);
+        const lkResult = applyLuckyCard(player, lucky);
+        logPlayerEvent(
+          player, gs, 'payday',
+          `機運卡：${lucky.title}（+$${lkResult.cashGain.toLocaleString()}）`,
+          _lkCB, _lkFB, _lkNWB,
+          { cardId: lucky.id, cashGain: lkResult.cashGain }
+        );
+        socket.emit('luckyCardDrawn', {
+          card: lucky,
+          cashGain: lkResult.cashGain,
+          newCash: player.cash,
+        });
+        emitCellEvent(socket, roomId, player.name, '機運卡', `🍀 ${lucky.title}：+$${lkResult.cashGain.toLocaleString()}！`);
+        emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+        break;
+      }
+
       socket.emit('squareLandingNotice', { cellName: dealTypeName, message: `📋 ${dealTypeName}機會出現！查看可用的投資選項。` });
       io.to(roomId).emit('cellEventBroadcast', { playerId: socket.id, playerName: player.name, cellName: dealTypeName, message: `📋 ${dealTypeName}機會出現！`, ts: Date.now() });
 
@@ -3127,23 +3560,31 @@ async function handleLandingSquare(
 
         const downPayment = chosen.asset.downPayment ?? chosen.asset.cost ?? 0;
 
-        // 若玩家選擇「用槓桿借款購買」，先補上現金缺口
-        if (decision.useLeverage === true && player.cash < downPayment) {
-          const shortfall = downPayment - player.cash;
-          const lvResult = takeLeverageLoan(player, shortfall, chosen.title);
-          if (!lvResult.success) {
-            socket.emit('error', { message: `投資槓桿借款失敗：${lvResult.message}` });
-            drawnCards.forEach((c) => deck.discard(c));
-            emitToRoom(roomId, 'cardApplied', { playerId: player.id, squareType, effect: { type: 'dealDeclined' } });
-            break;
+        // 若玩家選擇「用槓桿借款購買」：
+        // - 現金不足：借差額補上
+        // - 現金已足：主動槓桿，借款金額 = min(downPayment, 借款上限)，把現金留著做別的事
+        if (decision.useLeverage === true && downPayment > 0) {
+          const availableLoan = getAvailableLoan(player);
+          const borrowAmount =
+            player.cash < downPayment
+              ? downPayment - player.cash
+              : Math.min(downPayment, availableLoan);
+          if (borrowAmount > 0) {
+            const lvResult = takeLeverageLoan(player, borrowAmount, chosen.title);
+            if (!lvResult.success) {
+              socket.emit('error', { message: `投資槓桿借款失敗：${lvResult.message}` });
+              drawnCards.forEach((c) => deck.discard(c));
+              emitToRoom(roomId, 'cardApplied', { playerId: player.id, squareType, effect: { type: 'dealDeclined' } });
+              break;
+            }
+            socket.emit('loanTaken', {
+              liabilityId: lvResult.liabilityId,
+              loanType: 'leverage',
+              amount: lvResult.amount,
+              monthlyPayment: lvResult.monthlyPayment,
+              newCreditScore: lvResult.newCreditScore,
+            });
           }
-          socket.emit('loanTaken', {
-            liabilityId: lvResult.liabilityId,
-            loanType: 'leverage',
-            amount: lvResult.amount,
-            monthlyPayment: lvResult.monthlyPayment,
-            newCreditScore: lvResult.newCreditScore,
-          });
         }
 
         if (player.cash < downPayment) {
@@ -3257,8 +3698,15 @@ async function handleLandingSquare(
       emitToRoom(roomId, 'cardApplied', {
         playerId: player.id,
         squareType,
-        effect: { type: 'charity', donated: donate, donationAmount: donate ? donationAmount : 0, bonusDice: player.bonusDice },
+        effect: {
+          type: 'charity',
+          donated: donate,
+          donationAmount: donate ? donationAmount : 0,
+          bonusDice: player.bonusDice,
+          charityTotal: player.charityTotal,
+        },
       });
+      if (donate) checkBucketGoals(player, gs, roomId, socket);
       break;
     }
 
@@ -3455,7 +3903,10 @@ async function triggerMarriageWindow(
     player.isMarried = true;
     player.marriageBonus = card.monthlyBonus;
     addLifeExperience(player, card.lifeExpGain);
-    logPlayerEvent(player, gs, 'marriage', `結婚（緣分），月收入加成 +$${card.monthlyBonus}`, _wmCB, _wmFB, _wmNWB, { marriageType: 'window', card: card.title, monthlyBonus: card.monthlyBonus });
+    // 緣分窗口結婚的禮金（最盛大）
+    const wmGift = MARRIAGE_GIFT.window + Math.round(Math.random() * MARRIAGE_GIFT_RANDOM_BONUS);
+    player.cash += wmGift;
+    logPlayerEvent(player, gs, 'marriage', `結婚（緣分），月收入加成 +$${card.monthlyBonus}，禮金 +$${wmGift.toLocaleString()}`, _wmCB, _wmFB, _wmNWB, { marriageType: 'window', card: card.title, monthlyBonus: card.monthlyBonus, marriageGift: wmGift });
 
     emitToRoom(roomId, 'playerMarried', {
       playerId: player.id,
@@ -3463,6 +3914,7 @@ async function triggerMarriageWindow(
       card,
       newMonthlyBonus: card.monthlyBonus,
       lifeExpGained: card.lifeExpGain,
+      marriageGift: wmGift,
     });
   } else {
     emitToRoom(roomId, 'marriageDeclined', {

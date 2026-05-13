@@ -133,6 +133,47 @@ export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPla
       {/* 可捲動內容 */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
 
+        {/* ─── 股市內幕（FQ ≥ 7 才會收到）─── */}
+        {data.marketTip && (() => {
+          const tip = data.marketTip;
+          const effectLabel: Record<string, string> = {
+            PriceIncrease: '📈 市值上漲',
+            PriceDecrease: '📉 市值下跌',
+            Dividend: '💰 配息發放',
+            SellOpportunity: '🏷️ 出售機會',
+          };
+          const assetLabel: Record<string, string> = {
+            Stock: '股票',
+            RealEstate: '房地產',
+            Business: '事業',
+            Commodity: '大宗商品',
+            Other: '其他',
+          };
+          return (
+            <section>
+              <div className="bg-gradient-to-br from-purple-900/60 to-indigo-900/60 border-2 border-purple-500 rounded-xl p-3 shadow-lg">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-lg">🕵️</span>
+                  <h3 className="text-xs font-bold text-purple-300 uppercase tracking-wide">股市內幕（FQ {data.currentStats.financialIQ}）</h3>
+                </div>
+                <div className="text-sm text-white font-semibold mb-1">下次市場行情：{tip.title}</div>
+                <div className="text-xs text-purple-200 mb-2">{tip.description}</div>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="px-2 py-0.5 rounded bg-purple-700 text-white">{effectLabel[tip.effect] ?? tip.effect}</span>
+                  <span className="px-2 py-0.5 rounded bg-indigo-700 text-white">標的：{assetLabel[tip.targetAssetType] ?? tip.targetAssetType}</span>
+                  {tip.priceMultiplier !== undefined && (
+                    <span className="text-purple-200">×{tip.priceMultiplier.toFixed(2)}</span>
+                  )}
+                  {tip.dividendRate !== undefined && (
+                    <span className="text-purple-200">配息 {(tip.dividendRate * 100).toFixed(1)}%</span>
+                  )}
+                </div>
+                <p className="text-[10px] text-purple-300 mt-2">提早布局：若預期上漲就買進對應資產，預期下跌就考慮先脫手。</p>
+              </div>
+            </section>
+          );
+        })()}
+
         {/* ─── A. 成長投資 ─── */}
         <section>
           <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">成長投資</h3>
@@ -187,7 +228,9 @@ export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPla
               <div>
                 <div className="text-sm text-white font-semibold">股票定期定額</div>
                 {data.stockDCAPortfolioValue > 0 && (
-                  <div className="text-xs text-green-400">目前持倉：${data.stockDCAPortfolioValue.toLocaleString()}（每發薪日 +0.5%）</div>
+                  <div className="text-xs text-green-400">
+                    目前持倉：${data.stockDCAPortfolioValue.toLocaleString()}（每發薪日 +0.5% 增值，+0.25% 現金股息）
+                  </div>
                 )}
               </div>
             </div>

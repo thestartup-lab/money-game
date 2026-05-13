@@ -131,8 +131,15 @@ export default function EventCard({ event, onDecision, onDismiss }: EventCardPro
         const selected = event.cards.find((c) => c.id === selectedCardId);
         const selectedDownPayment = selected?.downPayment ?? 0;
         const selectedShortfall = Math.max(0, selectedDownPayment - event.playerCash);
-        const canUseLeverageForSelected = selected != null && selectedShortfall > 0 && selectedShortfall <= loanAvailable;
-        const leverageMonthly = Math.max(1, Math.round(selectedShortfall * leverageRate));
+        const canUseLeverageForSelected =
+          selected != null &&
+          selectedDownPayment > 0 &&
+          loanAvailable > 0 &&
+          selectedShortfall <= loanAvailable;
+        // 若現金已足，玩家仍可主動選擇槓桿購買「全額」borrowed —— 把現金留著做別的事
+        const leverageBorrowAmount =
+          selectedShortfall > 0 ? selectedShortfall : Math.min(selectedDownPayment, loanAvailable);
+        const leverageMonthly = Math.max(1, Math.round(leverageBorrowAmount * leverageRate));
 
         return (
           <>
@@ -147,13 +154,14 @@ export default function EventCard({ event, onDecision, onDismiss }: EventCardPro
                 <span className="text-gray-500">可借 ${loanAvailable.toLocaleString()}</span>
               </div>
             )}
-            <p className="text-xs text-gray-400">選擇一張交易牌；現金不足可用「投資槓桿借款」補差額（不扣信用）</p>
+            <p className="text-xs text-gray-400">選擇一張交易牌；可選現金支付，或用「投資槓桿借款」買下（不扣信用，留現金做別的事）</p>
             <div className="space-y-2">
               {event.cards.map((card) => {
                 const dp = card.downPayment ?? 0;
                 const canAffordCash = event.playerCash >= dp;
                 const shortfall = Math.max(0, dp - event.playerCash);
-                const canAffordLeverage = !canAffordCash && shortfall > 0 && shortfall <= loanAvailable;
+                // 即使現金夠，若可借款也允許選擇（主動槓桿）
+                const canAffordLeverage = dp > 0 && shortfall <= loanAvailable;
                 const selectable = canAffordCash || canAffordLeverage;
                 const remaining = event.playerCash - dp;
                 return (
@@ -187,31 +195,32 @@ export default function EventCard({ event, onDecision, onDismiss }: EventCardPro
                     {canAffordCash && selectedCardId === card.id && (
                       <div className="text-xs text-gray-400 mt-0.5">付現後剩餘：<span className="text-emerald-400">${remaining.toLocaleString()}</span></div>
                     )}
-                    {!canAffordCash && canAffordLeverage && selectedCardId === card.id && (
+                    {selectedCardId === card.id && canAffordLeverage && (
                       <div className="text-[11px] text-emerald-300 mt-0.5">
-                        差額 ${shortfall.toLocaleString()} 借款 → 月付 ${Math.max(1, Math.round(shortfall * leverageRate)).toLocaleString()}（{(leverageRate * 100).toFixed(2)}%/月，不扣信用）
+                        {shortfall > 0
+                          ? `差額 $${shortfall.toLocaleString()} 借款 → 月付 $${Math.max(1, Math.round(shortfall * leverageRate)).toLocaleString()}（${(leverageRate * 100).toFixed(2)}%/月，不扣信用）`
+                          : `主動槓桿選項：借 $${Math.min(dp, loanAvailable).toLocaleString()} → 月付 $${Math.max(1, Math.round(Math.min(dp, loanAvailable) * leverageRate)).toLocaleString()}（${(leverageRate * 100).toFixed(2)}%/月，現金可保留做別的事）`}
                       </div>
                     )}
                   </button>
                 );
               })}
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              {canUseLeverageForSelected ? (
-                <button
-                  className="py-2 rounded-xl text-sm bg-emerald-700 hover:bg-emerald-600 text-white"
-                  onClick={() => onDecision({ accepted: true, selectedCardId, useLeverage: true })}
-                  title={`借 $${selectedShortfall.toLocaleString()}，月付 $${leverageMonthly.toLocaleString()}`}
-                >🚀 槓桿借款購買</button>
-              ) : (
-                <button
-                  className={`py-2 rounded-xl text-sm ${selectedCardId && event.playerCash >= selectedDownPayment ? 'bg-green-700 hover:bg-green-600 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}
-                  disabled={!(selectedCardId && event.playerCash >= selectedDownPayment)}
-                  onClick={() => selectedCardId && onDecision({ accepted: true, selectedCardId })}
-                >接受交易</button>
-              )}
+            <div className="grid grid-cols-3 gap-2">
               <button
-                className="py-2 rounded-xl text-sm bg-gray-700 hover:bg-gray-600 text-white"
+                className={`col-span-1 py-2 rounded-xl text-sm ${selectedCardId && event.playerCash >= selectedDownPayment ? 'bg-green-700 hover:bg-green-600 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}
+                disabled={!(selectedCardId && event.playerCash >= selectedDownPayment)}
+                onClick={() => selectedCardId && onDecision({ accepted: true, selectedCardId })}
+                title="現金支付"
+              >💵 現金</button>
+              <button
+                className={`col-span-1 py-2 rounded-xl text-sm ${canUseLeverageForSelected ? 'bg-emerald-700 hover:bg-emerald-600 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}
+                disabled={!canUseLeverageForSelected}
+                onClick={() => onDecision({ accepted: true, selectedCardId, useLeverage: true })}
+                title={canUseLeverageForSelected ? `借 $${leverageBorrowAmount.toLocaleString()}，月付 $${leverageMonthly.toLocaleString()}` : '借款額度不足'}
+              >🚀 槓桿</button>
+              <button
+                className="col-span-1 py-2 rounded-xl text-sm bg-gray-700 hover:bg-gray-600 text-white"
                 onClick={() => onDecision({ accepted: false })}
               >拒絕</button>
             </div>

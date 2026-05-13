@@ -344,3 +344,78 @@
   background: rgba(0, 0, 0, 0.75);
   border-color: rgba(255, 200, 80, 0.8);
 }
+
+/* ── Mini-map：對方圈玩家位置縮圖 ─────────────────────────────── */
+/* 設計理念：當有玩家進到外圈但其他人還在內圈時，主畫面只能顯示一邊。
+   此 mini-map 在右側角落顯示「另一圈」的軌道與玩家分布，點擊整圖可切換主畫面。 */
+.board-minimap {
+  position: absolute;
+  top: 56px;     /* 緊貼在切換按鈕下方 */
+  right: 8px;
+  z-index: 12;
+  width: clamp(120px, 14vw, 180px);
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 200, 80, 0.45);
+  border-radius: 10px;
+  padding: 6px;
+  cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s;
+  user-select: none;
+}
+
+.board-minimap:hover {
+  transform: scale(1.05);
+  border-color: rgba(255, 200, 80, 0.85);
+}
+
+.board-minimap-title {
+  font-size: clamp(9px, 0.9vw, 11px);
+  font-weight: 700;
+  color: rgba(255, 210, 100, 0.95);
+  text-align: center;
+  margin-bottom: 3px;
+  letter-spacing: 0.5px;
+}
+
+.board-minimap-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+.board-minimap-cell {
+  fill: rgba(255, 255, 255, 0.18);
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-width: 0.6;
+}
+
+.board-minimap-cell.payday {
+  fill: rgba(255, 210, 100, 0.4);
+}
+
+.board-minimap-token {
+  stroke: rgba(255, 255, 255, 0.85);
+  stroke-width: 0.8;
+}
+
+.board-minimap-token.active {
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+
+.board-minimap-empty {
+  font-size: clamp(9px, 0.9vw, 11px);
+  text-align: center;
+  color: rgba(255, 255, 255, 0.5);
+  padding: 12px 4px;
+  font-style: italic;
+}
+
+.board-minimap-count {
+  font-size: clamp(8px, 0.8vw, 10px);
+  color: rgba(255, 255, 255, 0.75);
+  text-align: center;
+  margin-top: 3px;
+}

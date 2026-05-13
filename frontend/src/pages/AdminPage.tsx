@@ -300,7 +300,9 @@ export default function AdminPage() {
                   <div className="flex items-center gap-2">
                     <span className={`w-3 h-3 rounded-full flex-shrink-0 ${dotColors[idx % 6]}`} />
                     <span className={`font-semibold truncate ${p.isAlive ? 'text-white' : 'line-through text-gray-500'}`}>{p.name}</span>
-                    <span className="text-gray-400 text-xs truncate hidden sm:block">{p.profession?.name}</span>
+                    <span className={`text-xs truncate hidden sm:block ${p.profession?.name === '待選擇' ? 'text-gray-500 italic' : 'text-gray-400'}`}>
+                      {p.profession?.name === '待選擇' ? '未選擇職業' : p.profession?.name}
+                    </span>
                     <span className={`ml-auto text-xs font-mono ${hpColor}`}>{p.stats.health}hp</span>
                     <span className={`text-xs font-mono ${cfColor}`}>${(p.monthlyCashflow/1000).toFixed(1)}k</span>
                   </div>
@@ -344,9 +346,9 @@ export default function AdminPage() {
             <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">遊戲控制</p>
             {isStartable && notReadyPlayers.length > 0 && (
               <div className="bg-yellow-950 border border-yellow-700 rounded-xl p-2 text-xs text-yellow-200">
-                ⏳ 等待 {notReadyPlayers.length} 位玩家完成設定：
+                ⏳ 等待 {notReadyPlayers.length} 位玩家完成職業選擇：
                 <span className="font-semibold">{notReadyPlayers.map((p: Player) => p.name).join('、')}</span>
-                <p className="text-[11px] text-yellow-400 mt-0.5">如玩家已離開可在上方點「移除」清掉，或直接按「強制」啟動。</p>
+                <p className="text-[11px] text-yellow-400 mt-0.5">職業選擇為硬性條件：如玩家已離開請在上方點「移除」清掉名單後再開始。</p>
               </div>
             )}
             {isStartable && (
@@ -359,14 +361,14 @@ export default function AdminPage() {
                   min={20} max={180}
                   onChange={(e) => setDurationMinutes(Number(e.target.value))}
                 />
-                <button className="btn-primary flex-1 text-sm" onClick={() => emit('startGame', { durationMinutes })}>
+                <button
+                  className="btn-primary flex-1 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={notReadyPlayers.length > 0}
+                  title={notReadyPlayers.length > 0 ? '尚有玩家未完成職業選擇，無法開始' : '開始遊戲'}
+                  onClick={() => emit('startGame', { durationMinutes })}
+                >
                   開始
                 </button>
-                <button
-                  className="bg-gray-600 hover:bg-gray-500 text-white text-sm py-2 px-2 rounded-xl transition-colors"
-                  title="強制開始（無視玩家準備狀態）"
-                  onClick={() => emit('startGame', { durationMinutes, force: true })}
-                >強制</button>
               </div>
             )}
             {isRunning && (
@@ -409,6 +411,49 @@ export default function AdminPage() {
                 >{ev.label}</button>
               ))}
             </div>
+            <button
+              className="w-full bg-amber-700 hover:bg-amber-600 text-white text-xs font-semibold py-2 px-2 rounded-xl transition-colors mt-2"
+              onClick={() => {
+                if (window.confirm('開放一場 30 秒「特殊拍賣」給全房玩家競標？')) {
+                  emit('triggerSpecialAuction', { roomId });
+                  addLog('觸發特殊拍賣');
+                }
+              }}
+              title="從特殊拍賣牌庫隨機抽 1 張，所有玩家競標 30 秒"
+            >🔨 觸發特殊拍賣（30 秒競標）</button>
+          </div>
+
+          {/* 慈善排行榜（A1） */}
+          <div className="card space-y-1">
+            <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">❤️ 慈善排行榜</p>
+            {(() => {
+              const ranked = [...players]
+                .filter((p) => (p.charityTotal ?? 0) > 0)
+                .sort((a, b) => (b.charityTotal ?? 0) - (a.charityTotal ?? 0))
+                .slice(0, 5);
+              if (ranked.length === 0) {
+                return <p className="text-gray-600 text-xs">尚無玩家捐款</p>;
+              }
+              return (
+                <div className="space-y-1">
+                  {ranked.map((p, i) => {
+                    const bonusPts = Math.min(30, Math.floor((p.charityTotal ?? 0) / 100_000) * 5);
+                    return (
+                      <div key={p.id} className="flex items-center justify-between text-xs px-2 py-1 rounded bg-gray-800/60">
+                        <span className="text-gray-300">
+                          <span className="text-yellow-400 font-bold">#{i + 1}</span>{' '}
+                          <span className="font-semibold">{p.name}</span>
+                        </span>
+                        <span className="text-pink-300 font-mono">
+                          ${(p.charityTotal ?? 0).toLocaleString()}{' '}
+                          <span className="text-emerald-400">+{bonusPts}</span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
 
           {/* 活動日誌 */}
@@ -559,9 +604,10 @@ interface PlayerRowProps {
   onTriggerRelationship: () => void;
 }
 
-function PlayerRow({ player: p, expanded, statsEdit, onToggleExpand, onStatsChange, onApplyStats, onTriggerRelationship }: PlayerRowProps) {
+function PlayerRow({ player: p, currentAge, expanded, statsEdit, onToggleExpand, onStatsChange, onApplyStats, onTriggerRelationship }: PlayerRowProps) {
   const hpColor = p.stats.health >= 60 ? 'text-green-400' : p.stats.health >= 30 ? 'text-yellow-400' : 'text-red-400';
   const cfColor = p.monthlyCashflow >= 0 ? 'text-emerald-400' : 'text-red-400';
+  const personalAge = p.personalAge ?? Math.max(p.startAge ?? 20, currentAge);
 
   return (
     <div className={`rounded-xl border transition-colors ${p.isAlive ? 'border-gray-700 bg-gray-800' : 'border-gray-800 bg-gray-900 opacity-50'}`}>
@@ -570,8 +616,11 @@ function PlayerRow({ player: p, expanded, statsEdit, onToggleExpand, onStatsChan
         <span className={`text-sm font-semibold ${p.isAlive ? 'text-white' : 'text-gray-500 line-through'}`}>
           {p.name}
         </span>
-        <span className="text-xs text-gray-400">{p.profession.name}</span>
+        <span className={`text-xs ${p.profession.name === '待選擇' ? 'text-gray-500 italic' : 'text-gray-400'}`}>
+          {p.profession.name === '待選擇' ? '未選擇職業' : p.profession.name}
+        </span>
         <span className="text-xs px-1.5 py-0.5 rounded bg-gray-700 text-gray-300">{p.quadrant}</span>
+        <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-900/60 text-yellow-200">{personalAge.toFixed(1)} 歲</span>
         {p.isBedridden && <span className="text-xs text-orange-400">臥床</span>}
         {p.isInFastTrack && <span className="text-xs text-emerald-400">外圈</span>}
         <span className="ml-auto flex items-center gap-3 text-xs">

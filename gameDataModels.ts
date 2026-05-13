@@ -260,7 +260,9 @@ export type PlayerEventType =
   | 'bedridden'
   | 'relationship'
   | 'franchise'
-  | 'death';
+  | 'death'
+  | 'bucket_goal_achieved'
+  | 'life_milestone';
 
 /**
  * 記錄玩家人生中每個關鍵決策與事件的快照。
@@ -432,6 +434,24 @@ export class Player {
    */
   eventLog: PlayerEvent[];
 
+  /**
+   * 累積慈善捐款金額（含內圈/外圈 Charity 格、人際關係捐款等所有管道）。
+   * 用於慈善排行榜與最終評分加成（每 $100K +5 傳承點）。
+   */
+  charityTotal: number;
+
+  /**
+   * 人生夢想清單（Bucket List）— 進入外圈時隨機抽 3 個目標。
+   * 達成時 claimed=true 並加分；全部達成額外給一次性大獎。
+   */
+  bucketList: { id: string; claimed: boolean; claimedAt?: number }[];
+
+  /**
+   * 已通過的人生里程碑年齡（40/60/80）。
+   * 跨越時觸發「人生回顧」事件，依當下狀態自動加分。
+   */
+  milestonesPassed: { age40: boolean; age60: boolean; age80: boolean };
+
   constructor(id: string, name: string, profession: Profession) {
     this.id = id;
     this.name = name;
@@ -492,6 +512,9 @@ export class Player {
     this.isDisconnected = false;
     this.hasPassedSecondLife = false;
     this.eventLog = [];
+    this.charityTotal = 0;
+    this.bucketList = [];
+    this.milestonesPassed = { age40: false, age60: false, age80: false };
   }
 
   /** 所有資產的每月現金流總和 */

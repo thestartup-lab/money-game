@@ -1,4 +1,4 @@
-import { Player, GameState, MarketEventType, Asset, Liability, SocialClass, LifeStage, GrowthStats } from './gameDataModels';
+import { Player, GameState, MarketEventType, Asset, Liability, SocialClass, LifeStage, GrowthStats, Profession } from './gameDataModels';
 import {
   RAT_RACE_TRACK_SIZE, PAYDAY_LOCATIONS, PROFESSIONS, PROFESSION_MAP,
   CREDIT_SCORE_MIN, CREDIT_SCORE_MAX,
@@ -225,17 +225,33 @@ export function checkAndApplyAnnualTax(player: Player): AnnualTaxCheckResult {
 // 玩家建立
 // ============================================================
 
-/** 從職業陣列隨機抽取一個職業 */
-function randomProfession() {
-  return PROFESSIONS[Math.floor(Math.random() * PROFESSIONS.length)];
-}
+/**
+ * Pre-20 期間的佔位職業：薪資/支出/資產全為 0，避免在玩家還沒選象限前就
+ * 把某個具體職業（含薪資與資產）放上後台/大螢幕，造成「還沒選就被決定」的錯覺。
+ * 玩家在 selectQuadrant 時會被覆寫成真正的職業。
+ */
+export const PLACEHOLDER_PROFESSION: Profession = {
+  id: '__placeholder__',
+  name: '待選擇',
+  quadrant: 'E',
+  salaryType: 'fixed',
+  startingSalary: 0,
+  startingTaxes: 0,
+  startingHomeMortgage: 0,
+  startingCarLoan: 0,
+  startingCreditCard: 0,
+  startingOtherExpenses: 0,
+  startingCash: 0,
+  hasFlexibleSchedule: false,
+};
 
 /**
  * 建立新玩家。
  *
  * @param socketId    玩家的 Socket.io 連線 ID，作為玩家唯一識別符
  * @param playerName  玩家暱稱
- * @param professionId 選填。指定職業 ID（如 'engineer'）；未提供或 ID 不存在時隨機分配
+ * @param professionId 選填。指定職業 ID（如 'engineer'）；未提供時使用佔位職業，
+ *                     等玩家在 Pre-20 完成 `selectQuadrant` 才會被覆寫成真正的職業
  * @returns 初始化完成的 Player 物件
  */
 export function createPlayer(
@@ -245,8 +261,8 @@ export function createPlayer(
 ): Player {
   const profession =
     professionId !== undefined
-      ? (PROFESSION_MAP.get(professionId) ?? randomProfession())
-      : randomProfession();
+      ? (PROFESSION_MAP.get(professionId) ?? PLACEHOLDER_PROFESSION)
+      : PLACEHOLDER_PROFESSION;
 
   const player = new Player(socketId, playerName, profession);
 
@@ -729,7 +745,10 @@ export function applyGrowthStats(player: Player, growthStats: GrowthStats): void
   const social = Math.min(10, Math.max(0, growthStats.social));
   player.stats.network = 1 + Math.floor(social / 2.5);
 
-  // resource 點數影響起始現金（由 createPlayer 搭配 SOCIAL_CLASS_CONFIG 處理）
+  // 資源點數映射為起始現金加成（每點 +$3,000）。
+  // 讓「資源」維度有實際遊戲意義；之前僅留註解但未實作，導致玩家分配資源等於浪費。
+  const resource = Math.min(10, Math.max(0, growthStats.resource));
+  player.cash += resource * 3_000;
 }
 
 /**
@@ -879,6 +898,11 @@ export function calculateLifeScore(player: Player, deathAge: number): LifeScoreB
   } else {
     legacyRaw = Math.min(100, Math.max(0, (netEstate / LEGACY_FULL_SCORE_AMOUNT) * 100));
   }
+  // 慈善累積加成：每 $100K +5 點傳承（最多 +30）
+  const charityBonus = Math.min(30, Math.floor((player.charityTotal ?? 0) / 100_000) * 5);
+  // 個別事件累積的傳承點（夢想清單、里程碑、特殊事件）
+  const eventBonus = player.legacyBonusPoints ?? 0;
+  legacyRaw = Math.min(100, Math.max(0, legacyRaw + charityBonus + eventBonus));
 
   // ── 7 維度原始分（0–100）──
   const netWorth_raw        = Math.min(100, Math.max(0, netWorth / 1000));
@@ -932,6 +956,10 @@ export function calculateLifeScore(player: Player, deathAge: number): LifeScoreB
   if (totalDebt === 0)                               achievements.push('無債一身輕');
   if (netEstate >= 1_500_000)                        achievements.push('傳承者');
   if (player.stats.network >= 8)                     achievements.push('人脈大師');
+  if ((player.charityTotal ?? 0) >= 200_000)         achievements.push('慈善家');
+  if ((player.bucketList ?? []).length > 0
+      && (player.bucketList ?? []).every((b) => b.claimed))
+    achievements.push('夢想成真');
 
   return {
     netWorth:            Math.round(netWorth_raw),

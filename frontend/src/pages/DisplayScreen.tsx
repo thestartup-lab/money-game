@@ -408,7 +408,7 @@ export default function DisplayScreen() {
     isBedridden: p.isBedridden,
     health: p.stats.health,
     monthlyCashflow: p.monthlyCashflow,
-    age: Math.floor(gameState.currentAge),
+    age: Math.floor(p.personalAge ?? Math.max(p.startAge ?? 20, gameState.currentAge)),
     isAlive: p.isAlive,
     isMarried: p.isMarried,
     roundAction: playerRoundActions.get(p.id) || undefined,
