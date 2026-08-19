@@ -7,10 +7,6 @@ import './AdminClarity.css';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
-const fmtActivityTime = (ms: number) => {
-  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
-  return `${Math.floor(totalSeconds / 60).toString().padStart(2, '0')}:${(totalSeconds % 60).toString().padStart(2, '0')}`;
-};
 
 const GLOBAL_EVENTS = [
   { id: 'stock_crash',       label: '股市崩盤',   color: 'bg-red-700 hover:bg-red-600' },
@@ -36,6 +32,15 @@ interface StatsEdit {
   nt: number;
 }
 
+interface AdaptiveDirectorStatus {
+  enabled: boolean;
+  mode: 'support' | 'balanced' | 'challenge';
+  score: number;
+  reason: string;
+  globalPaydayNumber: number;
+  lastEventTitle?: string;
+}
+
 export default function AdminPage() {
   const socketRef = useRef<Socket | null>(null);
   const pendingLoginPasswordRef = useRef<string>(''); // 建立房間後自動登入用
@@ -53,8 +58,7 @@ export default function AdminPage() {
   const [loginRoomId, setLoginRoomId] = useState('');
   const [loginError, setLoginError] = useState('');
 
-  // Game start settings
-  const [durationMinutes, setDurationMinutes] = useState(90);
+  const [adaptiveDirector, setAdaptiveDirector] = useState<AdaptiveDirectorStatus | null>(null);
 
   // Stats editor
   const [expandedPlayer, setExpandedPlayer] = useState<string | null>(null);
@@ -93,6 +97,7 @@ export default function AdminPage() {
         if (pendingLoginPasswordRef.current) {
           autoReloginPasswordRef.current = pendingLoginPasswordRef.current;
         }
+        s.emit('getAdaptiveDirectorStatus', { roomId: p.roomId });
       }
     });
     s.on('adminLoginFail', (p: { message: string }) => {
@@ -111,18 +116,24 @@ export default function AdminPage() {
     });
     s.on('roomList', (rooms: AdminRoom[]) => setRoomList(rooms ?? []));
 
-    s.on('gameStateUpdate', (gs: GameState) => setGameState(gs));
+    s.on('gameStateUpdate', (gs: GameState) => {
+      setGameState(gs);
+      setRoomList((rooms) => rooms.map((room) => room.roomId === gs.roomId
+        ? { ...room, phase: gs.gamePhase, playerCount: gs.players.length }
+        : room));
+    });
     s.on('gameClock', (p: { currentAge: number; remainingTimeMs?: number }) => {
       setGameState((gs) => gs ? { ...gs, currentAge: p.currentAge, remainingTimeMs: p.remainingTimeMs ?? gs.remainingTimeMs } : gs);
     });
 
     s.on('gamePaused', (p: { reason?: string }) => addLog(`遊戲暫停${p.reason ? `：${p.reason}` : ''}`));
     s.on('gameResumed', () => addLog('遊戲繼續'));
-    s.on('gameStarted', (p: { durationMinutes: number; yearsPerRound?: number }) => addLog(`遊戲開始：每輪 +${p.yearsPerRound ?? 4} 歲；活動參考時間 ${p.durationMinutes} 分鐘`));
+    s.on('gameStarted', (p: { yearsPerRound?: number }) => addLog(`遊戲開始：每輪 +${p.yearsPerRound ?? 4} 歲，共 20 個人生輪`));
     s.on('gameRestarted', (p: { playerCount: number }) => addLog(`遊戲重啟，${p.playerCount} 位玩家回到投胎`));
     s.on('finalRoundStarted', (p: { firstPlayerName: string }) => addLog(`96 歲：最後一輪開始，由 ${p.firstPlayerName} 先行動`));
     s.on('educationTurnSkipped', (p: { playerName: string; careerStartAge: number }) => addLog(`${p.playerName} 完成進修延後回合，將從 ${p.careerStartAge} 歲職涯起點出發`));
     s.on('globalEventAnnouncement', (p: { event: { title: string; description: string } }) => addLog(`全局事件：${p.event?.title ?? '未知事件'}`));
+    s.on('adaptiveDirectorStatus', (p: AdaptiveDirectorStatus) => setAdaptiveDirector(p));
     s.on('playerStatUpdated', (p: { playerName: string }) => addLog(`玩家數值已更新：${p.playerName}`));
     s.on('error', (p: { message: string }) => addLog(`錯誤：${p.message}`));
 
@@ -158,11 +169,14 @@ export default function AdminPage() {
               id="admin-password"
               className="w-full"
               type="password"
-              placeholder="請輸入主持人密碼"
+              placeholder="至少 8 個字元"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
           </div>
+          <p className="-mt-3 text-xs leading-relaxed text-gray-400">
+            建立房間時會設定這一間的專屬密碼；重新登入同一房間時請使用相同密碼。
+          </p>
           <div>
             <label className="admin-field-label" htmlFor="admin-room-code">房間代碼</label>
             <input
@@ -187,7 +201,7 @@ export default function AdminPage() {
           {/* 建立新房間（自訂或隨機代號） */}
           <button
             className="btn-primary w-full"
-            disabled={!connected || !password}
+            disabled={!connected || password.trim().length < 8}
             onClick={() => {
               setLoginError('');
               pendingLoginPasswordRef.current = password;
@@ -202,7 +216,7 @@ export default function AdminPage() {
           {loginRoomId && (
             <button
               className="btn-secondary w-full"
-              disabled={!connected || !password}
+              disabled={!connected || password.trim().length < 8}
               onClick={() => {
                 setLoginError('');
                 autoReloginPasswordRef.current = password;
@@ -291,11 +305,6 @@ export default function AdminPage() {
           {isRunning && (
             <span className="admin-status-chip">
               人生輪 {Math.min(gameState?.totalLifeRounds ?? 20, (gameState?.completedLifeRounds ?? gameState?.turnNumber ?? 0) + 1)}/{gameState?.totalLifeRounds ?? 20}
-            </span>
-          )}
-          {isRunning && (
-            <span className="admin-status-chip text-cyan-100">
-              ⏱ 活動參考 {fmtActivityTime(gameState?.remainingTimeMs ?? gameState?.gameDurationMs ?? 0)}
             </span>
           )}
           {isPaused && <span className="admin-status-chip border-orange-600 text-orange-200">⏸ 已暫停</span>}
@@ -413,24 +422,14 @@ export default function AdminPage() {
               </div>
             )}
             {isStartable && (
-              <div className="flex items-center gap-2">
-                <label className="text-sm text-gray-300 whitespace-nowrap">時長（分）</label>
-                <input
-                  type="number"
-                  className="w-20 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-white text-sm focus:outline-none focus:border-indigo-500"
-                  value={durationMinutes}
-                  min={20} max={180}
-                  onChange={(e) => setDurationMinutes(Number(e.target.value))}
-                />
-                <button
-                  className="btn-primary flex-1 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={notReadyPlayers.length > 0}
-                  title={notReadyPlayers.length > 0 ? '尚有玩家未完成職業選擇，無法開始' : '開始遊戲'}
-                  onClick={() => emit('startGame', { durationMinutes })}
-                >
-                  開始
-                </button>
-              </div>
+              <button
+                className="btn-primary w-full text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={notReadyPlayers.length > 0}
+                title={notReadyPlayers.length > 0 ? '尚有玩家未完成職業選擇，無法開始' : '開始 20 回合遊戲'}
+                onClick={() => emit('startGame')}
+              >
+                開始 20 回合遊戲
+              </button>
             )}
             {isStartable && notReadyPlayers.length > 0 && (
               <button
@@ -439,7 +438,7 @@ export default function AdminPage() {
                 onClick={() => {
                   const names = notReadyPlayers.map((p) => p.name).join('、');
                   if (window.confirm(`系統會為以下 ${notReadyPlayers.length} 位玩家自動分配「中等社會階層 / E 象限隨機職業」：\n${names}\n\n確定強制開始？`)) {
-                    emit('startGame', { durationMinutes, force: true });
+                    emit('startGame', { force: true });
                     addLog(`強制開始：自動補齊 ${notReadyPlayers.length} 位玩家的 Pre-20`);
                   }
                 }}
@@ -520,9 +519,58 @@ export default function AdminPage() {
             )}
           </div>
 
-          {/* 全局事件 */}
+          {/* 自動難度導演 */}
+          <div className="card space-y-3">
+            <SectionHeading icon="🧭" title="自動難度導演" meta="季度後評估" />
+            <div className="flex items-center justify-between gap-3 rounded-xl bg-gray-900/70 p-3">
+              <div>
+                <p className={`text-sm font-black ${
+                  adaptiveDirector?.mode === 'support'
+                    ? 'text-emerald-300'
+                    : adaptiveDirector?.mode === 'challenge'
+                      ? 'text-orange-300'
+                      : 'text-blue-300'
+                }`}>
+                  {adaptiveDirector?.mode === 'support'
+                    ? '降低難度・支援全場'
+                    : adaptiveDirector?.mode === 'challenge'
+                      ? '提高難度・加入考驗'
+                      : '維持平衡'}
+                </p>
+                <p className="mt-1 text-xs text-gray-400">
+                  全場狀態指數 {adaptiveDirector?.score ?? 50}/100
+                </p>
+              </div>
+              <button
+                className={`rounded-xl px-3 py-2 text-xs font-black ${
+                  adaptiveDirector?.enabled !== false
+                    ? 'bg-emerald-700 text-white hover:bg-emerald-600'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+                onClick={() => emit('setAdaptiveDirectorEnabled', {
+                  roomId,
+                  enabled: adaptiveDirector?.enabled === false,
+                })}
+              >
+                {adaptiveDirector?.enabled !== false ? '自動調節中' : '已關閉'}
+              </button>
+            </div>
+            <p className="text-xs leading-relaxed text-gray-400">
+              {adaptiveDirector?.reason ?? '等待季度結算後評估全場現金流、現金緩衝、健康與外圈進度。'}
+            </p>
+            {adaptiveDirector?.lastEventTitle && (
+              <p className="rounded-lg bg-indigo-950/70 px-3 py-2 text-xs text-indigo-200">
+                上次自動事件：{adaptiveDirector.lastEventTitle}
+              </p>
+            )}
+            <p className="text-[11px] leading-relaxed text-gray-500">
+              最早從第 2 次季度發薪後開始，兩次自動事件至少間隔 2 季；不會在玩家思考時突然觸發。
+            </p>
+          </div>
+
+          {/* 主持人手動全局事件 */}
           <div className="card space-y-2">
-            <SectionHeading icon="🌍" title="全局事件" meta="影響全場" />
+            <SectionHeading icon="🌍" title="手動全局事件" meta="主持人保留控制權" />
             <div className="grid grid-cols-2 gap-2">
               {GLOBAL_EVENTS.map((ev) => (
                 <button

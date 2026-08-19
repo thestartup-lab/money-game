@@ -354,7 +354,15 @@ export function applyGlobalEvent(
       }
 
       if (effect.type === 'ExpenseChange' && effect.flatAmount !== undefined) {
-        player.expenses.otherExpenses += effect.flatAmount;
+        player.expenses.otherExpenses = Math.max(0, player.expenses.otherExpenses + effect.flatAmount);
+      }
+
+      if (effect.type === 'CashChange' && effect.flatAmount !== undefined) {
+        player.cash += effect.flatAmount;
+      }
+
+      if (effect.type === 'HealthChange' && effect.flatAmount !== undefined) {
+        player.stats.health = Math.max(0, Math.min(100, player.stats.health + effect.flatAmount));
       }
     });
   });
@@ -379,8 +387,16 @@ function inferMarketEventType(event: AdminGlobalEvent): MarketEventType {
   const hasPositiveMultiplier = event.effects.some(
     (e) => e.multiplier !== undefined && e.multiplier > 1
   );
-  if (hasNegativeMultiplier) return MarketEventType.NegativeMarket;
-  if (hasPositiveMultiplier) return MarketEventType.PositiveMarket;
+  const hasNegativeFlatEffect = event.effects.some((e) =>
+    (e.type === 'ExpenseChange' && (e.flatAmount ?? 0) > 0) ||
+    ((e.type === 'CashChange' || e.type === 'HealthChange') && (e.flatAmount ?? 0) < 0)
+  );
+  const hasPositiveFlatEffect = event.effects.some((e) =>
+    (e.type === 'ExpenseChange' && (e.flatAmount ?? 0) < 0) ||
+    ((e.type === 'CashChange' || e.type === 'HealthChange') && (e.flatAmount ?? 0) > 0)
+  );
+  if (hasNegativeMultiplier || hasNegativeFlatEffect) return MarketEventType.NegativeMarket;
+  if (hasPositiveMultiplier || hasPositiveFlatEffect) return MarketEventType.PositiveMarket;
   return MarketEventType.NegativeMarket;
 }
 

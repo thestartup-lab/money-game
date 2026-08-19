@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
-import PlayerPage from './pages/PlayerPage';
-import DisplayScreen from './pages/DisplayScreen';
-import AdminPage from './pages/AdminPage';
+import { lazy, Suspense, useMemo, type ReactNode } from 'react';
 import { GameBoard } from './components/game/GameBoard';
 import { ErrorBoundary } from './components/ErrorBoundary';
+
+const PlayerPage = lazy(() => import('./pages/PlayerPage'));
+const DisplayScreen = lazy(() => import('./pages/DisplayScreen'));
+const AdminPage = lazy(() => import('./pages/AdminPage'));
 
 /**
  * 路由：根據 URL 參數決定顯示哪個介面
@@ -21,10 +22,20 @@ export default function App() {
     return 'player';
   }, []);
 
-  if (mode === 'display') return <ErrorBoundary><DisplayScreen /></ErrorBoundary>;
-  if (mode === 'admin') return <ErrorBoundary><AdminPage /></ErrorBoundary>;
+  if (mode === 'display') return <RouteShell><DisplayScreen /></RouteShell>;
+  if (mode === 'admin') return <RouteShell><AdminPage /></RouteShell>;
   if (mode === 'board') return <ErrorBoundary><BoardPreview /></ErrorBoundary>;
-  return <ErrorBoundary><PlayerPage /></ErrorBoundary>;
+  return <RouteShell><PlayerPage /></RouteShell>;
+}
+
+function RouteShell({ children }: { children: ReactNode }) {
+  return (
+    <ErrorBoundary>
+      <Suspense fallback={<div className="min-h-screen bg-gray-950" aria-label="載入遊戲畫面" />}>
+        {children}
+      </Suspense>
+    </ErrorBoundary>
+  );
 }
 
 function BoardPreview() {

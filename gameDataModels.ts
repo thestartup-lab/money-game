@@ -194,6 +194,23 @@ export interface DecisionPhaseState {
   reminderEndsAt: number;
 }
 
+export type AdaptiveDifficultyMode = 'support' | 'balanced' | 'challenge';
+
+/**
+ * 後台自動難度導演。只在季度發薪完成後評估，避免打斷玩家當前決策。
+ * score 越高代表全場越順利，系統越可能加入溫和挑戰。
+ */
+export interface AdaptiveDirectorState {
+  enabled: boolean;
+  mode: AdaptiveDifficultyMode;
+  score: number;
+  reason: string;
+  lastEvaluatedPayday: number;
+  lastTriggeredPayday: number;
+  lastEventId?: string;
+  lastEventTitle?: string;
+}
+
 // ============================================================
 // 玩家成長數值
 // ============================================================
@@ -668,6 +685,9 @@ export class GameState {
   /** 主持人控制的目前決策階段；null 表示正在正常推進棋盤。 */
   decisionPhase: DecisionPhaseState | null;
 
+  /** 每季結算後依全場狀況調節隨機事件強度。 */
+  adaptiveDirector: AdaptiveDirectorState;
+
   /** 完成第 19 個全體回合、來到 96 歲後進入公平的最後一輪。 */
   finalRoundStarted: boolean;
   /** 尚未完成最後一次行動的存活玩家 ID，依實際回合順序排列。 */
@@ -704,6 +724,14 @@ export class GameState {
     this.totalPausedMs = 0;
     this.paydayPlanningConfirmed = new Set();
     this.decisionPhase = null;
+    this.adaptiveDirector = {
+      enabled: true,
+      mode: 'balanced',
+      score: 50,
+      reason: '尚未完成第一次季度評估',
+      lastEvaluatedPayday: 0,
+      lastTriggeredPayday: 0,
+    };
     this.finalRoundStarted = false;
     this.finalRoundPendingPlayerIds = [];
     this.roundsSinceGlobalPayday = 0;

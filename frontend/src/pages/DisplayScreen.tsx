@@ -13,12 +13,11 @@ import TurnIntroOverlay, { type TurnIntroData } from '../components/game/TurnInt
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
-const remainingGameMs = (gs: GameState) => {
-  return Math.max(0, Math.round(gs.remainingTimeMs ?? gs.gameDurationMs));
-};
-
-const STAGE_LABELS: Record<string, string> = {
-  Youth: '青年期', Family: '家庭期', Transition: '轉型期', Retirement: '退休期', Legacy: '傳承期',
+const fmtCompact = (n: number) => {
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(abs >= 10_000_000 ? 0 : 1)}M`;
+  if (abs >= 1_000) return `${(n / 1_000).toFixed(abs >= 100_000 ? 0 : 1)}k`;
+  return fmt(n);
 };
 const PHASE_LABELS: Record<string, string> = {
   WaitingForPlayers: '等待玩家', Pre20: '開局設定', RatRace: '老鼠賽跑',
@@ -53,9 +52,6 @@ export default function DisplayScreen() {
   const [joining, setJoining] = useState(false);
   const [view, setView] = useState<'game' | 'analysis' | 'intro' | 'history'>('game');
   const [ticker, setTicker] = useState<string[]>([]);
-  // 主持人活動倒數：只作節奏參考，不再推動年齡或結束遊戲。
-  const [countdownMs, setCountdownMs] = useState(0);
-  const countdownRef = useRef(0);
   // 置中大字幕：落地事件與里程碑
   type CellEvent = { playerName: string; cellName: string; message: string; isMilestone?: boolean };
   const [centerEvent, setCenterEvent] = useState<CellEvent | null>(null);
@@ -198,11 +194,6 @@ export default function DisplayScreen() {
 
       prevTurnIdRef.current = gs.currentPlayerTurnId ?? null;
       prevGamePhaseRef.current = gs.gamePhase;
-      const remaining = remainingGameMs(gs);
-      if (Math.abs(countdownRef.current - remaining) > 3000 || countdownRef.current === 0) {
-        countdownRef.current = remaining;
-        setCountdownMs(remaining);
-      }
       setJoined(true);
       setJoining(false);
       // 若尚未記錄房間代碼（例如 gameStateUpdate 先於 joinDisplaySuccess 到達），從 gs 補記
@@ -212,10 +203,6 @@ export default function DisplayScreen() {
     });
     s.on('gameClock', (p: { currentAge: number; remainingTimeMs?: number }) => {
       setGameState((gs) => gs ? { ...gs, currentAge: p.currentAge, remainingTimeMs: p.remainingTimeMs ?? gs.remainingTimeMs } : gs);
-      if (typeof p.remainingTimeMs === 'number' && Math.abs(countdownRef.current - p.remainingTimeMs) > 3_000) {
-        countdownRef.current = p.remainingTimeMs;
-        setCountdownMs(p.remainingTimeMs);
-      }
     });
     s.on('roomAnalysis', (data: typeof roomAnalysis) => { setRoomAnalysis(data); setView('analysis'); });
     s.on('ratRaceEscaped', (p: { playerId: string; playerName: string; routeLabel?: string }) => {
@@ -429,17 +416,6 @@ export default function DisplayScreen() {
     };
   }, []);
 
-  // 每秒本地遞減倒數計時（暫停時停止）
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (!gameState?.isPaused && countdownRef.current > 0) {
-        countdownRef.current = Math.max(0, countdownRef.current - 1000);
-        setCountdownMs(countdownRef.current);
-      }
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [gameState?.isPaused]);
-
   // Enter 鍵手動關閉置中事件 overlay
   useEffect(() => {
     if (!centerEvent) return;
@@ -529,14 +505,6 @@ export default function DisplayScreen() {
     );
   }
 
-  // 格式化為 MM:SS
-  const formatCountdown = (ms: number) => {
-    const totalSec = Math.max(0, Math.ceil(ms / 1000));
-    const m = Math.floor(totalSec / 60).toString().padStart(2, '0');
-    const s = (totalSec % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
-  };
-
   const playerUrl = `${window.location.protocol}//${window.location.host}/?room=${gameState.roomId}`;
 
   // 把玩家轉為 GameBoard 格式（含 HP / 現金流 / 年齡等富資訊，給棋盤中央面板顯示）
@@ -578,7 +546,7 @@ export default function DisplayScreen() {
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col">
 
-      {/* ══ 頂部大型計時器橫幅 ══ */}
+      {/* ══ 頂部全場狀態橫幅 ══ */}
       <div className="flex items-center justify-between px-6 py-3 bg-gray-900 border-b border-gray-700 flex-shrink-0">
 
         {/* 左：標題 + 房間 + 階段 */}
@@ -594,23 +562,27 @@ export default function DisplayScreen() {
             {phaseLabel}
           </span>
           <span className="whitespace-nowrap rounded-full bg-gray-800 px-2 py-0.5 text-xs font-bold text-yellow-200">
-            {gameState.currentAge} 歲 · 人生輪 {Math.min(gameState.totalLifeRounds ?? 20, (gameState.completedLifeRounds ?? gameState.turnNumber) + 1)}/{gameState.totalLifeRounds ?? 20}
+            {currentTurnPlayer ? `${Math.floor(currentTurnPlayer.personalAge ?? gameState.currentAge)} 歲 · ` : ''}人生輪 {Math.min(gameState.totalLifeRounds ?? 20, (gameState.completedLifeRounds ?? gameState.turnNumber) + 1)}/{gameState.totalLifeRounds ?? 20}
           </span>
         </div>
 
-        {/* 中：倒數計時器（取代年齡顯示） */}
+        {/* 中：持續顯示目前玩家；真正的決策倒數只在決策階段出現 */}
         <div className="text-center flex-shrink-0">
-          <div className={`text-7xl font-bold tabular-nums leading-none tracking-tight ${
-            countdownMs < 300_000 ? 'text-red-400' : countdownMs < 600_000 ? 'text-orange-300' : 'text-yellow-300'
+          <div className={`max-w-[34vw] truncate text-4xl font-black leading-none tracking-tight ${
+            gameState.isPaused ? 'text-orange-300' : gameState.finalRoundStarted ? 'text-purple-300' : 'text-yellow-200'
           }`}>
-            {gameState.finalRoundStarted ? 'FINAL' : gameState.isPaused ? '⏸' : formatCountdown(countdownMs)}
+            {gameState.isPaused
+              ? '遊戲暫停'
+              : gameState.finalRoundStarted
+                ? '最後一輪'
+                : currentTurnPlayer?.name ?? '準備開始'}
           </div>
           <div className="text-base text-gray-300 mt-0.5 tracking-wide">
-            {gameState.finalRoundStarted
-              ? '每位玩家完成最後一次行動'
-              : gameState.isPaused
-                ? '暫停中'
-                : `活動參考時間 · ${STAGE_LABELS[gameState.currentStage] ?? gameState.currentStage}`}
+            {gameState.isPaused
+              ? '由主持人決定何時繼續'
+              : gameState.finalRoundStarted
+                ? `現在輪到 ${currentTurnPlayer?.name ?? '—'} 完成最後行動`
+                : `現在輪到 · 下一位 ${nextTurnPlayer?.name ?? '—'}`}
           </div>
         </div>
 
@@ -720,7 +692,7 @@ export default function DisplayScreen() {
                     <div className="rounded-lg bg-black/25 px-1 py-2">
                       <p className="text-[9px] uppercase text-gray-500">月現金流</p>
                       <p className={`mt-0.5 truncate text-xs font-black ${currentTurnPlayer.monthlyCashflow >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
-                        {currentTurnPlayer.monthlyCashflow >= 0 ? '+' : ''}${fmt(currentTurnPlayer.monthlyCashflow)}
+                        {currentTurnPlayer.monthlyCashflow >= 0 ? '+' : '-'}${fmtCompact(Math.abs(currentTurnPlayer.monthlyCashflow))}
                       </p>
                     </div>
                   </div>

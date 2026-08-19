@@ -1,6 +1,7 @@
 import * as http from 'http';
+import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 import { Server, Socket } from 'socket.io';
-import { GameState, Player, PaydayPlanPayload, GamePhase, PlayerEvent, PlayerEventType, DecisionPhaseState } from './gameDataModels';
+import { GameState, Player, PaydayPlanPayload, GamePhase, PlayerEvent, PlayerEventType, DecisionPhaseState, AssetType } from './gameDataModels';
 import {
   createPlayer,
   applyGlobalEvent,
@@ -40,7 +41,6 @@ import {
   getArrangedMarriageCost,
 } from './gameLogic';
 import {
-  ADMIN_PASSWORD,
   SOCIAL_CLASS_CONFIG, DEFAULT_GAME_DURATION_MS,
   MIN_GAME_DURATION_MS, MAX_GAME_DURATION_MS,
   LIFE_EXP, LIFE_EVENT_WINDOWS,
@@ -68,7 +68,7 @@ import {
   PROPERTY_INSURANCE_PREMIUM,
   PER_CHILD_EXPENSE,
 } from './gameConstants';
-import { ADMIN_GLOBAL_EVENT_MAP } from './adminEvents';
+import { ADMIN_GLOBAL_EVENT_MAP, type AdminGlobalEvent } from './adminEvents';
 import {
   applyPaydayPlan,
   executeCareerChange,
@@ -121,11 +121,53 @@ import {
 
 const PORT = parseInt(process.env.PORT ?? '3001', 10);
 
-const httpServer = http.createServer();
+const httpServer = http.createServer((request, response) => {
+  if (request.url === '/health') {
+    response.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+    response.end(JSON.stringify({
+      ok: true,
+      service: 'money-game-server',
+      revision: process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GIT_COMMIT_SHA ?? 'local',
+      rooms: rooms.size,
+      uptimeSeconds: Math.floor(process.uptime()),
+    }));
+    return;
+  }
+  response.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+  response.end(JSON.stringify({ ok: false, message: 'Not Found' }));
+});
+
+const configuredOrigins = new Set(
+  (process.env.ALLOWED_ORIGINS ?? 'https://game.cjlead.com.tw')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+);
+
+function isAllowedOrigin(origin?: string): boolean {
+  if (!origin) return true;
+  if (configuredOrigins.has(origin)) return true;
+  try {
+    const url = new URL(origin);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return true;
+    return url.protocol === 'https:'
+      && url.hostname.endsWith('.vercel.app')
+      && url.hostname.startsWith('money-game');
+  } catch {
+    return false;
+  }
+}
 
 const io = new Server(httpServer, {
   cors: {
-    origin: '*',
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) callback(null, true);
+      else callback(new Error('此來源不允許連線。'));
+    },
     methods: ['GET', 'POST'],
   },
 });
@@ -139,6 +181,46 @@ const io = new Server(httpServer, {
  * 每位主持人建立一個獨立房間，互不干擾。
  */
 const rooms = new Map<string, GameState>();
+
+interface RoomAdminCredential {
+  salt: Buffer;
+  hash: Buffer;
+}
+
+const roomAdminCredentials = new Map<string, RoomAdminCredential>();
+const MIN_ADMIN_PASSWORD_LENGTH = 8;
+const MAX_ACTIVE_ROOMS = 100;
+const roomCreationRate = new Map<string, { count: number; resetAt: number }>();
+const adminLoginRate = new Map<string, { count: number; resetAt: number }>();
+
+function consumeRateLimit(
+  store: Map<string, { count: number; resetAt: number }>,
+  key: string,
+  maxAttempts: number,
+  windowMs: number,
+): boolean {
+  const now = Date.now();
+  const current = store.get(key);
+  if (!current || current.resetAt <= now) {
+    store.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (current.count >= maxAttempts) return false;
+  current.count += 1;
+  return true;
+}
+
+function createRoomAdminCredential(password: string): RoomAdminCredential {
+  const salt = randomBytes(16);
+  return { salt, hash: scryptSync(password, salt, 32) };
+}
+
+function verifyRoomAdminPassword(roomId: string, password: string): boolean {
+  const credential = roomAdminCredentials.get(roomId);
+  if (!credential || !password) return false;
+  const candidate = scryptSync(password, credential.salt, credential.hash.length);
+  return candidate.length === credential.hash.length && timingSafeEqual(candidate, credential.hash);
+}
 
 /** 記錄每個 socket 目前所在的房間 ID（斷線清理用） */
 const socketRoomMap = new Map<string, string>();
@@ -202,6 +284,190 @@ function calcNetWorth(p: Player): number {
   const assetValue = p.assets.reduce((s, a) => s + (a.currentValue ?? a.cost), 0);
   const liabilityTotal = p.liabilities.reduce((s, l) => s + l.totalDebt, 0);
   return p.cash + assetValue - liabilityTotal;
+}
+
+// ============================================================
+// 自動難度導演
+// ============================================================
+
+const ADAPTIVE_EVENT_COOLDOWN_PAYDAYS = 2;
+
+function emitAdaptiveDirectorStatus(gs: GameState): void {
+  if (!gs.adminSocketId) return;
+  io.to(gs.adminSocketId).emit('adaptiveDirectorStatus', {
+    ...gs.adaptiveDirector,
+    globalPaydayNumber: gs.globalPaydayNumber,
+  });
+}
+
+function assessAdaptiveDifficulty(gs: GameState): {
+  score: number;
+  mode: 'support' | 'balanced' | 'challenge';
+  reason: string;
+  dominantAssetType?: AssetType;
+} {
+  const players = [...gs.players.values()];
+  const alive = players.filter((player) => player.isAlive);
+  if (alive.length === 0) {
+    return { score: 0, mode: 'support', reason: '目前沒有存活玩家' };
+  }
+
+  const positiveCashflowRatio = alive.filter((player) => player.monthlyCashflow > 0).length / alive.length;
+  const negativeCashflowRatio = alive.filter((player) => player.monthlyCashflow < 0).length / alive.length;
+  const lowReserveRatio = alive.filter((player) => player.cash < Math.max(1, player.totalExpenses * 2)).length / alive.length;
+  const strongReserveRatio = alive.filter((player) => player.cash >= Math.max(1, player.totalExpenses * 6)).length / alive.length;
+  const fastTrackRatio = alive.filter((player) => player.isInFastTrack).length / alive.length;
+  const bedriddenRatio = alive.filter((player) => player.isBedridden).length / alive.length;
+  const survivalRatio = alive.length / Math.max(1, players.length);
+  const averageHealth = alive.reduce((sum, player) => sum + player.stats.health, 0) / alive.length;
+
+  const rawScore =
+    48
+    + positiveCashflowRatio * 22
+    + strongReserveRatio * 10
+    + fastTrackRatio * 22
+    + Math.max(-12, Math.min(12, (averageHealth - 60) * 0.4))
+    - negativeCashflowRatio * 28
+    - lowReserveRatio * 16
+    - bedriddenRatio * 20
+    - (1 - survivalRatio) * 24;
+  const score = Math.round(Math.max(0, Math.min(100, rawScore)));
+  const mode = score <= 38 ? 'support' : score >= 68 ? 'challenge' : 'balanced';
+
+  const assetTotals = new Map<AssetType, number>();
+  for (const player of alive) {
+    for (const asset of player.assets) {
+      assetTotals.set(asset.type, (assetTotals.get(asset.type) ?? 0) + Math.max(0, asset.currentValue ?? asset.cost));
+    }
+  }
+  const dominantAssetType = [...assetTotals.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+
+  const reason = [
+    `正現金流 ${Math.round(positiveCashflowRatio * 100)}%`,
+    `低現金緩衝 ${Math.round(lowReserveRatio * 100)}%`,
+    `平均健康 ${Math.round(averageHealth)}`,
+    `外圈 ${Math.round(fastTrackRatio * 100)}%`,
+  ].join('・');
+
+  return { score, mode, reason, dominantAssetType };
+}
+
+function getAdaptiveEventPool(
+  mode: 'support' | 'balanced' | 'challenge',
+  dominantAssetType?: AssetType,
+): AdminGlobalEvent[] {
+  const support: AdminGlobalEvent[] = [
+    {
+      id: 'adaptive_living_relief',
+      title: '民生支持方案',
+      description: '公共資源投入生活支持，每位玩家獲得 $20,000 緊急預備金。',
+      effects: [{ type: 'CashChange', flatAmount: 20_000 }],
+    },
+    {
+      id: 'adaptive_health_program',
+      title: '全民健康促進計畫',
+      description: '健康資源普及，每位存活玩家恢復 8 點健康值。',
+      effects: [{ type: 'HealthChange', flatAmount: 8 }],
+    },
+    {
+      id: 'adaptive_cost_relief',
+      title: '生活成本減壓',
+      description: '公共服務補助上路，每位玩家每月其他支出減少 $1,500。',
+      effects: [{ type: 'ExpenseChange', flatAmount: -1_500 }],
+    },
+  ];
+
+  const challenge: AdminGlobalEvent[] = [
+    {
+      id: 'adaptive_rate_pressure',
+      title: '利率與物價升溫',
+      description: '資金與生活成本同步上升，每位玩家每月其他支出增加 $2,500。',
+      effects: [{ type: 'ExpenseChange', flatAmount: 2_500 }],
+    },
+    {
+      id: 'adaptive_work_pressure',
+      title: '高壓環境考驗',
+      description: '全場進入高壓週期，每位存活玩家健康值下降 5 點。',
+      effects: [{ type: 'HealthChange', flatAmount: -5 }],
+    },
+  ];
+  if (dominantAssetType !== undefined) {
+    challenge.push({
+      id: `adaptive_asset_correction_${dominantAssetType}`,
+      title: '主力資產市場修正',
+      description: '資金集中度過高引發市場修正，全場主要持有資產估值下調 15%。',
+      effects: [{ type: 'AssetValueChange', targetAssetType: dominantAssetType, multiplier: 0.85 }],
+    });
+  }
+
+  const balanced: AdminGlobalEvent[] = [
+    {
+      id: 'adaptive_small_stimulus',
+      title: '景氣微幅回暖',
+      description: '消費信心回升，每位玩家獲得 $8,000 周轉資金。',
+      effects: [{ type: 'CashChange', flatAmount: 8_000 }],
+    },
+    {
+      id: 'adaptive_cost_wave',
+      title: '生活成本波動',
+      description: '短期物價變動，每位玩家每月其他支出增加 $1,000。',
+      effects: [{ type: 'ExpenseChange', flatAmount: 1_000 }],
+    },
+  ];
+  if (dominantAssetType !== undefined) {
+    balanced.push({
+      id: `adaptive_asset_tailwind_${dominantAssetType}`,
+      title: '產業順風',
+      description: '市場信心轉強，全場主要持有資產估值上升 10%。',
+      effects: [{ type: 'AssetValueChange', targetAssetType: dominantAssetType, multiplier: 1.1 }],
+    });
+  }
+
+  return mode === 'support' ? support : mode === 'challenge' ? challenge : balanced;
+}
+
+function evaluateAndMaybeTriggerAdaptiveEvent(gs: GameState): void {
+  const assessment = assessAdaptiveDifficulty(gs);
+  gs.adaptiveDirector.score = assessment.score;
+  gs.adaptiveDirector.mode = assessment.mode;
+  gs.adaptiveDirector.reason = assessment.reason;
+  gs.adaptiveDirector.lastEvaluatedPayday = gs.globalPaydayNumber;
+
+  if (!gs.adaptiveDirector.enabled || gs.globalPaydayNumber < 2) {
+    emitAdaptiveDirectorStatus(gs);
+    return;
+  }
+  if (gs.globalPaydayNumber - gs.adaptiveDirector.lastTriggeredPayday < ADAPTIVE_EVENT_COOLDOWN_PAYDAYS) {
+    emitAdaptiveDirectorStatus(gs);
+    return;
+  }
+
+  const triggerChance = assessment.mode === 'balanced' ? 0.55 : 0.75;
+  if (Math.random() >= triggerChance) {
+    emitAdaptiveDirectorStatus(gs);
+    return;
+  }
+
+  const pool = getAdaptiveEventPool(assessment.mode, assessment.dominantAssetType)
+    .filter((event) => event.id !== gs.adaptiveDirector.lastEventId);
+  const event = pool[Math.floor(Math.random() * pool.length)];
+  if (!event) {
+    emitAdaptiveDirectorStatus(gs);
+    return;
+  }
+
+  applyGlobalEvent(gs, event);
+  gs.adaptiveDirector.lastTriggeredPayday = gs.globalPaydayNumber;
+  gs.adaptiveDirector.lastEventId = event.id;
+  gs.adaptiveDirector.lastEventTitle = event.title;
+
+  console.log(`[adaptiveDirector] 房間 ${gs.gameId}｜${assessment.mode} ${assessment.score}｜${event.title}`);
+  emitToRoom(gs.gameId, 'globalEventAnnouncement', {
+    event,
+    timestamp: new Date(),
+    automatic: true,
+  });
+  emitAdaptiveDirectorStatus(gs);
 }
 
 /**
@@ -1189,6 +1455,7 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
       currentAge: Math.round(getCurrentAge(gs) * 10) / 10,
     });
   }
+  evaluateAndMaybeTriggerAdaptiveEvent(gs);
   emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
 }
 
@@ -1203,7 +1470,7 @@ io.on('connection', (socket: Socket) => {
   // 主持人：建立房間 (createRoom)
   // ----------------------------------------------------------
   /**
-   * Admin only（密碼驗證）。
+   * 建立時由主持人設定此房間專屬密碼。
    * Client → Server: { password: string }
    * Server → Caller: roomCreated { roomId, joinCode } | error
    *
@@ -1211,8 +1478,18 @@ io.on('connection', (socket: Socket) => {
    * 同一主持人可建立多個房間（多開場次）。
    */
   socket.on('createRoom', (payload: { password: string; roomId?: string }) => {
-    if (payload?.password !== ADMIN_PASSWORD) {
-      socket.emit('error', { message: '密碼錯誤，無法建立房間。' });
+    const rateKey = socket.handshake.address || socket.id;
+    if (!consumeRateLimit(roomCreationRate, rateKey, 5, 10 * 60 * 1000)) {
+      socket.emit('error', { message: '建立房間次數過多，請稍後再試。' });
+      return;
+    }
+    if (rooms.size >= MAX_ACTIVE_ROOMS) {
+      socket.emit('error', { message: '目前房間已達上限，請稍後再試。' });
+      return;
+    }
+    const password = payload?.password ?? '';
+    if (password.trim().length < MIN_ADMIN_PASSWORD_LENGTH) {
+      socket.emit('error', { message: `主持人密碼至少需要 ${MIN_ADMIN_PASSWORD_LENGTH} 個字元。` });
       return;
     }
 
@@ -1230,6 +1507,7 @@ io.on('connection', (socket: Socket) => {
     const roomCode = customCode || generateRoomCode();
     const gs = new GameState(roomCode);
     gs.adminSocketId = socket.id;
+    roomAdminCredentials.set(roomCode, createRoomAdminCredential(password));
     rooms.set(roomCode, gs);
 
     // 主持人也加入 Socket.io 房間（可接收廣播）
@@ -1276,6 +1554,7 @@ io.on('connection', (socket: Socket) => {
     emitToRoom(roomId, 'roomDeleted', { roomId, reason: '主持人已關閉房間。' });
 
     rooms.delete(roomId);
+    roomAdminCredentials.delete(roomId);
 
     // 踢出所有在此房間的 socket
     io.in(roomId).socketsLeave(roomId);
@@ -1298,15 +1577,14 @@ io.on('connection', (socket: Socket) => {
    * Server → Caller: adminLoginSuccess | adminLoginFail
    */
   socket.on('adminLogin', (payload: { password: string; roomId?: string }) => {
-    if (payload?.password !== ADMIN_PASSWORD) {
-      socket.emit('adminLoginFail', { message: '密碼錯誤，請重試。' });
+    const targetRoomId = payload?.roomId?.trim().toUpperCase();
+    if (!targetRoomId) {
+      socket.emit('adminLoginFail', { message: '請輸入房間代碼。' });
       return;
     }
-
-    const targetRoomId = payload?.roomId;
-    if (!targetRoomId) {
-      // 未指定房間：直接回傳成功（可搭配 createRoom 使用）
-      socket.emit('adminLoginSuccess', { adminSocketId: socket.id, roomId: null });
+    const rateKey = `${socket.handshake.address || socket.id}:${targetRoomId}`;
+    if (!consumeRateLimit(adminLoginRate, rateKey, 10, 5 * 60 * 1000)) {
+      socket.emit('adminLoginFail', { message: '登入嘗試次數過多，請五分鐘後再試。' });
       return;
     }
 
@@ -1315,6 +1593,11 @@ io.on('connection', (socket: Socket) => {
       socket.emit('adminLoginFail', { message: `房間 ${targetRoomId} 不存在。` });
       return;
     }
+    if (!verifyRoomAdminPassword(targetRoomId, payload?.password ?? '')) {
+      socket.emit('adminLoginFail', { message: '房間代碼或主持人密碼錯誤。' });
+      return;
+    }
+    adminLoginRate.delete(rateKey);
 
     gs.adminSocketId = socket.id;
     socket.join(targetRoomId);
@@ -2266,22 +2549,31 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 觸發全局市場事件 (triggerGlobalEvent) — 主持人專用
   // ----------------------------------------------------------
+  socket.on('getAdaptiveDirectorStatus', (payload?: { roomId?: string }) => {
+    const gs = (payload?.roomId ? rooms.get(payload.roomId) : null) ?? getRoomState(socket);
+    if (!gs || socket.id !== gs.adminSocketId) return;
+    emitAdaptiveDirectorStatus(gs);
+  });
+
+  socket.on('setAdaptiveDirectorEnabled', (payload: { enabled: boolean; roomId?: string }) => {
+    const gs = (payload?.roomId ? rooms.get(payload.roomId) : null) ?? getRoomState(socket);
+    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (socket.id !== gs.adminSocketId) {
+      socket.emit('error', { message: '只有主持人可以調整自動難度。' });
+      return;
+    }
+    gs.adaptiveDirector.enabled = Boolean(payload.enabled);
+    emitAdaptiveDirectorStatus(gs);
+  });
+
   socket.on('triggerGlobalEvent', (payload: { eventId: string; roomId?: string }) => {
     const gs = (payload.roomId ? rooms.get(payload.roomId) : null) ?? getRoomState(socket);
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
     if (socket.id !== gs.adminSocketId) {
-      // 允許同一密碼管理員（已用 roomId 查到房間）重新綁定
-      if (payload.roomId && gs.adminSocketId) {
-        // 以 roomId 方式觸發時，更新 adminSocketId 並繼續
-        gs.adminSocketId = socket.id;
-        socketRoomMap.set(socket.id, roomId);
-        socket.join(roomId);
-      } else {
-        socket.emit('error', { message: '權限不足：僅管理員可觸發全局事件。' });
-        return;
-      }
+      socket.emit('error', { message: '權限不足：僅管理員可觸發全局事件。' });
+      return;
     }
 
     const event = ADMIN_GLOBAL_EVENT_MAP.get(payload.eventId);
@@ -2309,14 +2601,8 @@ io.on('connection', (socket: Socket) => {
     const roomId = gs.gameId;
 
     if (socket.id !== gs.adminSocketId) {
-      if (payload?.roomId && gs.adminSocketId) {
-        gs.adminSocketId = socket.id;
-        socketRoomMap.set(socket.id, roomId);
-        socket.join(roomId);
-      } else {
-        socket.emit('error', { message: '權限不足：僅管理員可觸發特殊拍賣。' });
-        return;
-      }
+      socket.emit('error', { message: '權限不足：僅管理員可觸發特殊拍賣。' });
+      return;
     }
 
     const { SPECIAL_AUCTION_DEALS } = require('./gameCards') as typeof import('./gameCards');
@@ -3160,6 +3446,13 @@ io.on('connection', (socket: Socket) => {
     gs.globalPaydayNumber = 0;
     gs.finalRoundStarted = false;
     gs.finalRoundPendingPlayerIds = [];
+    gs.adaptiveDirector.mode = 'balanced';
+    gs.adaptiveDirector.score = 50;
+    gs.adaptiveDirector.reason = '等待第一次季度評估';
+    gs.adaptiveDirector.lastEvaluatedPayday = 0;
+    gs.adaptiveDirector.lastTriggeredPayday = 0;
+    gs.adaptiveDirector.lastEventId = undefined;
+    gs.adaptiveDirector.lastEventTitle = undefined;
     startGameClock(gs);
 
     console.log(`[startGame] 房間 ${roomId} 遊戲啟動；每完整回合 +${YEARS_PER_COMPLETED_ROUND} 歲，活動倒數：${minutes} 分鐘`);
@@ -3290,6 +3583,13 @@ io.on('connection', (socket: Socket) => {
     gs.globalPaydayNumber = 0;
     gs.finalRoundStarted = false;
     gs.finalRoundPendingPlayerIds = [];
+    gs.adaptiveDirector.mode = 'balanced';
+    gs.adaptiveDirector.score = 50;
+    gs.adaptiveDirector.reason = '等待第一次季度評估';
+    gs.adaptiveDirector.lastEvaluatedPayday = 0;
+    gs.adaptiveDirector.lastTriggeredPayday = 0;
+    gs.adaptiveDirector.lastEventId = undefined;
+    gs.adaptiveDirector.lastEventTitle = undefined;
 
     // 重置牌組
     gs.smallDealDeck = new Deck(SMALL_DEALS);
@@ -3740,6 +4040,7 @@ io.on('connection', (socket: Socket) => {
       setTimeout(() => {
         if (rooms.has(roomId) && rooms.get(roomId)!.players.size === 0) {
           rooms.delete(roomId);
+          roomAdminCredentials.delete(roomId);
           console.log(`[autoCleanup] 房間 ${roomId} 已自動清除（遊戲結束且無玩家）`);
         }
       }, 30 * 60 * 1000);
@@ -4899,31 +5200,6 @@ function buildAvailableProfessions(player: Player): object[] {
       };
     });
 }
-
-// ============================================================
-// 主持人活動倒數廣播（輪詢所有房間）
-// ============================================================
-
-/**
- * 每 5 秒廣播回合年齡與活動剩餘時間。
- * 活動倒數歸零不會結束遊戲；100 歲終局只由完整回合推進。
- */
-setInterval(() => {
-  for (const [roomId, gs] of rooms) {
-    if (!gs.gameStartTime) continue;
-    if ((gs.gamePhase as string) === GamePhase.GameOver) continue;
-    if (gs.pausedAt !== null) continue;
-
-    const currentAge = getCurrentAge(gs);
-
-    emitToRoom(roomId, 'gameClock', {
-      currentAge,
-      currentStage: getLifeStage(currentAge),
-      remainingTimeMs: getRemainingActivityTimeMs(gs),
-      isPaused: false,
-    });
-  }
-}, 5000);
 
 // ============================================================
 // 啟動伺服器

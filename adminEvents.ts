@@ -9,11 +9,15 @@ import { AssetType } from './gameDataModels';
  * - AssetValueChange: 特定資產類型的市場估值乘以倍數
  * - CashflowChange:   特定資產類型的每月現金流乘以倍數
  * - ExpenseChange:    所有玩家的 otherExpenses 增加固定金額
+ * - CashChange:       所有玩家現金增加固定金額
+ * - HealthChange:     所有玩家健康值增減固定點數
  */
 export type GlobalEventEffectType =
   | 'AssetValueChange'
   | 'CashflowChange'
-  | 'ExpenseChange';
+  | 'ExpenseChange'
+  | 'CashChange'
+  | 'HealthChange';
 
 export interface GlobalEventEffect {
   type: GlobalEventEffectType;

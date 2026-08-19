@@ -9,13 +9,15 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/socketServer.js",
-    "dev": "ts-node --watch socketServer.ts"
+    "dev": "node --watch -r ts-node/register socketServer.ts",
+    "test": "npm run build && node --test tests/*.test.js"
   },
   "dependencies": {
     "socket.io": "^4.7.5"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
+    "socket.io-client": "^4.8.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5"
   }

@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import './GameBoard.css';
-import { innerCircleConfig, outerCircleConfig } from './boardConfig';
 
 // ============================================================
 // 型別定義（與 PlayerPage.tsx 中的用法相容）
@@ -44,33 +43,31 @@ const PLAYER_COLORS = [
 ];
 
 // ============================================================
-// 格子座標（以 gameboard-wrapper 寬/高的 % 為單位）。
-// 座標直接對齊手繪 PNG 的留白格位；程式只疊上文字、進度與玩家棋子。
+// 格子中心座標（以 gameboard-wrapper 寬/高的 % 為單位）。
+// 逐格依 1672×941 的正式 PNG 校準；棋子與校準點共用同一份座標。
 const INNER_CELL_POSITIONS: [number, number][] = [
-  [39.8, 28.4], [46.6, 27.1], [53.3, 31.4], [58.2, 43.5],
-  [59.0, 56.8], [56.0, 70.9], [49.2, 82.5], [40.7, 87.7],
-  [31.4, 86.3], [23.6, 78.2], [17.2, 67.9], [15.0, 51.7],
-  [15.9, 37.3], [20.7, 22.7], [28.5, 13.1], [37.5, 10.5],
-  [45.8, 10.0], [53.7, 12.2], [60.8, 21.0], [65.8, 32.6],
-  [68.0, 47.7], [72.2, 59.8], [80.3, 64.4], [88.9, 40.7],
+  [40.3, 29.9], [47.4, 30.3], [54.2, 33.4], [58.9, 43.3],
+  [59.7, 58.6], [55.3, 73.0], [48.3, 85.1], [39.8, 88.7],
+  [30.6, 87.8], [22.1, 78.6], [15.9, 65.4], [14.7, 50.7],
+  [16.6, 36.2], [21.4, 23.8], [28.9, 14.1], [37.1, 11.8],
+  [46.4, 12.2], [55.6, 14.6], [62.6, 23.5], [66.7, 37.3],
+  [68.7, 52.0], [73.0, 65.4], [81.3, 68.7], [90.3, 45.4],
 ];
 
 const OUTER_CELL_POSITIONS: [number, number][] = [
-  [10.7, 18.0], [16.5, 40.0], [22.4, 64.8], [32.3, 76.8],
-  [44.3, 82.2], [56.9, 83.2], [69.8, 77.4], [78.2, 67.0],
-  [85.1, 55.0], [86.6, 39.0], [77.6, 23.2], [67.8, 15.8],
-  [55.4, 15.2], [44.4, 19.3], [34.5, 35.1], [36.5, 53.0],
-  [46.0, 61.0],
+  [10.5, 16.8], [16.3, 42.3], [22.2, 66.4], [32.1, 81.7],
+  [44.5, 85.8], [56.9, 86.0], [68.9, 82.0], [78.1, 72.4],
+  [85.2, 59.0], [86.0, 40.2], [78.4, 25.8], [67.2, 17.6],
+  [55.4, 16.5], [44.5, 19.4], [34.1, 37.8], [37.1, 54.4],
+  [46.0, 63.2],
 ];
 
 function getPos(idx: number, isOuter: boolean): { left: string; top: string } {
   const table = isOuter ? OUTER_CELL_POSITIONS : INNER_CELL_POSITIONS;
   const [l, t] = table[Math.min(idx, table.length - 1)] ?? [50, 50];
-  // 棋子稍微往軌道內側移，避免遮住格名與圖示。
-  const inward = 0.88;
   return {
-    left: `${50 + (l - 50) * inward}%`,
-    top: `${50 + (t - 50) * inward}%`,
+    left: `${l}%`,
+    top: `${t}%`,
   };
 }
 
@@ -103,10 +100,9 @@ export function GameBoard({
 
   const isOuter = boardView === 'outer';
   const bgImage = isOuter
-    ? "url('/board-outer-painted-v2.png')"
-    : "url('/board-inner-painted-v2.png')";
+    ? "url('/board-outer-user-v5.png')"
+    : "url('/board-inner-user-v5.png')";
   const posTable = isOuter ? OUTER_CELL_POSITIONS : INNER_CELL_POSITIONS;
-  const squareConfig = isOuter ? outerCircleConfig : innerCircleConfig;
 
   const visiblePlayers = players.filter((p) =>
     boardView === 'inner' ? !p.isInFastTrack : p.isInFastTrack
@@ -121,27 +117,6 @@ export function GameBoard({
         className={`gameboard-wrapper board-surface ${isOuter ? 'is-outer' : 'is-inner'}`}
         style={{ backgroundImage: bgImage }}
       >
-
-        {/* ══ PNG 留白格位上的文字層；不再由程式繪製棋盤 ══ */}
-        {!calibrate && squareConfig.map((square, idx) => {
-          const [left, top] = posTable[idx];
-          return (
-            <div
-              key={square.id}
-              className={`quarter-board-cell type-${square.type}`}
-              style={{
-                left: `${left}%`,
-                top: `${top}%`,
-                '--cell-color': square.color,
-                '--cell-border': square.borderColor,
-              } as React.CSSProperties}
-            >
-              <span className="quarter-board-cell-index">{idx + 1}</span>
-              <span className="quarter-board-cell-icon">{square.icon}</span>
-              <span className="quarter-board-cell-name">{square.name}</span>
-            </div>
-          );
-        })}
 
         <QuarterDial
           completedRounds={completedRoundsInCycle}
@@ -337,7 +312,7 @@ function QuarterDial({
       <div className="quarter-dial-rings" />
       <p className="quarter-dial-kicker">{isOuter ? 'FASTTRACK · 同步季曆' : '人生季度'}</p>
       <p className="quarter-dial-title">
-        {isGlobalPayday ? '全體發薪日' : `第 ${currentRound} 輪`}
+        {isGlobalPayday ? '全體發薪日' : `本季第 ${currentRound} 輪`}
       </p>
       <div className="quarter-dial-segments" aria-label={`季度進度 ${completed}/3`}>
         {[0, 1, 2].map((index) => (

@@ -62,53 +62,6 @@
 .constellation-a { top: 14%; left: 8%; }
 .constellation-b { right: 8%; bottom: 13%; transform: rotate(18deg); }
 
-.quarter-board-cell {
-  position: absolute;
-  z-index: 8;
-  width: clamp(60px, 6.7vw, 98px);
-  min-height: clamp(42px, 4.7vw, 68px);
-  transform: translate(-50%, -50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1px;
-  padding: 3px;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  pointer-events: none;
-}
-
-.quarter-board-cell-index {
-  display: none;
-}
-
-.quarter-board-cell-icon {
-  font-size: clamp(16px, 1.45vw, 23px);
-  line-height: 1;
-  filter: drop-shadow(0 1px 1px rgba(255,255,255,0.8));
-}
-
-.quarter-board-cell-name {
-  color: #2d2117;
-  font-size: clamp(8px, 0.74vw, 12px);
-  font-weight: 950;
-  line-height: 1.05;
-  letter-spacing: 0.02em;
-  text-align: center;
-  text-shadow: 0 1px 0 rgba(255,255,255,0.9), 0 0 4px rgba(255,248,220,0.9);
-}
-
-.quarter-board-cell.type-secondLife {
-  animation: second-life-glow 2.2s ease-in-out infinite alternate;
-}
-
-@keyframes second-life-glow {
-  from { box-shadow: 0 6px 15px rgba(0,0,0,0.48), 0 0 10px rgba(250,204,21,0.28); }
-  to { box-shadow: 0 6px 15px rgba(0,0,0,0.48), 0 0 26px rgba(250,204,21,0.68); }
-}
-
 .quarter-dial {
   position: absolute;
   z-index: 7;
