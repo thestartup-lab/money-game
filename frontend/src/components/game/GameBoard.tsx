@@ -44,19 +44,24 @@ const PLAYER_COLORS = [
 ];
 
 // ============================================================
-// 格子座標（以 gameboard-wrapper 寬/高的 % 為單位）
-// 依 1.png 圖片目測校準：時鐘中心 ≈ (44%, 46%)
-// 螺旋由內圈（順時針）展開至外圈
-// ── 內圈 25 格（index 0–24）────────────────────────────────
-function buildTrackPositions(cellCount: number): [number, number][] {
-  return Array.from({ length: cellCount }, (_, index) => {
-    const angle = (Math.PI * 2 * index) / cellCount - Math.PI / 2;
-    return [50 + Math.cos(angle) * 43, 50 + Math.sin(angle) * 40];
-  });
-}
+// 格子座標（以 gameboard-wrapper 寬/高的 % 為單位）。
+// 座標直接對齊手繪 PNG 的留白格位；程式只疊上文字、進度與玩家棋子。
+const INNER_CELL_POSITIONS: [number, number][] = [
+  [39.8, 28.4], [46.6, 27.1], [53.3, 31.4], [58.2, 43.5],
+  [59.0, 56.8], [56.0, 70.9], [49.2, 82.5], [40.7, 87.7],
+  [31.4, 86.3], [23.6, 78.2], [17.2, 67.9], [15.0, 51.7],
+  [15.9, 37.3], [20.7, 22.7], [28.5, 13.1], [37.5, 10.5],
+  [45.8, 10.0], [53.7, 12.2], [60.8, 21.0], [65.8, 32.6],
+  [68.0, 47.7], [72.2, 59.8], [80.3, 64.4], [88.9, 40.7],
+];
 
-const INNER_CELL_POSITIONS = buildTrackPositions(innerCircleConfig.length);
-const OUTER_CELL_POSITIONS = buildTrackPositions(outerCircleConfig.length);
+const OUTER_CELL_POSITIONS: [number, number][] = [
+  [10.7, 18.0], [16.5, 40.0], [22.4, 64.8], [32.3, 76.8],
+  [44.3, 82.2], [56.9, 83.2], [69.8, 77.4], [78.2, 67.0],
+  [85.1, 55.0], [86.6, 39.0], [77.6, 23.2], [67.8, 15.8],
+  [55.4, 15.2], [44.4, 19.3], [34.5, 35.1], [36.5, 53.0],
+  [46.0, 61.0],
+];
 
 function getPos(idx: number, isOuter: boolean): { left: string; top: string } {
   const table = isOuter ? OUTER_CELL_POSITIONS : INNER_CELL_POSITIONS;
@@ -70,7 +75,7 @@ function getPos(idx: number, isOuter: boolean): { left: string; top: string } {
 }
 
 // ============================================================
-// 主組件 — 雙底圖切換：1.png（內圈）/ 2.png（外圈）
+// 主組件 — 雙手繪 PNG 切換：內圈 / 外圈
 // ============================================================
 export function GameBoard({
   players,
@@ -97,6 +102,9 @@ export function GameBoard({
   };
 
   const isOuter = boardView === 'outer';
+  const bgImage = isOuter
+    ? "url('/board-outer-painted-v2.png')"
+    : "url('/board-inner-painted-v2.png')";
   const posTable = isOuter ? OUTER_CELL_POSITIONS : INNER_CELL_POSITIONS;
   const squareConfig = isOuter ? outerCircleConfig : innerCircleConfig;
 
@@ -111,14 +119,10 @@ export function GameBoard({
     <div className="gameboard-scroll">
       <div
         className={`gameboard-wrapper board-surface ${isOuter ? 'is-outer' : 'is-inner'}`}
+        style={{ backgroundImage: bgImage }}
       >
 
-        <div className="board-orbit board-orbit-outer" />
-        <div className="board-orbit board-orbit-inner" />
-        <div className="board-constellation constellation-a">✦ · ✧ · ✦</div>
-        <div className="board-constellation constellation-b">✧ · ✦ · ✧</div>
-
-        {/* ══ 精準的程式化格位：文字與棋子永遠使用同一組座標 ══ */}
+        {/* ══ PNG 留白格位上的文字層；不再由程式繪製棋盤 ══ */}
         {!calibrate && squareConfig.map((square, idx) => {
           const [left, top] = posTable[idx];
           return (
@@ -329,7 +333,7 @@ function QuarterDial({
   const roundsLeft = Math.max(0, 3 - completed);
 
   return (
-    <div className={`quarter-dial${isGlobalPayday ? ' is-payday' : ''}`}>
+    <div className={`quarter-dial ${isOuter ? 'is-outer' : 'is-inner'}${isGlobalPayday ? ' is-payday' : ''}`}>
       <div className="quarter-dial-rings" />
       <p className="quarter-dial-kicker">{isOuter ? 'FASTTRACK · 同步季曆' : '人生季度'}</p>
       <p className="quarter-dial-title">
