@@ -5,7 +5,7 @@ const STRATEGY_CARDS = [
     icon: '💰',
     title: '現金流 vs 薪水',
     question: '你在追什麼？',
-    body: '薪水每個月歸零，現金流才會月月累積。脫出老鼠賽跑的條件是：被動收入 ≥ 每月支出。越早建立現金流資產，越快獲得時間自由。',
+    body: '薪水每個月歸零，現金流才會月月累積；但第二人生不只檢視金錢，也會看你如何經營健康、成長、關係與人生體驗。完整判定會留到賽後復盤。',
     color: 'border-emerald-600',
     highlight: 'text-emerald-400',
   },

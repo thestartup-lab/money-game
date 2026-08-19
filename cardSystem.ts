@@ -9,7 +9,20 @@ import {
   RelationshipCard,
   LuckyCard,
 } from './gameCards';
-import { HP_DANGER_THRESHOLD, HP_STRONG_THRESHOLD } from './gameConfig';
+import {
+  FQ_MULTIPLIERS,
+  HP_DANGER_THRESHOLD,
+  HP_STRONG_THRESHOLD,
+  SECOND_LIFE_BALANCED_COVERAGE_RATIO,
+  SECOND_LIFE_BALANCED_INDICATORS_REQUIRED,
+  SECOND_LIFE_EXPERIENCE_THRESHOLD,
+  SECOND_LIFE_FINANCIAL_COVERAGE_RATIO,
+  SECOND_LIFE_FINANCIAL_INDICATORS_REQUIRED,
+  SECOND_LIFE_HEALTH_THRESHOLD,
+  SECOND_LIFE_RELATIONSHIP_THRESHOLD,
+  SECOND_LIFE_SKILL_THRESHOLD,
+  LIFE_EXP,
+} from './gameConfig';
 import { addLifeExperience } from './gameLogic';
 
 // ============================================================
@@ -211,6 +224,7 @@ export function acceptDealCard(player: Player, card: DealCard): void {
 
   const payment = cardAsset.downPayment ?? cardAsset.cost;
   player.cash -= payment;
+  addLifeExperience(player, LIFE_EXP.INVEST_DEAL);
 }
 
 /**
@@ -233,6 +247,7 @@ export function applyCharityDonation(
   player.cash -= actualPaid;
   player.charityTotal = (player.charityTotal ?? 0) + actualPaid;
   player.bonusDice = card.bonusDiceCount;
+  addLifeExperience(player, LIFE_EXP.CHARITY_DONATED);
 }
 
 // ============================================================
@@ -281,6 +296,7 @@ export function applyCrisisCard(player: Player, card: CrisisCard): CrisisResult 
   if (!deathTriggered) {
     player.cash -= Math.min(effectiveCost, player.cash);
     player.turnsToSkip += baseTurns;
+    addLifeExperience(player, LIFE_EXP.CRISIS_SURVIVED);
   }
 
   return {
@@ -297,25 +313,124 @@ export function applyCrisisCard(player: Player, card: CrisisCard): CrisisResult 
 // ============================================================
 
 /**
- * 執行玩家死亡：標記為死亡並從遊戲中移除。
+ * 執行玩家死亡：停止其後續回合，但保留完整玩家資料供終局復盤。
  * 死亡一律為終局結算，不再有重生機制。
  * 呼叫方應在此之後立即呼叫 calculateLifeScore 計算最終評分（含傳承分）。
  */
 export function handlePlayerDeath(player: Player, gameState: GameState): void {
   player.isAlive = false;
-  gameState.removePlayer(player.id);
+  gameState.finalRoundPendingPlayerIds = gameState.finalRoundPendingPlayerIds.filter(
+    (id) => id !== player.id
+  );
 }
 
 // ============================================================
 // 2-5 老鼠賽跑脫出判定
 // ============================================================
 
+export type SecondLifeRoute = 'financialBreakthrough' | 'balancedLife' | null;
+export type SecondLifeIndicatorKey = 'health' | 'growth' | 'relationship' | 'experience';
+
+export interface SecondLifeIndicatorResult {
+  key: SecondLifeIndicatorKey;
+  label: string;
+  achieved: boolean;
+  value: number;
+  threshold: number;
+}
+
+export interface SecondLifeEligibility {
+  eligible: boolean;
+  route: SecondLifeRoute;
+  rawPassiveIncome: number;
+  effectivePassiveIncome: number;
+  totalExpenses: number;
+  coverageRatio: number;
+  achievedIndicatorCount: number;
+  indicators: SecondLifeIndicatorResult[];
+  financialBreakthroughMet: boolean;
+  balancedLifeMet: boolean;
+}
+
 /**
- * 判斷玩家是否達到脫出老鼠賽跑的條件。
- * 條件：totalPassiveIncome >= totalExpenses（被動收入 ≥ 總支出）
+ * 計算第二人生資格，回傳完整明細供進圈事件與賽後復盤使用。
+ *
+ * - 有效被動收入 = 原始被動收入 × FQ 乘數
+ * - 財務突破：覆蓋率 >= 100%，人生指標 >= 1
+ * - 平衡人生：覆蓋率 >= 75%，人生指標 >= 2
+ *
+ * 關係指標可由「已婚」或 DRS 達標擇一完成；已婚以門檻值記錄，
+ * 讓復盤資料維持同一數值尺度。
  */
+export function evaluateSecondLifeEligibility(player: Player): SecondLifeEligibility {
+  const fqMultiplier = FQ_MULTIPLIERS[player.stats.financialIQ] ?? 1;
+  const effectivePassiveIncome = Math.round(player.totalPassiveIncome * fqMultiplier);
+  const totalExpenses = player.totalExpenses;
+  const coverageRatio = totalExpenses > 0
+    ? effectivePassiveIncome / totalExpenses
+    : 1;
+
+  const indicators: SecondLifeIndicatorResult[] = [
+    {
+      key: 'health',
+      label: '健康',
+      achieved: player.stats.health >= SECOND_LIFE_HEALTH_THRESHOLD,
+      value: player.stats.health,
+      threshold: SECOND_LIFE_HEALTH_THRESHOLD,
+    },
+    {
+      key: 'growth',
+      label: '成長',
+      achieved: player.stats.careerSkill >= SECOND_LIFE_SKILL_THRESHOLD,
+      value: player.stats.careerSkill,
+      threshold: SECOND_LIFE_SKILL_THRESHOLD,
+    },
+    {
+      key: 'relationship',
+      label: '關係',
+      achieved: player.isMarried || player.relationshipPoints >= SECOND_LIFE_RELATIONSHIP_THRESHOLD,
+      value: player.isMarried
+        ? Math.max(player.relationshipPoints, SECOND_LIFE_RELATIONSHIP_THRESHOLD)
+        : player.relationshipPoints,
+      threshold: SECOND_LIFE_RELATIONSHIP_THRESHOLD,
+    },
+    {
+      key: 'experience',
+      label: '體驗',
+      achieved: player.lifeExperience >= SECOND_LIFE_EXPERIENCE_THRESHOLD,
+      value: player.lifeExperience,
+      threshold: SECOND_LIFE_EXPERIENCE_THRESHOLD,
+    },
+  ];
+  const achievedIndicatorCount = indicators.filter((indicator) => indicator.achieved).length;
+  const financialBreakthroughMet =
+    coverageRatio >= SECOND_LIFE_FINANCIAL_COVERAGE_RATIO &&
+    achievedIndicatorCount >= SECOND_LIFE_FINANCIAL_INDICATORS_REQUIRED;
+  const balancedLifeMet =
+    coverageRatio >= SECOND_LIFE_BALANCED_COVERAGE_RATIO &&
+    achievedIndicatorCount >= SECOND_LIFE_BALANCED_INDICATORS_REQUIRED;
+
+  return {
+    eligible: financialBreakthroughMet || balancedLifeMet,
+    route: financialBreakthroughMet
+      ? 'financialBreakthrough'
+      : balancedLifeMet
+        ? 'balancedLife'
+        : null,
+    rawPassiveIncome: player.totalPassiveIncome,
+    effectivePassiveIncome,
+    totalExpenses,
+    coverageRatio,
+    achievedIndicatorCount,
+    indicators,
+    financialBreakthroughMet,
+    balancedLifeMet,
+  };
+}
+
+/** 保留布林判定介面，供既有流程與外部呼叫相容。 */
 export function checkRatRaceEscape(player: Player): boolean {
-  return player.totalPassiveIncome >= player.totalExpenses;
+  return evaluateSecondLifeEligibility(player).eligible;
 }
 
 // ============================================================

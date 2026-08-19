@@ -118,7 +118,7 @@ export default function ActionPanel({
   const noTokensLeft = !player.hasFlexibleSchedule && player.actionTokensThisPayday <= 0;
   const scheduleLabel = player.hasFlexibleSchedule
     ? '自由行程（不限次數）'
-    : `本發薪日剩餘活動：${player.actionTokensThisPayday} 次`;
+    : `本季剩餘活動：${player.actionTokensThisPayday} 次`;
 
   const travelDisabled = player.isBedridden || player.stats.health < 50 || noTokensLeft;
   const socialDisabled = player.isBedridden || player.isMarried || noTokensLeft;
@@ -144,7 +144,7 @@ export default function ActionPanel({
   const dcaPortfolioValue = player.assets?.find((a) => a.id === 'stock-dca')?.currentValue ?? 0;
 
   return (
-    <div className="space-y-3">
+    <div className="senior-action-panel space-y-3">
       {/* ── 現金狀態列 ─────────────────── */}
       <div className="rounded-xl bg-gray-800 border border-gray-600 px-4 py-3 flex items-center justify-between">
         <span className="text-sm text-gray-400">手頭現金</span>
@@ -465,7 +465,7 @@ export default function ActionPanel({
       <div className="card">
         <div className="flex justify-between text-sm">
           <span className="text-gray-400">目前年齡</span>
-          <span className="text-white font-bold">{currentAge.toFixed(1)} 歲</span>
+          <span className="text-white font-bold">{Math.round(currentAge)} 歲</span>
         </div>
         <div className="flex justify-between text-sm mt-1">
           <span className="text-gray-400">信用評分</span>

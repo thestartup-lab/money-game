@@ -1,0 +1,170 @@
+.turn-intro-overlay {
+  --turn-color: #fbbf24;
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 47%, color-mix(in srgb, var(--turn-color) 25%, transparent) 0%, transparent 38%),
+    linear-gradient(135deg, rgba(2, 6, 23, 0.98), rgba(15, 23, 42, 0.97));
+  animation: turn-intro-enter 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.turn-intro-overlay::before,
+.turn-intro-overlay::after {
+  content: '';
+  position: absolute;
+  width: 75vmax;
+  height: 75vmax;
+  border: 1px solid color-mix(in srgb, var(--turn-color) 28%, transparent);
+  border-radius: 50%;
+  animation: turn-intro-ring 2.8s ease-out both;
+}
+
+.turn-intro-overlay::after {
+  width: 48vmax;
+  height: 48vmax;
+  animation-delay: 140ms;
+}
+
+.turn-intro-overlay.is-leaving {
+  animation: turn-intro-exit 450ms ease-in both;
+}
+
+.turn-intro-glow {
+  position: absolute;
+  width: min(76vw, 980px);
+  height: min(76vw, 980px);
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--turn-color) 24%, transparent), transparent 66%);
+  filter: blur(18px);
+  animation: turn-intro-breathe 1.8s ease-in-out infinite alternate;
+}
+
+.turn-intro-content {
+  position: relative;
+  z-index: 1;
+  width: min(92%, 1200px);
+  text-align: center;
+  text-shadow: 0 6px 30px rgba(0, 0, 0, 0.8);
+}
+
+.turn-intro-eyebrow {
+  margin: 0 0 1.2rem;
+  color: color-mix(in srgb, var(--turn-color) 76%, white);
+  font-size: clamp(0.8rem, 1.4vw, 1.2rem);
+  font-weight: 800;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  animation: turn-intro-copy-up 520ms 120ms both;
+}
+
+.turn-intro-prefix,
+.turn-intro-launch {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: clamp(2rem, 4vw, 4.5rem);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  line-height: 1.05;
+  animation: turn-intro-copy-up 580ms 180ms both;
+}
+
+.turn-intro-name {
+  margin: 0.08em auto;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--turn-color);
+  font-size: clamp(5rem, 13vw, 11rem);
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  line-height: 0.98;
+  overflow-wrap: anywhere;
+  text-shadow:
+    0 0 30px color-mix(in srgb, var(--turn-color) 48%, transparent),
+    0 8px 40px rgba(0, 0, 0, 0.86);
+  animation: turn-intro-name-pop 720ms 80ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.turn-intro-launch {
+  animation-delay: 320ms;
+}
+
+.turn-intro-profession {
+  display: inline-block;
+  margin: 1.5rem 0 0;
+  padding: 0.45rem 1.2rem;
+  border: 1px solid color-mix(in srgb, var(--turn-color) 55%, transparent);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.66);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: clamp(0.85rem, 1.5vw, 1.25rem);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  animation: turn-intro-copy-up 500ms 520ms both;
+}
+
+.turn-intro-progress {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 6px;
+  background: var(--turn-color);
+  transform-origin: left center;
+  box-shadow: 0 0 18px var(--turn-color);
+  animation: turn-intro-progress 3.2s linear both;
+}
+
+@keyframes turn-intro-enter {
+  from { opacity: 0; transform: scale(1.035); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes turn-intro-exit {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(1.035); }
+}
+
+@keyframes turn-intro-name-pop {
+  from { opacity: 0; transform: translateY(34px) scale(0.72); filter: blur(14px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+
+@keyframes turn-intro-copy-up {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes turn-intro-ring {
+  from { opacity: 0.72; transform: scale(0.44); }
+  to { opacity: 0; transform: scale(1.12); }
+}
+
+@keyframes turn-intro-breathe {
+  from { opacity: 0.6; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1.06); }
+}
+
+@keyframes turn-intro-progress {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-intro-overlay,
+  .turn-intro-overlay::before,
+  .turn-intro-overlay::after,
+  .turn-intro-glow,
+  .turn-intro-eyebrow,
+  .turn-intro-prefix,
+  .turn-intro-name,
+  .turn-intro-launch,
+  .turn-intro-profession {
+    animation: none;
+  }
+}

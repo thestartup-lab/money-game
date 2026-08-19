@@ -21,9 +21,10 @@ interface Props {
 
 const PLAYER_COLORS = ['#fbbf24', '#60a5fa', '#f472b6', '#34d399', '#a78bfa', '#fb923c'];
 
-const TUMBLE_MS = 1200;
-const HOLD_MS = 1500;
-const FADE_MS = 400;
+// 骰子是全場共同觀看的遊戲演出，不計入玩家的決策時間。
+const TUMBLE_MS = 1_150;
+const HOLD_MS = 1_550;
+const FADE_MS = 450;
 
 export default function DiceRollOverlay({ data, onDone, size = 'large' }: Props) {
   const [phase, setPhase] = useState<'tumble' | 'hold' | 'fade'>('tumble');

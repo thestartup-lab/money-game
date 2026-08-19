@@ -18,6 +18,7 @@ export interface UseGameStateReturn {
 
 export function useGameState(mySocketId: string | null): UseGameStateReturn {
   const socketRef = useRef<Socket | null>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +29,10 @@ export function useGameState(mySocketId: string | null): UseGameStateReturn {
     const s = io(SERVER_URL, { transports: ['websocket', 'polling'], reconnection: true, reconnectionAttempts: Infinity, reconnectionDelay: 1000, reconnectionDelayMax: 5000, randomizationFactor: 0.5, timeout: 20000 });
     socketRef.current = s;
 
-    s.on('connect', () => setConnected(true));
+    s.on('connect', () => {
+      setSocket(s);
+      setConnected(true);
+    });
     s.on('disconnect', () => setConnected(false));
 
     s.on('gameStateUpdate', (state: GameState) => setGameState(state));
@@ -43,10 +47,10 @@ export function useGameState(mySocketId: string | null): UseGameStateReturn {
     socketRef.current?.emit(event, ...args);
   };
 
-  const myPlayer = gameState?.players.find((p) => p.id === (socketRef.current?.id ?? mySocketId)) ?? null;
+  const myPlayer = gameState?.players.find((p) => p.id === (socket?.id ?? mySocketId)) ?? null;
 
   return {
-    socket: socketRef.current,
+    socket,
     connected,
     gameState,
     myPlayer,

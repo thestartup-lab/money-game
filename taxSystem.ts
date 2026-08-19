@@ -26,12 +26,18 @@ export interface TaxDeductionBreakdown {
  * 年度繳稅計算結果，包含完整明細供前端顯示教育說明。
  */
 export interface AnnualTaxResult {
-  /** 遊戲年收入 = totalIncome × 4（每圈 4 個發薪日 = 一年） */
+  /** 遊戲年收入 = totalIncome × 12（月薪制，每 12 個月為一年） */
   annualIncome: number;
   /** 各項節稅扣除明細 */
   deductions: TaxDeductionBreakdown;
   /** 應稅收入 = 年收入 − 總扣除額（最低為 0） */
   taxableIncome: number;
+  /** 稅務規劃抵減前的稅額。 */
+  taxBeforeCredit: number;
+  /** 本次套用的稅務規劃抵減比例。 */
+  taxCreditRate: number;
+  /** 本次由稅務規劃減免的金額。 */
+  taxCreditAmount: number;
   /** 最終應繳稅額（已套用累進稅率） */
   taxAmount: number;
   /** 各稅率級距的計算明細字串，供前端展示（如 "$50k×5% + $70k×12%..."） */
@@ -89,7 +95,7 @@ function applyProgressiveTax(taxableIncome: number): {
 /**
  * 純計算：根據玩家當前財務狀況計算年度稅金，不修改玩家物件。
  *
- * 年收入 = player.totalIncome × 4（遊戲設定：4 個發薪日 = 一年）
+ * 年收入 = player.totalIncome × 12（每 12 個月為一年）
  *
  * 節稅扣除順序：
  *  1. 撫養扣除：子女人數 × $225,000
@@ -101,7 +107,7 @@ function applyProgressiveTax(taxableIncome: number): {
  * @returns AnnualTaxResult 稅務計算結果明細
  */
 export function calculateAnnualTax(player: Player): AnnualTaxResult {
-  const annualIncome = player.totalIncome * 4;
+  const annualIncome = player.totalIncome * 12;
 
   // 計算各項扣除額
   const dependentDeduction = player.numberOfChildren * DEPENDENT_DEDUCTION_PER_CHILD;
@@ -123,7 +129,10 @@ export function calculateAnnualTax(player: Player): AnnualTaxResult {
 
   const taxableIncome = Math.max(0, annualIncome - totalDeductions);
 
-  const { taxAmount, bracketBreakdown } = applyProgressiveTax(taxableIncome);
+  const { taxAmount: taxBeforeCredit, bracketBreakdown } = applyProgressiveTax(taxableIncome);
+  const taxCreditRate = Math.max(0, Math.min(0.5, player.taxPlanningCreditRate ?? 0));
+  const taxCreditAmount = Math.round(taxBeforeCredit * taxCreditRate);
+  const taxAmount = Math.max(0, taxBeforeCredit - taxCreditAmount);
 
   return {
     annualIncome,
@@ -135,6 +144,9 @@ export function calculateAnnualTax(player: Player): AnnualTaxResult {
       totalDeductions,
     },
     taxableIncome,
+    taxBeforeCredit,
+    taxCreditRate,
+    taxCreditAmount,
     taxAmount,
     bracketBreakdown,
   };
@@ -150,5 +162,6 @@ export function calculateAnnualTax(player: Player): AnnualTaxResult {
 export function applyAnnualTax(player: Player): AnnualTaxResult {
   const result = calculateAnnualTax(player);
   player.cash -= result.taxAmount;
+  player.taxPlanningCreditRate = 0;
   return result;
 }

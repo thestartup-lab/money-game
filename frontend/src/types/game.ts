@@ -103,7 +103,7 @@ export interface Player {
   lifeExperience: number;
   hasContinuedEducation: boolean;
   startAge: number;
-  /** 顯示用個人年齡 = max(startAge, 全域時鐘)，由後端算好；舊版 server 沒有此欄位故為 optional */
+  /** 顯示用個人年齡 = max(startAge, 全體回合年齡)，由後端算好。 */
   personalAge?: number;
   isMarried: boolean;
   marriageBonus: number;
@@ -124,8 +124,8 @@ export interface Player {
   actionTokensThisPayday: number;
   /** 是否為自由行程職業（B/I 象限及無底薪業務）*/
   hasFlexibleSchedule: boolean;
-  /** 進修代價：true 時下一個發薪日自動跳過 */
-  skipFirstPayday: boolean;
+  /** 進修尚需延後的完整人生回合數。 */
+  educationTurnsToSkip: number;
   totalPassiveIncome: number;
   totalIncome: number;
   totalExpenses: number;
@@ -134,6 +134,8 @@ export interface Player {
   eventLog: PlayerEvent[];
   /** A1：累積慈善捐款金額（含內外圈所有捐款） */
   charityTotal?: number;
+  /** 外圈稅務規劃對下一次年度稅的減免比例。 */
+  taxPlanningCreditRate?: number;
   /** B1：人生夢想清單（進外圈時隨機抽 3 個） */
   bucketList?: { id: string; claimed: boolean; claimedAt?: number }[];
   /** B2：已通過的人生里程碑（40/60/80 歲） */
@@ -163,9 +165,30 @@ export interface GameState {
   hasAdmin: boolean;
   gameStartTime?: string;
   gameDurationMs: number;
+  /** 主持人活動倒數剩餘時間；歸零不影響回合年齡或終局。 */
+  remainingTimeMs?: number;
   isPaused: boolean;
   currentAge: number;
   currentStage: LifeStage;
+  completedLifeRounds?: number;
+  yearsPerRound?: number;
+  totalLifeRounds?: number;
+  finalRoundStarted?: boolean;
+  finalRoundPendingPlayerIds?: string[];
+  roundsSinceGlobalPayday?: number;
+  globalPaydayPending?: boolean;
+  globalPaydayInProgress?: boolean;
+  globalPaydayNumber?: number;
+  decisionPhase?: {
+    id: string;
+    kind: 'payday' | 'deal' | 'charity' | 'crisis' | 'relationship' | 'marriage' | 'startup' | 'auction';
+    title: string;
+    playerId: string;
+    playerName: string;
+    submitted: boolean;
+    startedAt: number;
+    reminderEndsAt: number;
+  } | null;
 }
 
 export interface LifeScoreBreakdown {
@@ -185,6 +208,29 @@ export interface LifeScoreBreakdown {
   total:               number;
   grade:               string;
   achievements:        string[];
+}
+
+export interface SecondLifeIndicatorReview {
+  key: 'health' | 'growth' | 'relationship' | 'experience';
+  label: string;
+  achieved: boolean;
+  value: number;
+  threshold: number;
+}
+
+export interface SecondLifeReview {
+  escaped: boolean;
+  passedSecondLife: boolean;
+  route: 'financialBreakthrough' | 'balancedLife' | null;
+  routeLabel: string | null;
+  rawPassiveIncome: number;
+  effectivePassiveIncome: number;
+  totalExpenses: number;
+  coverageRatio: number;
+  achievedIndicatorCount: number;
+  indicators: SecondLifeIndicatorReview[];
+  financialBreakthroughMet: boolean;
+  balancedLifeMet: boolean;
 }
 
 export interface PlayerAnalysis {
@@ -210,6 +256,17 @@ export interface PlayerAnalysis {
     finalNetWorth: number;
     finalCashflow: number;
     finalPassiveIncome: number;
+    finalCash: number;
+    finalExpenses: number;
+    finalHP: number;
+    finalNetwork: number;
+    totalDebt: number;
+    insuranceCount: number;
+    firstAssetAge: number | null;
+    escapeAge: number | null;
+    socialClass: string;
+    continuedEducation: boolean;
+    secondLifeReview: SecondLifeReview;
   };
   cashflowHistory: { age: number; cashflow: number; netWorth: number }[];
   keyDecisions: {
@@ -236,6 +293,13 @@ export interface RoomPlayerSummary {
   finalNetWorth: number;
   finalCashflow: number;
   finalPassiveIncome: number;
+  finalExpenses?: number;
+  finalHP?: number;
+  finalNetwork?: number;
+  insuranceCount?: number;
+  firstAssetAge?: number | null;
+  escapeAge?: number | null;
+  secondLifeReview?: SecondLifeReview;
   score: LifeScoreBreakdown;
   cashflowHistory: { age: number; cashflow: number; netWorth: number }[];
   eventLog?: {
@@ -307,6 +371,9 @@ export type ActiveEvent =
   | { kind: 'crisis_nt_skip'; title: string; description: string; baseCost: number; network: number; timeoutMs: number }
   | { kind: 'crisis_applied'; title: string; description: string; effectiveCost: number; turnsLost: number; wasInsured: boolean }
   | { kind: 'deal_pick'; cards: { id: string; name: string; description?: string; downPayment: number; monthlyCashflow: number }[]; playerCash: number; creditScore?: number; loanAvailable?: number }
+  | { kind: 'fast_track_travel'; destinations: { id: string; name: string; region: string; cost: number; lifeExpGained: number }[]; playerCash: number }
+  | { kind: 'partnership_pick'; availablePartners: { id: string; name: string }[] }
+  | { kind: 'partnership_response'; offerorName: string; dividendEstimate: number }
   | { kind: 'charity'; amount: number }
   | { kind: 'tech_startup_offer'; investmentAmount: number; playerCash: number }
   | { kind: 'tech_startup_result'; success: boolean; diceRoll: number; investmentAmount: number; monthlyCashflow?: number }
@@ -334,12 +401,19 @@ export interface PaydayFormData {
   paydayPosition: number;
   paydayIndex?: number;
   totalPaydays?: number;
+  /** 同一回合跨越多個發薪日時，只填一次規劃、依序完成多次薪資結算 */
+  combinedPlanning?: boolean;
+  /** 這次規劃涵蓋的月數；季度發薪時為 3。 */
+  settlementMonths?: number;
+  globalPayday?: boolean;
+  globalPaydayNumber?: number;
   currentCash: number;
   currentStats: { financialIQ: number; health: number; careerSkill: number; network: number };
   affordableOptions: AffordableOptions;
   currentInsurance: { hasMedicalInsurance: boolean; hasLifeInsurance: boolean; hasPropertyInsurance: boolean };
   stockDCAPortfolioValue: number;
   timeoutMs: number;
+  controlledByHost?: boolean;
   travelDestinations?: Array<{ id: string; name: string; region: string; cost: number; lifeExpGained: number }>;
   /** 股市內幕（FQ ≥ 7 才會收到）：下一張將觸發的市場行情卡預告 */
   marketTip?: {
@@ -355,6 +429,7 @@ export interface PaydayFormData {
 
 /** 發薪日規劃表單的送出 payload */
 export interface PaydayPlanPayload {
+  settlementMonths?: number;
   investInFQUpgrade: boolean;
   investInHealthMaintenance: boolean;
   investInHealthBoost: boolean;
@@ -362,6 +437,7 @@ export interface PaydayPlanPayload {
   investInNetwork: boolean;
   stockDCAAmount: number;
   buyInsuranceTypes: Array<'medical' | 'life' | 'property'>;
+  lifeChoice?: LifeChoice;
 }
 
 /** 生活體驗選擇 */

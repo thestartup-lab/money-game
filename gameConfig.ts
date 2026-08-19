@@ -19,7 +19,7 @@ import {
 // ============================================================
 
 /** 老鼠賽跑圈的總格數 */
-export const RAT_RACE_TRACK_SIZE = 25;
+export const RAT_RACE_TRACK_SIZE = 24;
 
 /** 外圈（FastTrack）棋盤的總格數 */
 export const FAST_TRACK_TRACK_SIZE = 17;
@@ -41,14 +41,38 @@ export const STOCK_DCA_MONTHLY_DIVIDEND_RATE = 0.0025;
 /** 股票定期定額可選投入金額選項 */
 export const STOCK_DCA_AMOUNTS = [15_000, 30_000, 75_000] as const;
 
-/** 「第二人生」格的索引（內圈第 25 格，路過後才能進入外圈）*/
-export const SECOND_LIFE_CELL = 24;
+/** 「第二人生」格的索引（內圈第 24 格，路過後才能進入外圈）*/
+export const SECOND_LIFE_CELL = 23;
 
 /**
- * 所有「發薪日」格的索引位置。
- * 起點(0)同時也是發薪日，之後每 6 格一個。
+ * 第二人生雙路徑資格。
+ *
+ * 財務突破：有效被動收入覆蓋 100% 支出，並完成至少 1 項人生指標。
+ * 平衡人生：有效被動收入覆蓋 75% 支出，並完成至少 2 項人生指標。
+ *
+ * 「有效被動收入」會套用 FQ 乘數；人生指標只在實際達成時參與判定，
+ * 遊戲進行中不向玩家顯示尚差多少，完整明細留到賽後復盤。
  */
-export const PAYDAY_LOCATIONS: readonly number[] = [0, 6, 12, 18];
+export const SECOND_LIFE_FINANCIAL_COVERAGE_RATIO = 1;
+export const SECOND_LIFE_BALANCED_COVERAGE_RATIO = 0.75;
+export const SECOND_LIFE_FINANCIAL_INDICATORS_REQUIRED = 1;
+export const SECOND_LIFE_BALANCED_INDICATORS_REQUIRED = 2;
+export const SECOND_LIFE_HEALTH_THRESHOLD = 50;
+export const SECOND_LIFE_SKILL_THRESHOLD = 60;
+export const SECOND_LIFE_RELATIONSHIP_THRESHOLD = 50;
+export const SECOND_LIFE_EXPERIENCE_THRESHOLD = 45;
+
+/** 發薪日不再綁定地圖格；每三個完整輪次由伺服器統一觸發。 */
+export const PAYDAY_LOCATIONS: readonly number[] = [];
+export const ROUNDS_PER_GLOBAL_PAYDAY = 3;
+export const MONTHS_PER_GLOBAL_PAYDAY = 3;
+
+/** 全體玩家各完成一次行動，視為一個完整人生回合，年齡增加 4 歲。 */
+export const YEARS_PER_COMPLETED_ROUND = 4;
+/** 20 歲開始、100 歲結束，共 20 個完整人生回合。 */
+export const TOTAL_LIFE_ROUNDS = 20;
+/** 完成第 19 輪、來到 96 歲時，先宣布第 20 輪為最後一輪。 */
+export const FINAL_ROUND_START_COMPLETED_ROUNDS = TOTAL_LIFE_ROUNDS - 1;
 
 // ============================================================
 // 玩家成長數值系統常量
@@ -118,7 +142,7 @@ export const PAYDAY_PLANNING_TIMEOUT_MS = 30000;
 // ============================================================
 
 /**
- * 累進稅率級距（基於遊戲年收入 = totalIncome × 4）。
+ * 累進稅率級距（基於遊戲年收入 = totalIncome × 12）。
  * maxIncome 為 null 表示此級距無上限。
  */
 export interface TaxBracket {
@@ -967,16 +991,16 @@ export const MARRIAGE_BONUS_BY_TYPE: Record<'love' | 'matchmaker' | 'arranged', 
 };
 
 // ============================================================
-// 百歲人生：時鐘驅動年齡系統
+// 百歲人生：回合年齡＋主持人活動倒數
 // ============================================================
 
-/** 預設遊戲時長（毫秒）；對應遊戲年齡 20–100 歲（80 年） */
+/** 預設活動參考時間；歸零不影響年齡或終局。 */
 export const DEFAULT_GAME_DURATION_MS = 5_400_000; // 90 分鐘
 
-/** 最短遊戲時長（毫秒）；快速場為 60 分鐘 */
+/** 最短活動參考時間。 */
 export const MIN_GAME_DURATION_MS = 3_600_000; // 60 分鐘
 
-/** 最長遊戲時長（毫秒）；長場最多 120 分鐘 */
+/** 最長活動參考時間。 */
 export const MAX_GAME_DURATION_MS = 7_200_000; // 120 分鐘
 
 /** 遊戲結束年齡 */
@@ -986,7 +1010,7 @@ export const GAME_START_AGE = 20;
 
 /**
  * 各人生階段的年齡區間 [最小年齡, 最大年齡)。
- * 年齡由 getCurrentAge() 即時計算，無需儲存於玩家資料。
+ * 年齡由 getCurrentAge() 按完整桌次輪計算，無需儲存於玩家資料。
  */
 export const LIFE_STAGE_AGE_RANGES: Readonly<Record<LifeStage, [number, number]>> = {
   [LifeStage.Youth]:      [20, 35],
@@ -1043,7 +1067,7 @@ export const LIFE_EVENT_WINDOWS = {
  * FastTrack 每個發薪日的資產自動增值率（複利）。
  * 適用於玩家進入外圈後持有的所有資產。
  */
-export const FAST_TRACK_ASSET_APPRECIATION_RATE = 0.15;
+export const FAST_TRACK_ASSET_APPRECIATION_RATE = 0.06;
 
 // FAST_TRACK_INCOME_MULTIPLIER 已移至 gameConstants.ts，從那裡 re-export
 

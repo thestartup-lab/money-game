@@ -126,6 +126,9 @@ export function getCareerChangeAssetCost(newProfessionId: string): number {
 export function applyPaydayPlan(player: Player, plan: PaydayPlanPayload): PaydayPlanResult {
   let remainingCash = player.cash;
   let totalCostDeducted = 0;
+  const settlementMonths = Math.max(1, Math.floor(plan.settlementMonths ?? 1));
+  const quarterlyMaintenanceCost = HP_MAINTENANCE_COST * settlementMonths;
+  const quarterlyBoostCost = HP_BOOST_COST + HP_MAINTENANCE_COST * (settlementMonths - 1);
 
   function tryInvest(cost: number): boolean {
     if (remainingCash >= cost) {
@@ -155,25 +158,25 @@ export function applyPaydayPlan(player: Player, plan: PaydayPlanPayload): Payday
   const boostOutcome: InvestmentOutcome = {
     attempted: plan.investInHealthBoost,
     executed: false,
-    cost: HP_BOOST_COST,
-    description: `積極投資健康（+${HP_BOOST_AMOUNT} HP）`,
+    cost: quarterlyBoostCost,
+    description: `積極投資健康（+${HP_BOOST_AMOUNT} HP，涵蓋 ${settlementMonths} 個月維護）`,
   };
   const maintOutcome: InvestmentOutcome = {
     attempted: plan.investInHealthMaintenance,
     executed: false,
-    cost: HP_MAINTENANCE_COST,
-    description: '維護健康（阻止 HP 衰退）',
+    cost: quarterlyMaintenanceCost,
+    description: `維護健康（阻止 ${settlementMonths} 個月 HP 衰退）`,
   };
 
   if (plan.investInHealthBoost) {
-    boostOutcome.executed = tryInvest(HP_BOOST_COST);
+    boostOutcome.executed = tryInvest(quarterlyBoostCost);
     if (boostOutcome.executed) {
       // boost 已含 maintenance，同時標記 maintenance 為已執行（供 applyHPDecay 判斷）
       player.stats.health = Math.min(100, player.stats.health + HP_BOOST_AMOUNT);
       maintOutcome.executed = true; // 視為已做維護
     }
   } else if (plan.investInHealthMaintenance) {
-    maintOutcome.executed = tryInvest(HP_MAINTENANCE_COST);
+    maintOutcome.executed = tryInvest(quarterlyMaintenanceCost);
     // HP 不增加，只是之後 applyHPDecay 會跳過衰退
   }
 

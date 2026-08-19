@@ -12,7 +12,7 @@ import {
   LIFE_STAGE_AGE_RANGES, SALARY_MULT_BY_STAGE,
   FAST_TRACK_ASSET_APPRECIATION_RATE,
   FAST_TRACK_TRACK_SIZE, FAST_TRACK_PAYDAY_BONUS_RATE,
-  GAME_END_AGE, GAME_START_AGE,
+  GAME_END_AGE, GAME_START_AGE, YEARS_PER_COMPLETED_ROUND,
   BEDRIDDEN_DEATH_PROBABILITY,
   TRAVEL_COST, TRAVEL_SALARY_PENALTY,
   HP_ACTIVITY_THRESHOLDS,
@@ -164,7 +164,7 @@ export function movePlayer(player: Player, steps: number): MoveResult {
  * 呼叫順序（每個發薪日）：
  *  1. applyPaydayPlan(player, plan) — 扣款並更新數值（含健康維護決策）
  *  2. triggerPayday(player, maintenanceDone) — 發薪 + HP 衰退 + NT 成長
- *  3. checkAndApplyAnnualTax(player) — 每 4 次觸發繳稅
+ *  3. checkAndApplyAnnualTax(player) — 每 12 個月觸發年度繳稅
  *
  * @param player          當前玩家（直接修改並回傳同一物件）
  * @param maintenanceDone 本次發薪日是否已執行健康維護（true = 阻止 HP 衰退）
@@ -207,14 +207,14 @@ export function triggerPayday(player: Player, gameState: GameState, maintenanceD
 }
 
 /**
- * 每次 triggerPayday 後呼叫，自動偵測是否達到年度繳稅時機（每 4 個發薪日一次）。
+ * 每次月結算後呼叫，自動偵測是否達到年度繳稅時機（每 12 個月一次）。
  * 若觸發，則計算並扣除年度累進稅（含撫養與保險扣除額）。
  *
  * @param player 當前玩家（若觸發繳稅則直接修改 cash）
  * @returns AnnualTaxCheckResult — triggered 是否觸發; taxResult 稅務明細（未觸發時為 null）
  */
 export function checkAndApplyAnnualTax(player: Player): AnnualTaxCheckResult {
-  if (player.paydayCount === 0 || player.paydayCount % 4 !== 0) {
+  if (player.paydayCount === 0 || player.paydayCount % 12 !== 0) {
     return { triggered: false, taxResult: null };
   }
   const taxResult = applyAnnualTax(player);
@@ -672,25 +672,28 @@ export function repayLoan(
 }
 
 // ============================================================
-// 百歲人生：時鐘驅動年齡系統
+// 百歲人生：全體回合驅動年齡系統
 // ============================================================
 
 /**
- * 計算玩家當前的遊戲年齡（20–100）。
- * 年齡完全由真實時間驅動，不儲存於玩家資料。
- * 暫停期間（pausedAt 非 null）年齡凍結。
+ * 計算目前遊戲年齡（20–100）。
+ * 每完成一個「所有存活玩家都各行動一次」的完整桌次輪，增加 4 歲。
+ * 真實時間與主持人暫停不再影響年齡。
  */
 export function getCurrentAge(gameState: GameState): number {
-  if (!gameState.gameStartTime) return GAME_START_AGE;
+  const completedRounds = Math.max(0, gameState.turnNumber);
+  return Math.min(GAME_END_AGE, GAME_START_AGE + completedRounds * YEARS_PER_COMPLETED_ROUND);
+}
 
-  const now = Date.now();
-  const pauseOffset = gameState.pausedAt
-    ? (now - gameState.pausedAt.getTime()) + gameState.totalPausedMs
-    : gameState.totalPausedMs;
-
-  const elapsed = now - gameState.gameStartTime.getTime() - pauseOffset;
-  const ratio = Math.min(1, Math.max(0, elapsed / gameState.gameDurationMs));
-  return GAME_START_AGE + ratio * (GAME_END_AGE - GAME_START_AGE);
+/** 主持人活動倒數的剩餘時間；只作節奏參考，不影響遊戲年齡或終局。 */
+export function getRemainingActivityTimeMs(gameState: GameState): number {
+  if (!gameState.gameStartTime) return gameState.gameDurationMs;
+  const now = gameState.pausedAt?.getTime() ?? Date.now();
+  const elapsed = Math.max(
+    0,
+    now - gameState.gameStartTime.getTime() - gameState.totalPausedMs,
+  );
+  return Math.max(0, gameState.gameDurationMs - elapsed);
 }
 
 /**
@@ -783,7 +786,7 @@ export function getAvailableProfessions(player: Player): typeof PROFESSIONS {
  */
 export function applyEducationLoan(player: Player): void {
   player.hasContinuedEducation = true;
-  player.skipFirstPayday = true;   // 進修代價：少一回合
+  player.educationTurnsToSkip = 1;
   player.stats.financialIQ = Math.min(10, player.stats.financialIQ + EDUCATION_FQ_BONUS);
   addLifeExperience(player, LIFE_EXP.CONTINUED_EDUCATION);
 
@@ -794,6 +797,13 @@ export function applyEducationLoan(player: Player): void {
     totalDebt: EDUCATION_LOAN_AMOUNT,
     monthlyPayment: EDUCATION_LOAN_MONTHLY,
   });
+}
+
+/** 消耗一次進修延後回合；回傳 true 表示本次應自動跳過行動。 */
+export function consumeEducationTurn(player: Player): boolean {
+  if (player.educationTurnsToSkip <= 0) return false;
+  player.educationTurnsToSkip -= 1;
+  return true;
 }
 
 // ============================================================
@@ -982,20 +992,20 @@ export function calculateLifeScore(player: Player, deathAge: number): LifeScoreB
 // 時鐘控制（由 socketServer 呼叫）
 // ============================================================
 
-/** 啟動遊戲時鐘（startGame 事件觸發時呼叫） */
+/** 啟動主持人活動倒數（不參與年齡計算）。 */
 export function startGameClock(gameState: GameState): void {
   gameState.gameStartTime = new Date();
   gameState.totalPausedMs = 0;
   gameState.pausedAt = null;
 }
 
-/** 暫停時鐘（主持人或結構性暫停節點觸發） */
+/** 暫停主持人活動倒數（主持人或結構性暫停節點觸發）。 */
 export function pauseGameClock(gameState: GameState): void {
   if (gameState.pausedAt !== null) return; // 已在暫停中，忽略
   gameState.pausedAt = new Date();
 }
 
-/** 恢復時鐘（主持人或玩家全員確認後觸發） */
+/** 恢復主持人活動倒數。 */
 export function resumeGameClock(gameState: GameState): void {
   if (gameState.pausedAt === null) return; // 未暫停，忽略
   gameState.totalPausedMs += Date.now() - gameState.pausedAt.getTime();

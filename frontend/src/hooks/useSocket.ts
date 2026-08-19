@@ -16,13 +16,17 @@ export interface UseSocketReturn {
  */
 export function useSocket(): UseSocketReturn {
   const socketRef = useRef<Socket | null>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     const s = io(SERVER_URL, { transports: ['websocket', 'polling'], reconnection: true, reconnectionAttempts: Infinity, reconnectionDelay: 1000, reconnectionDelayMax: 5000, randomizationFactor: 0.5, timeout: 20000 });
     socketRef.current = s;
 
-    s.on('connect', () => setConnected(true));
+    s.on('connect', () => {
+      setSocket(s);
+      setConnected(true);
+    });
     s.on('disconnect', () => setConnected(false));
 
     return () => {
@@ -41,5 +45,5 @@ export function useSocket(): UseSocketReturn {
     };
   }, []);
 
-  return { socket: socketRef.current, connected, emit, on };
+  return { socket, connected, emit, on };
 }

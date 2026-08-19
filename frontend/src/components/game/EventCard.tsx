@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { ActiveEvent } from '../../types/game';
+import DecisionCountdown from './DecisionCountdown';
 
 interface EventCardProps {
   event: ActiveEvent;
   onDecision: (decision: Record<string, unknown>) => void;
   onDismiss: () => void;
+  reminderEndsAt?: number;
 }
 
 const borderColors: Record<string, string> = {
@@ -20,45 +22,13 @@ const borderColors: Record<string, string> = {
   disease_crisis:      'border-purple-500',
   global_event:        'border-orange-400',
   marriage_window:     'border-pink-400',
+  fast_track_travel:   'border-violet-400',
+  partnership_pick:    'border-emerald-400',
+  partnership_response:'border-emerald-400',
 };
 
-export default function EventCard({ event, onDecision, onDismiss }: EventCardProps) {
+export default function EventCard({ event, onDecision, onDismiss, reminderEndsAt }: EventCardProps) {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
-  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
-
-  useEffect(() => {
-    setSelectedCardId(null);
-    if (event.kind === 'crisis_nt_skip') {
-      const secs = Math.ceil(event.timeoutMs / 1000);
-      setSecondsLeft(secs);
-      const interval = setInterval(() => {
-        setSecondsLeft((prev) => {
-          if (prev === null || prev <= 1) {
-            clearInterval(interval);
-            onDecision({ useNTSkip: false });
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-      return () => clearInterval(interval);
-    }
-    if (event.kind === 'marriage_window') {
-      const secs = Math.ceil(event.timeoutMs / 1000);
-      setSecondsLeft(secs);
-      const interval = setInterval(() => {
-        setSecondsLeft((prev) => {
-          if (prev === null || prev <= 1) {
-            clearInterval(interval);
-            onDecision({ acceptMarriage: false });
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-      return () => clearInterval(interval);
-    }
-  }, [event]);
 
   const borderClass =
     event.kind === 'tech_startup_result'
@@ -66,7 +36,13 @@ export default function EventCard({ event, onDecision, onDismiss }: EventCardPro
       : borderColors[event.kind] ?? 'border-gray-500';
 
   return (
-    <div className={`w-full rounded-2xl border-2 ${borderClass} bg-gray-800 p-4 space-y-3`}>
+    <div className={`senior-decision-card w-full rounded-2xl border-2 ${borderClass} bg-gray-800 p-4 space-y-3`}>
+      {reminderEndsAt ? (
+        <div className="flex items-center justify-between rounded-lg bg-gray-900/80 px-3 py-2 text-xs text-indigo-300">
+          <span>主持人節奏提醒</span>
+          <DecisionCountdown reminderEndsAt={reminderEndsAt} className="font-mono text-base font-black text-yellow-300" />
+        </div>
+      ) : null}
       {event.kind === 'doodad' && (
         <>
           <div className="text-red-400 font-bold text-base">💸 {event.title}</div>
@@ -85,7 +61,7 @@ export default function EventCard({ event, onDecision, onDismiss }: EventCardPro
         <>
           <div className="flex justify-between items-center">
             <span className="text-orange-400 font-bold text-base">⚠️ 危機事件</span>
-            {secondsLeft !== null && <span className="text-xs text-gray-400">⏱ {secondsLeft}秒</span>}
+            <span className="text-xs text-amber-300">主持人控制時間</span>
           </div>
           <p className="text-sm font-semibold text-white">{event.title}</p>
           <p className="text-sm text-gray-300">{event.description}</p>
@@ -247,6 +223,80 @@ export default function EventCard({ event, onDecision, onDismiss }: EventCardPro
         </>
       )}
 
+      {event.kind === 'fast_track_travel' && (
+        <>
+          <div className="text-violet-300 font-bold text-xl">✈️ 外圈生命歷練</div>
+          <p className="text-sm text-gray-300">先選擇目的地，送出後等待主持人揭曉。</p>
+          <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+            {event.destinations.map((destination) => {
+              const canAfford = event.playerCash >= destination.cost;
+              const selected = selectedCardId === destination.id;
+              return (
+                <button
+                  key={destination.id}
+                  type="button"
+                  disabled={!canAfford}
+                  className={`w-full rounded-xl border p-3 text-left ${selected ? 'border-violet-300 bg-violet-900' : 'border-gray-600 bg-gray-700'} ${canAfford ? '' : 'opacity-60'}`}
+                  onClick={() => setSelectedCardId(destination.id)}
+                >
+                  <span className="block font-bold text-white">{destination.name}</span>
+                  <span className="mt-1 block text-sm text-gray-300">
+                    {destination.region} · ${destination.cost.toLocaleString()} · 體驗 +{destination.lifeExpGained}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              className="rounded-xl bg-violet-700 text-white"
+              disabled={!selectedCardId}
+              onClick={() => selectedCardId && onDecision({ destinationId: selectedCardId })}
+            >確認目的地</button>
+            <button className="rounded-xl bg-gray-700 text-white" onClick={() => onDecision({ destinationId: null })}>這次不旅行</button>
+          </div>
+        </>
+      )}
+
+      {event.kind === 'partnership_pick' && (
+        <>
+          <div className="text-emerald-300 font-bold text-xl">🤝 選擇合夥夥伴</div>
+          <p className="text-sm text-gray-300">邀請會在主持人揭曉後送出，對方也會有獨立決策時間。</p>
+          <div className="space-y-2">
+            {event.availablePartners.map((partner) => (
+              <button
+                key={partner.id}
+                type="button"
+                className={`w-full rounded-xl border p-3 text-left font-bold ${selectedCardId === partner.id ? 'border-emerald-300 bg-emerald-900 text-white' : 'border-gray-600 bg-gray-700 text-gray-100'}`}
+                onClick={() => setSelectedCardId(partner.id)}
+              >
+                {selectedCardId === partner.id ? '✓ ' : ''}{partner.name}
+              </button>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              className="rounded-xl bg-emerald-700 text-white"
+              disabled={!selectedCardId}
+              onClick={() => selectedCardId && onDecision({ targetPlayerId: selectedCardId })}
+            >送出邀請</button>
+            <button className="rounded-xl bg-gray-700 text-white" onClick={() => onDecision({ targetPlayerId: null })}>略過</button>
+          </div>
+        </>
+      )}
+
+      {event.kind === 'partnership_response' && (
+        <>
+          <div className="text-emerald-300 font-bold text-xl">🤝 合夥邀請</div>
+          <p className="text-base text-white"><span className="font-black">{event.offerorName}</span> 邀請你共同合作。</p>
+          <p className="text-sm text-gray-300">接受後雙方各得生命體驗 +15，預估各獲分紅 ${event.dividendEstimate.toLocaleString()}。</p>
+          <div className="grid grid-cols-2 gap-2">
+            <button className="rounded-xl bg-emerald-700 text-white" onClick={() => onDecision({ accepted: true })}>接受合夥</button>
+            <button className="rounded-xl bg-gray-700 text-white" onClick={() => onDecision({ accepted: false })}>婉拒</button>
+          </div>
+        </>
+      )}
+
       {event.kind === 'tech_startup_offer' && (
         <>
           <div className="text-blue-400 font-bold text-base">💡 科技新創機會</div>
@@ -309,7 +359,7 @@ export default function EventCard({ event, onDecision, onDismiss }: EventCardPro
           )}
           {event.wasInsured
             ? <p className="text-sm text-green-400">✅ 醫療險已減免費用</p>
-            : <p className="text-sm text-yellow-400">⚠️ 建議購買醫療險以降低風險</p>
+            : <p className="text-sm text-yellow-400">本次未套用醫療險減免</p>
           }
           <button className="w-full btn-secondary py-2 rounded-xl text-sm" onClick={onDismiss}>確認</button>
         </>
@@ -328,9 +378,7 @@ export default function EventCard({ event, onDecision, onDismiss }: EventCardPro
         <>
           <div className="flex justify-between items-center">
             <span className="text-pink-400 font-bold text-base">💍 婚姻機會</span>
-            {secondsLeft !== null && secondsLeft > 0 && (
-              <span className="text-xs text-gray-400">⏱ {secondsLeft}秒</span>
-            )}
+            <span className="text-xs text-amber-300">主持人控制時間</span>
           </div>
           {event.inPeakWindow && (
             <p className="text-xs text-pink-300 bg-pink-950/40 rounded-lg px-2 py-1">✨ 正值黃金婚配年齡（25–40 歲）</p>

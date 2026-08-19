@@ -1,6 +1,6 @@
 import * as http from 'http';
 import { Server, Socket } from 'socket.io';
-import { GameState, Player, PaydayPlanPayload, GamePhase, PlayerEvent, PlayerEventType } from './gameDataModels';
+import { GameState, Player, PaydayPlanPayload, GamePhase, PlayerEvent, PlayerEventType, DecisionPhaseState } from './gameDataModels';
 import {
   createPlayer,
   applyGlobalEvent,
@@ -20,8 +20,10 @@ import {
   applyGrowthStats,
   getAvailableProfessions,
   applyEducationLoan,
+  consumeEducationTurn,
   addLifeExperience,
   getCurrentAge,
+  getRemainingActivityTimeMs,
   getLifeStage,
   calculateLifeScore,
   applyFastTrackAppreciation,
@@ -38,7 +40,7 @@ import {
   getArrangedMarriageCost,
 } from './gameLogic';
 import {
-  ADMIN_PASSWORD, PAYDAY_PLANNING_TIMEOUT_MS,
+  ADMIN_PASSWORD,
   SOCIAL_CLASS_CONFIG, DEFAULT_GAME_DURATION_MS,
   MIN_GAME_DURATION_MS, MAX_GAME_DURATION_MS,
   LIFE_EXP, LIFE_EVENT_WINDOWS,
@@ -50,6 +52,10 @@ import {
   E_PROFESSION_POOLS, S_PROFESSION_POOLS, B_PROFESSION_POOLS, I_PROFESSION_POOLS,
   QUADRANT_SELECT_THRESHOLDS, FRANCHISE_CASH_THRESHOLD, PROFESSIONS,
   SECOND_LIFE_CELL,
+  MONTHS_PER_GLOBAL_PAYDAY,
+  YEARS_PER_COMPLETED_ROUND,
+  TOTAL_LIFE_ROUNDS,
+  FINAL_ROUND_START_COMPLETED_ROUNDS,
   STOCK_DCA_MONTHLY_RETURN_RATE,
   STOCK_DCA_MONTHLY_DIVIDEND_RATE,
   SKILL_CAREER_CHANGE_THRESHOLD,
@@ -99,7 +105,7 @@ import {
   applyCharityDonation,
   applyCrisisCard,
   handlePlayerDeath,
-  checkRatRaceEscape,
+  evaluateSecondLifeEligibility,
   applyRelationshipCard,
   applyLuckyCard,
 } from './cardSystem';
@@ -136,6 +142,9 @@ const rooms = new Map<string, GameState>();
 
 /** 記錄每個 socket 目前所在的房間 ID（斷線清理用） */
 const socketRoomMap = new Map<string, string>();
+
+/** 每個房間同一時間只會有一個等待主持人收束的決策階段。 */
+const decisionReleaseWaiters = new Map<string, { phaseId: string; release: () => void }>();
 
 /**
  * 產生 6 字元隨機英數房間代碼，確保不重複。
@@ -341,7 +350,7 @@ function checkBucketGoals(
  * 人生里程碑檢查（40 / 60 / 80 歲）。
  * 玩家年齡跨越關卡時觸發人生回顧事件，依當下狀態自動加分。
  *
- * 在 payday 結算後呼叫（年齡會隨遊戲時鐘前進）。
+ * 在玩家行動與發薪結算後呼叫；年齡只在完整桌次輪結束時前進。
  */
 function checkLifeMilestones(
   player: Player,
@@ -453,6 +462,158 @@ function logPlayerEvent(
   player.eventLog.push(event);
 }
 
+/**
+ * 建立賽後使用的第二人生資格快照。
+ * 已進圈者優先採用進圈當下的事件資料；未進圈者採用終局狀態，
+ * 讓復盤能說明當時走了哪條路，或最後還欠缺哪些人生面向。
+ */
+function buildSecondLifeReview(player: Player): object {
+  const current = evaluateSecondLifeEligibility(player);
+  const escapeEvent = player.eventLog.find((event) => event.type === 'rat_race_escaped');
+  const meta = escapeEvent?.meta;
+  const route = typeof meta?.escapeRoute === 'string'
+    ? meta.escapeRoute
+    : current.route;
+  const routeLabel = typeof meta?.escapeRouteLabel === 'string'
+    ? meta.escapeRouteLabel
+    : route === 'balancedLife'
+      ? '平衡人生'
+      : route === 'financialBreakthrough'
+        ? '財務突破'
+        : null;
+
+  return {
+    escaped: player.isInFastTrack,
+    passedSecondLife: player.hasPassedSecondLife,
+    route,
+    routeLabel,
+    rawPassiveIncome: Number(meta?.passiveIncome ?? current.rawPassiveIncome),
+    effectivePassiveIncome: Number(meta?.effectivePassiveIncome ?? current.effectivePassiveIncome),
+    totalExpenses: Number(meta?.totalExpenses ?? current.totalExpenses),
+    coverageRatio: Number(meta?.coverageRatio ?? current.coverageRatio),
+    achievedIndicatorCount: Number(meta?.achievedIndicatorCount ?? current.achievedIndicatorCount),
+    indicators: Array.isArray(meta?.indicators) ? meta.indicators : current.indicators,
+    financialBreakthroughMet: Boolean(meta?.financialBreakthroughMet ?? current.financialBreakthroughMet),
+    balancedLifeMet: Boolean(meta?.balancedLifeMet ?? current.balancedLifeMet),
+  };
+}
+
+/**
+ * 統一完成玩家死亡結算。玩家仍保留在房間資料中，讓本人與全場在終局復盤時
+ * 都能看到完整人生軌跡；advanceToNextTurn 會自動略過 isAlive=false 的玩家。
+ */
+function eliminatePlayer(
+  player: Player,
+  gs: GameState,
+  cause: string,
+  description: string,
+): { deathAge: number; finalScore: ReturnType<typeof calculateLifeScore> } {
+  const deathAge = Math.round(Math.max(player.startAge ?? 20, getCurrentAge(gs)));
+  const cashBefore = player.cash;
+  const cashflowBefore = player.monthlyCashflow;
+  const netWorthBefore = calcNetWorth(player);
+
+  logPlayerEvent(
+    player,
+    gs,
+    'death',
+    description,
+    cashBefore,
+    cashflowBefore,
+    netWorthBefore,
+    { cause, deathAge },
+  );
+
+  const finalScore = calculateLifeScore(player, deathAge);
+  handlePlayerDeath(player, gs);
+
+  emitToRoom(gs.gameId, 'playerFinalScore', {
+    playerId: player.id,
+    playerName: player.name,
+    deathAge,
+    cause,
+    score: finalScore,
+    profession: player.profession.name,
+    quadrant: player.profession.quadrant,
+    isMarried: player.isMarried,
+    numberOfChildren: player.numberOfChildren,
+    lifeExperience: player.lifeExperience,
+  });
+  emitToRoom(gs.gameId, 'playerEliminated', {
+    playerId: player.id,
+    playerName: player.name,
+    deathAge,
+    cause,
+  });
+
+  if ([...gs.players.values()].every((candidate) => !candidate.isAlive)) {
+    finishGame(gs, 'allPlayersEliminated');
+  }
+
+  return { deathAge, finalScore };
+}
+
+function finishGame(gs: GameState, reason: 'finalRoundComplete' | 'allPlayersEliminated'): void {
+  if (gs.gamePhase === GamePhase.GameOver) return;
+
+  gs.gamePhase = GamePhase.GameOver;
+  gs.decisionPhase = null;
+  gs.globalPaydayPending = false;
+  gs.globalPaydayInProgress = false;
+  gs.finalRoundPendingPlayerIds = [];
+
+  const currentAge = Math.round(getCurrentAge(gs));
+  const finalScores = [...gs.players.values()].map((player) => {
+    const deathEvent = [...player.eventLog].reverse().find((event) => event.type === 'death');
+    const deathAge = player.isAlive
+      ? currentAge
+      : Number(deathEvent?.meta?.deathAge ?? Math.max(player.startAge ?? 20, currentAge));
+    return {
+      playerId: player.id,
+      playerName: player.name,
+      deathAge,
+      score: calculateLifeScore(player, deathAge),
+      isAlive: player.isAlive,
+      profession: player.profession.name,
+      quadrant: player.profession.quadrant,
+    };
+  }).sort((a, b) => b.score.total - a.score.total);
+
+  console.log(`[gameEnded] 房間 ${gs.gameId} 遊戲結束（${reason}）！`);
+  emitToRoom(gs.gameId, 'gameEnded', { reason, finalAge: currentAge, finalScores });
+  emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+}
+
+function startFinalRound(gs: GameState): void {
+  if (gs.finalRoundStarted || gs.gamePhase === GamePhase.GameOver) return;
+
+  const aliveIds = gs.playerOrder.filter((id) => gs.players.get(id)?.isAlive);
+  if (aliveIds.length === 0) {
+    finishGame(gs, 'allPlayersEliminated');
+    return;
+  }
+
+  const currentIndex = aliveIds.indexOf(gs.currentPlayerTurnId);
+  const orderedIds = currentIndex >= 0
+    ? [...aliveIds.slice(currentIndex), ...aliveIds.slice(0, currentIndex)]
+    : aliveIds;
+
+  gs.finalRoundStarted = true;
+  gs.finalRoundPendingPlayerIds = orderedIds;
+  gs.currentPlayerTurnId = orderedIds[0];
+  gs.globalPaydayPending = false;
+
+  emitToRoom(gs.gameId, 'finalRoundStarted', {
+    currentAge: getCurrentAge(gs),
+    finalAge: 100,
+    completedLifeRounds: gs.turnNumber,
+    playerOrder: orderedIds.map((id) => ({ id, name: gs.players.get(id)?.name ?? '' })),
+    firstPlayerId: orderedIds[0],
+    firstPlayerName: gs.players.get(orderedIds[0])?.name ?? '',
+  });
+  emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+}
+
 // ============================================================
 // 序列化工具
 // ============================================================
@@ -461,7 +622,7 @@ function logPlayerEvent(
  * 將 Player 轉換為可安全 JSON 序列化的純物件。
  * getter 值（totalIncome 等）需手動展開，Map 無法直接序列化。
  *
- * 第二個參數 gs 用來算 personalAge（顯示用個人年齡 = max(startAge, 全域時鐘)），
+ * 第二個參數 gs 用來算 personalAge（顯示用個人年齡 = max(startAge, 全體回合年齡)），
  * 讓所有前端讀同一個欄位即可，避免「進修玩家從 25 起算」與「全域時鐘 20」對不上。
  */
 function serializePlayer(p: Player, gs: GameState): object {
@@ -523,7 +684,8 @@ function serializePlayer(p: Player, gs: GameState): object {
     fastTrackPosition: p.fastTrackPosition,
     visitedDestinations: p.visitedDestinations ?? [],
     legacyBonusPoints: p.legacyBonusPoints ?? 0,
-    skipFirstPayday: p.skipFirstPayday ?? false,
+    taxPlanningCreditRate: p.taxPlanningCreditRate ?? 0,
+    educationTurnsToSkip: p.educationTurnsToSkip ?? 0,
     isDisconnected: p.isDisconnected ?? false,
     pre20Done: p.pre20Done,
     actionTokensThisPayday: p.actionTokensThisPayday,
@@ -556,10 +718,478 @@ function serializeGameState(gs: GameState): object {
     hasAdmin: gs.adminSocketId !== undefined,
     gameStartTime: gs.gameStartTime,
     gameDurationMs: gs.gameDurationMs,
+    remainingTimeMs: getRemainingActivityTimeMs(gs),
     isPaused: gs.pausedAt !== null,
     currentAge: Math.round(currentAge * 10) / 10,
     currentStage,
+    completedLifeRounds: gs.turnNumber,
+    yearsPerRound: YEARS_PER_COMPLETED_ROUND,
+    totalLifeRounds: TOTAL_LIFE_ROUNDS,
+    roundsSinceGlobalPayday: gs.roundsSinceGlobalPayday,
+    globalPaydayPending: gs.globalPaydayPending,
+    globalPaydayInProgress: gs.globalPaydayInProgress,
+    globalPaydayNumber: gs.globalPaydayNumber,
+    finalRoundStarted: gs.finalRoundStarted,
+    finalRoundPendingPlayerIds: gs.finalRoundPendingPlayerIds,
+    decisionPhase: gs.decisionPhase,
   };
+}
+
+function executeTravelAction(socket: Socket, gs: GameState, player: Player, destinationId: string): void {
+  const cashBefore = player.cash;
+  const cashflowBefore = player.monthlyCashflow;
+  const netWorthBefore = calcNetWorth(player);
+  const result = goTravel(player, destinationId);
+  socket.emit('travelResult', result);
+
+  if (!result.success) return;
+
+  logPlayerEvent(
+    player,
+    gs,
+    'travel',
+    `前往「${result.destination?.name ?? destinationId}」（體驗值 +${result.lifeExperienceGained}）`,
+    cashBefore,
+    cashflowBefore,
+    netWorthBefore,
+    { lifeExpGained: result.lifeExperienceGained },
+  );
+  console.log(`[travel] ${player.name}（${gs.gameId}）前往 ${result.destination?.name}！體驗值 +${result.lifeExperienceGained}`);
+  emitToRoom(gs.gameId, 'playerTraveled', {
+    playerId: player.id,
+    playerName: player.name,
+    destinationName: result.destination?.name,
+    destinationRegion: result.destination?.region,
+    lifeExperienceGained: result.lifeExperienceGained,
+    statEffect: result.destination?.statEffect,
+    travelPenaltyRemaining: player.travelPenaltyRemaining,
+  });
+  emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+}
+
+function executeSocialAction(socket: Socket, gs: GameState, player: Player): void {
+  const currentAge = getCurrentAge(gs);
+  const result = attendSocialEvent(player, currentAge);
+  socket.emit('socialEventResult', result);
+
+  if (!result.success) return;
+
+  const { RELATIONSHIP_MARRIAGE_THRESHOLD: threshold } = require('./gameConfig');
+  if (
+    result.newRelationshipPoints !== undefined &&
+    result.newRelationshipPoints >= threshold &&
+    !player.isMarried
+  ) {
+    socket.emit('marriageThresholdReached', {
+      playerId: player.id,
+      relationshipPoints: result.newRelationshipPoints,
+      threshold,
+    });
+  }
+  emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+}
+
+function applyPartnershipBenefits(gs: GameState, offeror: Player, target: Player): number {
+  offeror.lifeExperience += 15;
+  target.lifeExperience += 15;
+
+  const passiveSum = offeror.totalPassiveIncome + target.totalPassiveIncome;
+  const dividend = Math.max(3_000, Math.min(50_000, Math.round(passiveSum * 0.03)));
+  offeror.cash += dividend;
+  target.cash += dividend;
+
+  logPlayerEvent(
+    offeror, gs, 'asset_buy',
+    `🤝 與 ${target.name} 合夥分紅 +$${dividend.toLocaleString()}（雙方被動收入總和 $${passiveSum.toLocaleString()}）`,
+    offeror.cash - dividend, offeror.monthlyCashflow, calcNetWorth(offeror) - dividend,
+    { partnerId: target.id, partnerName: target.name, dividend },
+  );
+  logPlayerEvent(
+    target, gs, 'asset_buy',
+    `🤝 與 ${offeror.name} 合夥分紅 +$${dividend.toLocaleString()}（雙方被動收入總和 $${passiveSum.toLocaleString()}）`,
+    target.cash - dividend, target.monthlyCashflow, calcNetWorth(target) - dividend,
+    { partnerId: offeror.id, partnerName: offeror.name, dividend },
+  );
+
+  emitToRoom(gs.gameId, 'partnershipAccepted', {
+    offerorId: offeror.id,
+    offerorName: offeror.name,
+    targetId: target.id,
+    targetName: target.name,
+    dividend,
+    passiveSum,
+  });
+  return dividend;
+}
+
+/**
+ * 進修者以少一次人生行動換取較高起點。這裡直接自動交棒，避免玩家還要
+ * 在手機按一次擲骰才知道本輪被跳過。回合仍視為完成，會正常計入全體年齡。
+ */
+function skipCurrentEducationTurns(gs: GameState): void {
+  let safety = gs.playerOrder.length;
+
+  while (safety > 0) {
+    const player = gs.players.get(gs.currentPlayerTurnId);
+    if (!player?.isAlive || !consumeEducationTurn(player)) return;
+
+    io.sockets.sockets.get(player.id)?.emit('turnSkipped', {
+      playerId: player.id,
+      reason: 'education',
+      turnsRemaining: player.educationTurnsToSkip,
+    });
+    emitToRoom(gs.gameId, 'educationTurnSkipped', {
+      playerId: player.id,
+      playerName: player.name,
+      careerStartAge: player.startAge,
+    });
+    emitToRoom(gs.gameId, 'cellEventBroadcast', {
+      playerId: player.id,
+      playerName: player.name,
+      cellName: '繼續進修',
+      message: `📚 ${player.name} 正在完成進修，本人生回合暫停行動；下次將從 ${player.startAge} 歲職涯起點出發。`,
+      ts: Date.now(),
+    });
+    console.log(`[education] ${player.name}（${gs.gameId}）完成進修延後回合，自動交棒`);
+
+    gs.advanceToNextTurn();
+    safety -= 1;
+  }
+}
+
+/**
+ * 推進回合的唯一入口。完成第三個完整桌次輪後，立即鎖住擲骰並啟動
+ * 全體季度發薪；實際規劃仍由主持人逐位收束。
+ */
+function advanceTurn(gs: GameState): void {
+  if (gs.gamePhase === GamePhase.GameOver) return;
+  gs.advanceToNextTurn();
+  skipCurrentEducationTurns(gs);
+
+  if (gs.finalRoundStarted && gs.finalRoundPendingPlayerIds.length === 0) {
+    finishGame(gs, 'finalRoundComplete');
+    return;
+  }
+
+  if (!gs.finalRoundStarted && gs.turnNumber >= FINAL_ROUND_START_COMPLETED_ROUNDS) {
+    startFinalRound(gs);
+    return;
+  }
+
+  if (
+    gs.globalPaydayPending &&
+    !gs.globalPaydayInProgress &&
+    !gs.finalRoundStarted
+  ) {
+    gs.globalPaydayInProgress = true;
+    void runGlobalPayday(gs).catch((error) => {
+      console.error(`[globalPayday] 房間 ${gs.gameId} 季度結算失敗：`, error);
+      gs.globalPaydayPending = false;
+      gs.globalPaydayInProgress = false;
+      gs.decisionPhase = null;
+      if (gs.pausedAt !== null) resumeGameClock(gs);
+      emitToRoom(gs.gameId, 'globalPaydayFailed', { message: '季度發薪發生錯誤，已解除流程鎖定。' });
+      emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+    });
+  }
+}
+
+function getQuarterTravelDestinations(player: Player): Array<{
+  id: string; name: string; region: string; cost: number; lifeExpGained: number; salaryPenalty: number;
+}> {
+  const { TRAVEL_DESTINATIONS } = require('./gameConfig') as typeof import('./gameConfig');
+  return TRAVEL_DESTINATIONS
+    .filter((destination) => {
+      if (destination.tier === 'both') return true;
+      return destination.tier === (player.isInFastTrack ? 'outer' : 'inner');
+    })
+    .filter(() => player.stats.health >= HP_ACTIVITY_THRESHOLDS.travel)
+    .map((destination) => ({
+      id: destination.id,
+      name: destination.name,
+      region: destination.region,
+      cost: destination.cost,
+      lifeExpGained: destination.lifeExpGained,
+      salaryPenalty: destination.salaryPenalty,
+    }));
+}
+
+function emitQuarterMilestones(
+  socket: Socket,
+  gs: GameState,
+  player: Player,
+  planResult: ReturnType<typeof applyPaydayPlan>,
+): void {
+  if (player.stats.careerSkill >= SKILL_CAREER_CHANGE_THRESHOLD) {
+    socket.emit('careerChangeUnlocked', {
+      message: '恭喜！你的第二專長已達到頂峰，可以轉職了！',
+      availableProfessions: buildAvailableProfessions(player),
+    });
+    if (planResult.careerChangeUnlocked) {
+      emitToRoom(gs.gameId, 'milestoneAnnounced', {
+        playerId: player.id,
+        playerName: player.name,
+        milestone: '轉職解鎖',
+        description: `${player.name} 的技能值達到頂峰，可以轉職了！`,
+      });
+    }
+  }
+
+  const ntLabels: Record<number, string> = {
+    3: '人脈護盾解鎖 — 危機時可豁免一次！',
+    5: '交易加持解鎖 — 落地交易格可抽 2 張牌！',
+    8: '人脈大師 — 達成成就！',
+  };
+  for (const nt of planResult.ntMilestonesUnlocked ?? []) {
+    emitCellEvent(socket, gs.gameId, player.name, `NT ${nt} 達成`, `🌐 ${ntLabels[nt] ?? ''}`);
+    emitToRoom(gs.gameId, 'milestoneAnnounced', {
+      playerId: player.id,
+      playerName: player.name,
+      milestone: `NT ${nt}`,
+      description: `${player.name} 人脈值達到 ${nt}！${ntLabels[nt] ?? ''}`,
+    });
+  }
+}
+
+/** 將季度中的三個月逐月入帳，保留月支出、複利、年度稅與健康衰退。 */
+function settleQuarterMonths(
+  socket: Socket | undefined,
+  gs: GameState,
+  player: Player,
+  maintenanceCovered: boolean,
+): void {
+  for (let month = 1; month <= MONTHS_PER_GLOBAL_PAYDAY; month += 1) {
+    const cashBefore = player.cash;
+    const cashflowBefore = player.monthlyCashflow;
+    const netWorthBefore = calcNetWorth(player);
+    const dcaAsset = player.assets.find((asset) => asset.id === 'stock-dca');
+    let dcaDividend = 0;
+
+    if (dcaAsset) {
+      const valueBeforeGrowth = dcaAsset.currentValue ?? dcaAsset.cost;
+      dcaDividend = Math.round(valueBeforeGrowth * STOCK_DCA_MONTHLY_DIVIDEND_RATE);
+      dcaAsset.monthlyCashflow = dcaDividend;
+    }
+
+    triggerPayday(player, gs, maintenanceCovered);
+    logPlayerEvent(
+      player,
+      gs,
+      'payday',
+      `第 ${gs.globalPaydayNumber + 1} 季・第 ${month} 月結算（累計第 ${player.paydayCount} 月）`,
+      cashBefore,
+      cashflowBefore,
+      netWorthBefore,
+      { globalPaydayNumber: gs.globalPaydayNumber + 1, monthInQuarter: month },
+    );
+
+    if (dcaAsset) {
+      const previousValue = dcaAsset.currentValue ?? dcaAsset.cost;
+      dcaAsset.currentValue = Math.round(previousValue * (1 + STOCK_DCA_MONTHLY_RETURN_RATE));
+    }
+
+    if (!player.profession.hasFlexibleSchedule) player.actionTokensThisPayday = 1;
+
+    const { triggered, taxResult } = checkAndApplyAnnualTax(player);
+    if (triggered && taxResult) {
+      emitToRoom(gs.gameId, 'annualTaxResult', {
+        playerId: player.id,
+        playerName: player.name,
+        year: player.paydayCount / 12,
+        annualIncome: taxResult.annualIncome,
+        deductions: taxResult.deductions,
+        taxableIncome: taxResult.taxableIncome,
+        taxBeforeCredit: taxResult.taxBeforeCredit,
+        taxCreditRate: taxResult.taxCreditRate,
+        taxCreditAmount: taxResult.taxCreditAmount,
+        taxAmount: taxResult.taxAmount,
+        bracketBreakdown: taxResult.bracketBreakdown,
+        cashAfterTax: player.cash,
+      });
+    }
+  }
+
+  if (player.isInFastTrack) {
+    const bonus = applyFastTrackPaydayBonus(player);
+    applyFastTrackAppreciation(player);
+    emitToRoom(gs.gameId, 'fastTrackPayday', {
+      playerId: player.id,
+      playerName: player.name,
+      cashflow: player.monthlyCashflow * MONTHS_PER_GLOBAL_PAYDAY,
+      bonus,
+      cashAfter: player.cash,
+    });
+  }
+
+  const justBedridden = checkBedriddenStatus(player);
+  if (justBedridden) {
+    emitToRoom(gs.gameId, 'playerBedridden', {
+      playerId: player.id,
+      playerName: player.name,
+      age: Math.round(getCurrentAge(gs)),
+    });
+  }
+
+  if (socket && player.isAlive) {
+    checkLifeMilestones(player, gs, gs.gameId, socket);
+    checkBucketGoals(player, gs, gs.gameId, socket);
+  }
+}
+
+/** 每三個完整回合觸發一次；全員依回合順序逐位完成同一季的規劃與結算。 */
+async function runGlobalPayday(gs: GameState): Promise<void> {
+  const roomId = gs.gameId;
+  const wasPaused = gs.pausedAt !== null;
+  if (!wasPaused) pauseGameClock(gs);
+
+  gs.globalPaydayPending = false;
+  const playerIds = gs.playerOrder.filter((id) => gs.players.get(id)?.isAlive);
+
+  emitToRoom(roomId, 'globalPaydayStarted', {
+    globalPaydayNumber: gs.globalPaydayNumber + 1,
+    settlementMonths: MONTHS_PER_GLOBAL_PAYDAY,
+    playerCount: playerIds.length,
+  });
+  emitToRoom(roomId, 'gamePaused', {
+    reason: `第 ${gs.globalPaydayNumber + 1} 季全體發薪`,
+    currentAge: Math.round(getCurrentAge(gs) * 10) / 10,
+    controlledByHost: true,
+  });
+  emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+
+  for (const [index, playerId] of playerIds.entries()) {
+    const player = gs.players.get(playerId);
+    if (!player?.isAlive) continue;
+
+    const playerSocket = io.sockets.sockets.get(player.id);
+    const emptyPlan: PaydayPlanPayload = {
+      investInFQUpgrade: false,
+      investInHealthMaintenance: false,
+      investInHealthBoost: false,
+      investInSkillTraining: false,
+      investInNetwork: false,
+      stockDCAAmount: 0,
+      buyInsuranceTypes: [],
+      settlementMonths: MONTHS_PER_GLOBAL_PAYDAY,
+    };
+    let plan = emptyPlan;
+
+    emitToRoom(roomId, 'globalPaydayPlayerTurn', {
+      playerId: player.id,
+      playerName: player.name,
+      playerIndex: index + 1,
+      playerCount: playerIds.length,
+      globalPaydayNumber: gs.globalPaydayNumber + 1,
+    });
+
+    if (playerSocket && !player.isDisconnected) {
+      const decisionContext = beginHostDecisionPhase(
+        gs,
+        player,
+        'payday',
+        `第 ${gs.globalPaydayNumber + 1} 季發薪規劃（${index + 1}/${playerIds.length}）`,
+      );
+      player.paydayPlanningPending = true;
+
+      emitToRoom(roomId, 'paydayPlanningStarted', {
+        paydayPosition: -1,
+        settlementCount: MONTHS_PER_GLOBAL_PAYDAY,
+        settlementMonths: MONTHS_PER_GLOBAL_PAYDAY,
+        globalPayday: true,
+        globalPaydayNumber: gs.globalPaydayNumber + 1,
+        currentPlayerId: player.id,
+        currentPlayerName: player.name,
+        currentAge: Math.round(getCurrentAge(gs) * 10) / 10,
+        timeoutMs: 0,
+        controlledByHost: true,
+      });
+
+      playerSocket.emit('paydayPlanningRequired', {
+        paydayPosition: -1,
+        paydayIndex: index + 1,
+        totalPaydays: playerIds.length,
+        combinedPlanning: true,
+        settlementMonths: MONTHS_PER_GLOBAL_PAYDAY,
+        globalPayday: true,
+        globalPaydayNumber: gs.globalPaydayNumber + 1,
+        currentStats: player.stats,
+        currentCash: player.cash,
+        affordableOptions: buildAffordableOptions(player, MONTHS_PER_GLOBAL_PAYDAY),
+        currentInsurance: player.insurance,
+        stockDCAPortfolioValue: player.assets.find((asset) => asset.id === 'stock-dca')?.currentValue ?? 0,
+        travelDestinations: getQuarterTravelDestinations(player),
+        timeoutMs: 0,
+        controlledByHost: true,
+        marketTip: null,
+      });
+
+      plan = await waitForHostControlledDecision(
+        playerSocket,
+        gs,
+        decisionContext,
+        'submitPaydayPlan',
+        emptyPlan,
+      );
+    }
+
+    const quarterlyPlan = { ...plan, settlementMonths: MONTHS_PER_GLOBAL_PAYDAY };
+    const planResult = applyPaydayPlan(player, quarterlyPlan);
+    const maintenanceCovered =
+      planResult.investments.healthBoost.executed ||
+      planResult.investments.healthMaintenance.executed;
+
+    if (playerSocket) {
+      if (quarterlyPlan.lifeChoice?.type === 'travel') {
+        executeTravelAction(playerSocket, gs, player, quarterlyPlan.lifeChoice.destinationId);
+      } else if (quarterlyPlan.lifeChoice?.type === 'social') {
+        executeSocialAction(playerSocket, gs, player);
+      }
+      emitQuarterMilestones(playerSocket, gs, player, planResult);
+    }
+
+    settleQuarterMonths(playerSocket, gs, player, maintenanceCovered);
+    player.paydayPlanningPending = false;
+
+    emitToRoom(roomId, 'paydayPlanResult', {
+      playerId: player.id,
+      playerName: player.name,
+      paydayPosition: -1,
+      settlementCount: MONTHS_PER_GLOBAL_PAYDAY,
+      settlementMonths: MONTHS_PER_GLOBAL_PAYDAY,
+      globalPayday: true,
+      globalPaydayNumber: gs.globalPaydayNumber + 1,
+      planResult,
+    });
+    emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+  }
+
+  gs.roundsSinceGlobalPayday = 0;
+  gs.globalPaydayNumber += 1;
+  gs.globalPaydayInProgress = false;
+
+  emitToRoom(roomId, 'globalPaydayCompleted', {
+    globalPaydayNumber: gs.globalPaydayNumber,
+    settlementMonths: MONTHS_PER_GLOBAL_PAYDAY,
+    nextPlayer: (() => {
+      const player = gs.players.get(gs.currentPlayerTurnId);
+      if (!player) return undefined;
+      return {
+        id: player.id,
+        name: player.name,
+        professionName: player.profession.name,
+        colorIndex: Math.max(0, gs.playerOrder.indexOf(player.id)),
+      };
+    })(),
+  });
+
+  if (!wasPaused && gs.pausedAt !== null) {
+    resumeGameClock(gs);
+    emitToRoom(roomId, 'gameResumed', {
+      resumedAt: new Date(),
+      currentAge: Math.round(getCurrentAge(gs) * 10) / 10,
+    });
+  }
+  emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
 }
 
 // ============================================================
@@ -634,6 +1264,10 @@ io.on('connection', (socket: Socket) => {
     }
     if (socket.id !== gs.adminSocketId) {
       socket.emit('error', { message: '只有建立此房間的主持人才能刪除它。' });
+      return;
+    }
+    if (gs.decisionPhase) {
+      socket.emit('error', { message: '請先由主持人結束目前的決策階段，再關閉房間。' });
       return;
     }
 
@@ -787,6 +1421,9 @@ io.on('connection', (socket: Socket) => {
         const orderIdx = gs.playerOrder.indexOf(existingSocketId);
         if (orderIdx !== -1) gs.playerOrder[orderIdx] = socket.id;
         if (gs.currentPlayerTurnId === existingSocketId) gs.currentPlayerTurnId = socket.id;
+        gs.finalRoundPendingPlayerIds = gs.finalRoundPendingPlayerIds.map((id) =>
+          id === existingSocketId ? socket.id : id
+        );
 
         socket.join(roomCode);
         socketRoomMap.set(socket.id, roomCode);
@@ -833,7 +1470,7 @@ io.on('connection', (socket: Socket) => {
   // 玩家擲骰 (playerRoll)
   // ----------------------------------------------------------
   /**
-   * Client → Server: { diceCount?: 1 | 2 }   預設 1 顆骰子
+   * Client → Server: { diceCount?: 1 | 2 }   預設 2 顆骰子
    */
   socket.on(
     'playerRoll',
@@ -841,6 +1478,16 @@ io.on('connection', (socket: Socket) => {
       const gs = getRoomState(socket);
       if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
       const roomId = gs.gameId;
+
+      if (gs.gamePhase === GamePhase.GameOver) {
+        socket.emit('error', { message: '遊戲已結束，請進入復盤。' });
+        return;
+      }
+
+      if (gs.pausedAt !== null || gs.decisionPhase || gs.globalPaydayPending || gs.globalPaydayInProgress) {
+        socket.emit('error', { message: '目前由主持人控制流程，請等待主持人繼續遊戲。' });
+        return;
+      }
 
       // --- 1. 回合驗證 ---
       if (socket.id !== gs.currentPlayerTurnId) {
@@ -859,31 +1506,14 @@ io.on('connection', (socket: Socket) => {
       if (player.isBedridden) {
         const died = checkBedriddenDeath(player);
         if (died) {
-          const deathAge = Math.round(getCurrentAge(gs));
-          const finalScore = calculateLifeScore(player, deathAge);
-          handlePlayerDeath(player, gs);
+          const { deathAge, finalScore } = eliminatePlayer(
+            player,
+            gs,
+            'bedridden',
+            '長期臥床後自然死亡',
+          );
 
           console.log(`[bedridden] ${player.name} 臥床自然死亡（${deathAge} 歲），人生評分：${finalScore.total} 分`);
-
-          emitToRoom(roomId, 'playerFinalScore', {
-            playerId: player.id,
-            playerName: player.name,
-            deathAge,
-            cause: 'bedridden',
-            score: finalScore,
-            profession: player.profession.name,
-            quadrant: player.profession.quadrant,
-            isMarried: player.isMarried,
-            numberOfChildren: player.numberOfChildren,
-            lifeExperience: player.lifeExperience,
-          });
-
-          emitToRoom(roomId, 'playerEliminated', {
-            playerId: player.id,
-            playerName: player.name,
-            deathAge,
-            cause: 'bedridden',
-          });
 
           emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
         } else {
@@ -893,7 +1523,7 @@ io.on('connection', (socket: Socket) => {
             turnsRemaining: 0,
           });
         }
-        gs.advanceToNextTurn();
+        advanceTurn(gs);
         emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
         return;
       }
@@ -906,13 +1536,14 @@ io.on('connection', (socket: Socket) => {
           reason: 'crisis',
           turnsRemaining: player.turnsToSkip,
         });
-        gs.advanceToNextTurn();
+        advanceTurn(gs);
         emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
         return;
       }
 
       // --- 2. 擲骰 & 移動（含 bonusDice 加成）---
-      const baseDice = payload?.diceCount ?? 1;
+      // 未指定時預設使用兩顆骰子，加快棋盤推進；玩家仍可主動選一顆精準移動。
+      const baseDice = payload?.diceCount ?? 2;
       const diceCount = Math.min(3, baseDice + player.bonusDice) as 1 | 2 | 3;
       player.bonusDice = 0;
 
@@ -958,12 +1589,15 @@ io.on('connection', (socket: Socket) => {
         isInFastTrack: wasInFastTrack,
       });
 
-      // --- 3–4. 每個發薪日：暫停時鐘 → 全員規劃 → 發薪 → 繳稅 ---
+      // --- 3–4. 本回合只規劃一次；跨越幾個發薪日，就依序結算幾次 ---
       if (requiresPaydayPlanning) {
+        let maintenanceDoneForThisTurn = false;
         for (const [paydayIdx, paydayPos] of passedPaydays.entries()) {
-          pauseGameClock(gs);
-          gs.paydayPlanningConfirmed.clear();
-          emitToRoom(roomId, 'gamePaused', { reason: '發薪日規劃', currentAge: Math.round(getCurrentAge(gs) * 10) / 10 });
+          if (paydayIdx === 0) {
+          const decisionTitle = passedPaydays.length > 1
+            ? `發薪日規劃（本回合 ${passedPaydays.length} 次結算）`
+            : '發薪日規劃';
+          const decisionContext = beginHostDecisionPhase(gs, player, 'payday', decisionTitle);
 
           player.paydayPlanningPending = true;
           emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
@@ -972,8 +1606,11 @@ io.on('connection', (socket: Socket) => {
 
           emitToRoom(roomId, 'paydayPlanningStarted', {
             paydayPosition: paydayPos,
+            paydayPositions: passedPaydays,
+            settlementCount: passedPaydays.length,
             currentAge: Math.round(getCurrentAge(gs) * 10) / 10,
-            timeoutMs: PAYDAY_PLANNING_TIMEOUT_MS,
+            timeoutMs: 0,
+            controlledByHost: true,
           });
 
           // 取出符合玩家當前圈別與 HP 門檻的旅遊目的地，提供給發薪日表單顯示
@@ -1016,34 +1653,58 @@ io.on('connection', (socket: Socket) => {
 
           socket.emit('paydayPlanningRequired', {
             paydayPosition: paydayPos,
-            paydayIndex: paydayIdx + 1,
+            paydayIndex: 1,
             totalPaydays: passedPaydays.length,
+            combinedPlanning: passedPaydays.length > 1,
             currentStats: player.stats,
             currentCash: player.cash,
             affordableOptions,
             currentInsurance: player.insurance,
             stockDCAPortfolioValue: player.assets.find((a) => a.id === 'stock-dca')?.currentValue ?? 0,
             travelDestinations: eligibleDestinations,
-            timeoutMs: PAYDAY_PLANNING_TIMEOUT_MS,
+            timeoutMs: 0,
+            controlledByHost: true,
             marketTip,
           });
 
-          const plan = await waitForPaydayPlan(socket, player);
+          const emptyPlan: PaydayPlanPayload = {
+            investInFQUpgrade: false,
+            investInHealthMaintenance: false,
+            investInHealthBoost: false,
+            investInSkillTraining: false,
+            investInNetwork: false,
+            stockDCAAmount: 0,
+            buyInsuranceTypes: [],
+          };
+          const plan = await waitForHostControlledDecision(
+            socket,
+            gs,
+            decisionContext,
+            'submitPaydayPlan',
+            emptyPlan,
+          );
 
           const planResult = applyPaydayPlan(player, plan);
-          const maintenanceDone =
+          maintenanceDoneForThisTurn =
             planResult.investments.healthBoost.executed ||
             planResult.investments.healthMaintenance.executed;
 
           player.paydayPlanningPending = false;
-          gs.paydayPlanningConfirmed.add(player.id);
-
           emitToRoom(roomId, 'paydayPlanResult', {
             playerId: player.id,
             playerName: player.name,
             paydayPosition: paydayPos,
+            paydayPositions: passedPaydays,
+            settlementCount: passedPaydays.length,
             planResult,
           });
+
+          // 生活行動也是本次私人決策的一部分，必須等主持人收束後才執行與公開。
+          if (plan.lifeChoice?.type === 'travel') {
+            executeTravelAction(socket, gs, player, plan.lifeChoice.destinationId);
+          } else if (plan.lifeChoice?.type === 'social') {
+            executeSocialAction(socket, gs, player);
+          }
 
           if (player.stats.careerSkill >= SKILL_CAREER_CHANGE_THRESHOLD) {
             socket.emit('careerChangeUnlocked', {
@@ -1076,26 +1737,11 @@ io.on('connection', (socket: Socket) => {
               description: desc,
             });
           }
-
-          await waitForAllPlanningDone(gs, PAYDAY_PLANNING_TIMEOUT_MS);
-
-          resumeGameClock(gs);
-          emitToRoom(roomId, 'gameResumed', {
-            resumedAt: new Date(),
-            currentAge: Math.round(getCurrentAge(gs) * 10) / 10,
-          });
+          }
 
           const _pdCashBefore = player.cash;
           const _pdFlowBefore = player.monthlyCashflow;
           const _pdNWBefore = calcNetWorth(player);
-
-          // 進修代價：跳過第一個發薪日
-          if (player.skipFirstPayday) {
-            player.skipFirstPayday = false;
-            socket.emit('paydaySkipped', { reason: '你正在進修，跳過這個回合' });
-            emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
-            continue;  // 跳過本次發薪日其餘處理，但繼續執行後續流程（advanceToNextTurn 等）
-          }
 
           // 股票定期定額：發薪日「先算股息（進入 totalIncome）」→ payday 結算 → 後算增值
           // 設計：dcaAsset.monthlyCashflow = currentValue × dividendRate，
@@ -1110,7 +1756,7 @@ io.on('connection', (socket: Socket) => {
             dcaAsset.monthlyCashflow = dcaDividend;
           }
 
-          triggerPayday(player, gs, maintenanceDone);
+          triggerPayday(player, gs, maintenanceDoneForThisTurn);
           logPlayerEvent(player, gs, 'payday', `發薪日（第 ${player.paydayCount} 次）`, _pdCashBefore, _pdFlowBefore, _pdNWBefore);
 
           // 增值部分（不影響現金，只動 currentValue）
@@ -1146,10 +1792,13 @@ io.on('connection', (socket: Socket) => {
             emitToRoom(roomId, 'annualTaxResult', {
               playerId: player.id,
               playerName: player.name,
-              year: player.paydayCount / 4,
+              year: player.paydayCount / 12,
               annualIncome: taxResult.annualIncome,
               deductions: taxResult.deductions,
               taxableIncome: taxResult.taxableIncome,
+              taxBeforeCredit: taxResult.taxBeforeCredit,
+              taxCreditRate: taxResult.taxCreditRate,
+              taxCreditAmount: taxResult.taxCreditAmount,
               taxAmount: taxResult.taxAmount,
               bracketBreakdown: taxResult.bracketBreakdown,
               cashAfterTax: player.cash,
@@ -1164,7 +1813,7 @@ io.on('connection', (socket: Socket) => {
       // ⚠ 玩家可能在 handleLandingSquare 中因危機/疾病死亡，
       //   後續 FastTrack 解鎖、增值、advanceToNextTurn 邏輯需要 isAlive 守衛
       if (!player.isAlive) {
-        gs.advanceToNextTurn();
+        advanceTurn(gs);
         emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
         return;
       }
@@ -1184,11 +1833,21 @@ io.on('connection', (socket: Socket) => {
         }
       }
 
-      if (!player.isInFastTrack && player.hasPassedSecondLife && checkRatRaceEscape(player)) {
-        console.log(`[ratRace] ${player.name}（${roomId}）脫出老鼠賽跑！`);
+      const secondLifeEligibility = evaluateSecondLifeEligibility(player);
+      if (!player.isInFastTrack && player.hasPassedSecondLife && secondLifeEligibility.eligible) {
+        const escapeRouteLabel = secondLifeEligibility.route === 'balancedLife'
+          ? '平衡人生'
+          : '財務突破';
+        const achievedLifeIndicators = secondLifeEligibility.indicators
+          .filter((indicator) => indicator.achieved)
+          .map((indicator) => indicator.label);
+        console.log(`[ratRace] ${player.name}（${roomId}）透過「${escapeRouteLabel}」進入第二人生！`);
         const _rrCB = player.cash; const _rrFB = player.monthlyCashflow; const _rrNWB = calcNetWorth(player);
         player.isInFastTrack = true;
-        gs.gamePhase = GamePhase.FastTrack;
+        const allAlivePlayersAreInFastTrack = [...gs.players.values()]
+          .filter((candidate) => candidate.isAlive)
+          .every((candidate) => candidate.isInFastTrack);
+        if (allAlivePlayersAreInFastTrack) gs.gamePhase = GamePhase.FastTrack;
         addLifeExperience(player, LIFE_EXP.FAST_TRACK_ENTER);
 
         // B1：進入外圈時隨機抽 3 個人生夢想目標
@@ -1206,12 +1865,36 @@ io.on('connection', (socket: Socket) => {
             cashReward: g.cashReward ?? 0,
           }));
 
-        logPlayerEvent(player, gs, 'rat_race_escaped', `脫出老鼠賽跑！被動收入 $${player.totalPassiveIncome.toLocaleString()} ≥ 支出 $${player.totalExpenses.toLocaleString()}`, _rrCB, _rrFB, _rrNWB, { passiveIncome: player.totalPassiveIncome, totalExpenses: player.totalExpenses });
+        logPlayerEvent(
+          player,
+          gs,
+          'rat_race_escaped',
+          `進入第二人生（${escapeRouteLabel}）：有效被動收入 $${secondLifeEligibility.effectivePassiveIncome.toLocaleString()}，完成人生指標 ${achievedLifeIndicators.join('、')}`,
+          _rrCB,
+          _rrFB,
+          _rrNWB,
+          {
+            escapeRoute: secondLifeEligibility.route,
+            escapeRouteLabel,
+            passiveIncome: secondLifeEligibility.rawPassiveIncome,
+            effectivePassiveIncome: secondLifeEligibility.effectivePassiveIncome,
+            totalExpenses: secondLifeEligibility.totalExpenses,
+            coverageRatio: secondLifeEligibility.coverageRatio,
+            achievedIndicatorCount: secondLifeEligibility.achievedIndicatorCount,
+            indicators: secondLifeEligibility.indicators,
+            financialBreakthroughMet: secondLifeEligibility.financialBreakthroughMet,
+            balancedLifeMet: secondLifeEligibility.balancedLifeMet,
+          },
+        );
         emitToRoom(roomId, 'ratRaceEscaped', {
           playerId: player.id,
           playerName: player.name,
-          monthlyPassiveIncome: player.totalPassiveIncome,
-          totalExpenses: player.totalExpenses,
+          route: secondLifeEligibility.route,
+          routeLabel: escapeRouteLabel,
+          monthlyPassiveIncome: secondLifeEligibility.rawPassiveIncome,
+          effectivePassiveIncome: secondLifeEligibility.effectivePassiveIncome,
+          totalExpenses: secondLifeEligibility.totalExpenses,
+          achievedLifeIndicators,
           lifeExpGained: LIFE_EXP.FAST_TRACK_ENTER,
           canCongratulate: true,   // 前端可顯示祝賀按鈕
           bucketList: goalDetails,
@@ -1237,7 +1920,7 @@ io.on('connection', (socket: Socket) => {
       }
 
       // --- 6. 廣播最終遊戲狀態 & 推進回合 ---
-      gs.advanceToNextTurn();
+      advanceTurn(gs);
       emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
     } catch (err) {
       console.error(`[playerRoll] 未預期錯誤：`, err);
@@ -1255,24 +1938,52 @@ io.on('connection', (socket: Socket) => {
   );
 
   // ----------------------------------------------------------
-  // 非當前玩家確認發薪日規劃完成 (planningDone)
+  // 主持人收束目前決策階段
   // ----------------------------------------------------------
-  socket.on('planningDone', () => {
+  socket.on('continueDecisionPhase', (payload?: { phaseId?: string }) => {
     const gs = getRoomState(socket);
-    if (!gs) return;
+    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (socket.id !== gs.adminSocketId) {
+      socket.emit('error', { message: '只有主持人可以結束決策階段。' });
+      return;
+    }
 
-    const player = gs.players.get(socket.id);
-    if (!player || !player.isAlive) return;
+    const waiter = decisionReleaseWaiters.get(gs.gameId);
+    if (!gs.decisionPhase || !waiter) {
+      socket.emit('error', { message: '目前沒有等待中的決策。' });
+      return;
+    }
+    if (payload?.phaseId && payload.phaseId !== waiter.phaseId) {
+      socket.emit('error', { message: '決策階段已更新，請重新操作。' });
+      return;
+    }
 
-    gs.paydayPlanningConfirmed.add(socket.id);
-    console.log(`[planningDone] ${player.name}（${gs.gameId}）確認完成規劃（${gs.paydayPlanningConfirmed.size}/${countAlivePlayers(gs)} 人）`);
+    waiter.release();
+  });
 
-    emitToRoom(gs.gameId, 'playerPlanningConfirmed', {
-      playerId: player.id,
-      playerName: player.name,
-      confirmedCount: gs.paydayPlanningConfirmed.size,
-      totalAlive: countAlivePlayers(gs),
-    });
+  // 倒數只作為全場節奏提醒；歸零不會自動替玩家選擇或結束階段。
+  socket.on('setDecisionReminder', (payload?: { phaseId?: string; seconds?: number; addSeconds?: number }) => {
+    const gs = getRoomState(socket);
+    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (socket.id !== gs.adminSocketId) {
+      socket.emit('error', { message: '只有主持人可以調整決策倒數。' });
+      return;
+    }
+    const phase = gs.decisionPhase;
+    if (!phase || (payload?.phaseId && payload.phaseId !== phase.id)) {
+      socket.emit('error', { message: '目前的決策階段已更新。' });
+      return;
+    }
+
+    if (typeof payload?.addSeconds === 'number') {
+      const base = Math.max(Date.now(), phase.reminderEndsAt);
+      phase.reminderEndsAt = base + Math.max(0, Math.min(300, payload.addSeconds)) * 1000;
+    } else {
+      const seconds = Math.max(10, Math.min(300, payload?.seconds ?? 60));
+      phase.reminderEndsAt = Date.now() + seconds * 1000;
+    }
+    emitToRoom(gs.gameId, 'decisionPhaseUpdated', phase);
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 
   // ----------------------------------------------------------
@@ -1588,11 +2299,11 @@ io.on('connection', (socket: Socket) => {
 
   // ----------------------------------------------------------
   // 觸發特殊拍賣 (triggerSpecialAuction) — 主持人專用
-  // 從 SPECIAL_AUCTION_DEALS 牌組隨機抽 1 張，廣播給所有玩家進入 30 秒競標。
+  // 從 SPECIAL_AUCTION_DEALS 牌組隨機抽 1 張，廣播給所有玩家競標；結束時機由主持人控制。
   // 起標金額 = downPayment ?? cost；得標者扣現金後該資產直接寫入持有，
   // 起標金額會以「無主來源」（沒有原持有者）銷毀，等同新發行的特殊資產。
   // ----------------------------------------------------------
-  socket.on('triggerSpecialAuction', (payload: { roomId?: string; cardId?: string }) => {
+  socket.on('triggerSpecialAuction', async (payload: { roomId?: string; cardId?: string }) => {
     const gs = (payload?.roomId ? rooms.get(payload.roomId) : null) ?? getRoomState(socket);
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
@@ -1622,8 +2333,7 @@ io.on('connection', (socket: Socket) => {
     if (!gs.activeAuctions) gs.activeAuctions = {};
     const minBid = auctionCard.asset.downPayment ?? auctionCard.asset.cost ?? 0;
     const auctionId = `special-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const durationMs = 30_000;
-    const auctionEndTime = Date.now() + durationMs;
+    const auctionEndTime = 0;
 
     gs.activeAuctions[auctionId] = {
       dealCardId: auctionCard.id,
@@ -1654,45 +2364,54 @@ io.on('connection', (socket: Socket) => {
         monthlyCashflow: auctionCard.asset.monthlyCashflow,
       },
       endsAt: auctionEndTime,
+      controlledByHost: true,
     });
 
-    setTimeout(() => {
-      const auction = gs.activeAuctions?.[auctionId];
-      if (!auction) return;
-      delete gs.activeAuctions![auctionId];
+    const decisionContext = beginHostDecisionPhase(
+      gs,
+      { id: '__all_players__', name: '全體玩家' },
+      'auction',
+      `特殊拍賣：${auctionCard.title}`,
+    );
+    await waitForHostRelease(gs, decisionContext);
 
-      if (auction.highestBidderId && auction.highestBid >= minBid) {
-        const winner = gs.players.get(auction.highestBidderId);
-        if (winner && winner.cash >= auction.highestBid) {
-          const _wCB = winner.cash; const _wFB = winner.monthlyCashflow; const _wNWB = calcNetWorth(winner);
-          winner.cash -= auction.highestBid;
-          // 特殊拍賣：得標金額蒸發（市場新發行），不轉給任何玩家
-          acceptDealCard(winner, auctionCard);
-          logPlayerEvent(
-            winner, gs, 'asset_buy',
-            `特殊拍賣得標：${auctionCard.title}（月現金流 ${(auctionCard.asset.monthlyCashflow ?? 0) >= 0 ? '+' : ''}$${auctionCard.asset.monthlyCashflow ?? 0}）`,
-            _wCB, _wFB, _wNWB,
-            { cardId: auctionCard.id, cardTitle: auctionCard.title, isSpecialAuction: true }
-          );
-          emitToRoom(roomId, 'dealAuctionEnded', {
-            auctionId,
-            winnerId: auction.highestBidderId,
-            winnerName: auction.highestBidderName,
-            winningBid: auction.highestBid,
-            cardName: auctionCard.title,
-            hadBids: true,
-            isSpecialAuction: true,
-          });
-          emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
-        }
-      } else {
+    const auction = gs.activeAuctions?.[auctionId];
+    if (!auction) return;
+    delete gs.activeAuctions![auctionId];
+
+    if (auction.highestBidderId && auction.highestBid >= minBid) {
+      const winner = gs.players.get(auction.highestBidderId);
+      if (winner && winner.cash >= auction.highestBid) {
+        const _wCB = winner.cash; const _wFB = winner.monthlyCashflow; const _wNWB = calcNetWorth(winner);
+        winner.cash -= auction.highestBid;
+        // 特殊拍賣：得標金額蒸發（市場新發行），不轉給任何玩家
+        acceptDealCard(winner, auctionCard);
+        logPlayerEvent(
+          winner, gs, 'asset_buy',
+          `特殊拍賣得標：${auctionCard.title}（月現金流 ${(auctionCard.asset.monthlyCashflow ?? 0) >= 0 ? '+' : ''}$${auctionCard.asset.monthlyCashflow ?? 0}）`,
+          _wCB, _wFB, _wNWB,
+          { cardId: auctionCard.id, cardTitle: auctionCard.title, monthlyCashflow: auctionCard.asset.monthlyCashflow, isSpecialAuction: true }
+        );
         emitToRoom(roomId, 'dealAuctionEnded', {
-          auctionId, winnerId: null, winnerName: null,
-          winningBid: 0, cardName: auctionCard.title, hadBids: false,
+          auctionId,
+          winnerId: auction.highestBidderId,
+          winnerName: auction.highestBidderName,
+          winningBid: auction.highestBid,
+          cardName: auctionCard.title,
+          hadBids: true,
           isSpecialAuction: true,
         });
+        emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+        return;
       }
-    }, durationMs);
+    }
+
+    emitToRoom(roomId, 'dealAuctionEnded', {
+      auctionId, winnerId: null, winnerName: null,
+      winningBid: 0, cardName: auctionCard.title, hadBids: false,
+      isSpecialAuction: true,
+    });
+    emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
   });
 
   // ----------------------------------------------------------
@@ -2328,6 +3047,7 @@ io.on('connection', (socket: Socket) => {
       auctionId: payload.auctionId, bidderId: socket.id, bidderName: bidder.name,
       bidAmount: payload.bidAmount, newHighest: payload.bidAmount,
     });
+    emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
   });
 
   // ----------------------------------------------------------
@@ -2384,7 +3104,7 @@ io.on('connection', (socket: Socket) => {
     const wasCurrentTurn = gs.currentPlayerTurnId === payload.playerId;
     gs.removePlayer(payload.playerId);
     if (wasCurrentTurn && gs.playerOrder.length > 0) {
-      gs.advanceToNextTurn();
+      advanceTurn(gs);
     }
 
     console.log(`[kickPlayer] 主持人移除玩家 ${target.name}（${roomId}）`);
@@ -2433,15 +3153,28 @@ io.on('connection', (socket: Socket) => {
 
     gs.gameDurationMs = durationMs;
     gs.gamePhase = GamePhase.RatRace;
+    gs.turnNumber = 0;
+    gs.roundsSinceGlobalPayday = 0;
+    gs.globalPaydayPending = false;
+    gs.globalPaydayInProgress = false;
+    gs.globalPaydayNumber = 0;
+    gs.finalRoundStarted = false;
+    gs.finalRoundPendingPlayerIds = [];
     startGameClock(gs);
 
-    console.log(`[startGame] 房間 ${roomId} 遊戲啟動，時長：${minutes} 分鐘`);
+    console.log(`[startGame] 房間 ${roomId} 遊戲啟動；每完整回合 +${YEARS_PER_COMPLETED_ROUND} 歲，活動倒數：${minutes} 分鐘`);
 
     emitToRoom(roomId, 'gameStarted', {
       gameStartTime: gs.gameStartTime,
       gameDurationMs: gs.gameDurationMs,
+      durationMinutes: minutes,
+      yearsPerRound: YEARS_PER_COMPLETED_ROUND,
+      totalLifeRounds: TOTAL_LIFE_ROUNDS,
       endTime: new Date(gs.gameStartTime!.getTime() + durationMs),
     });
+
+    // 若首位（或連續多位）玩家選擇進修，開局立即完成其延後回合並交棒。
+    skipCurrentEducationTurns(gs);
 
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
   });
@@ -2480,6 +3213,10 @@ io.on('connection', (socket: Socket) => {
       socket.emit('error', { message: '只有管理員可以恢復遊戲。' });
       return;
     }
+    if (gs.decisionPhase) {
+      socket.emit('error', { message: '目前是主持人控制的決策階段，請使用「結束決策並繼續」。' });
+      return;
+    }
     if (gs.pausedAt === null) {
       socket.emit('error', { message: '遊戲未在暫停中。' });
       return;
@@ -2513,6 +3250,10 @@ io.on('connection', (socket: Socket) => {
       socket.emit('error', { message: '只有管理員可以重啟遊戲。' });
       return;
     }
+    if (gs.decisionPhase) {
+      socket.emit('error', { message: '請先結束目前的決策階段，再重新開始遊戲。' });
+      return;
+    }
 
     // 保存現有玩家名單（ID + 姓名）
     const playerInfos = gs.playerOrder.map((id) => {
@@ -2542,6 +3283,13 @@ io.on('connection', (socket: Socket) => {
     gs.pendingLoanOffers = {};
     gs.pendingLoanRequests = {};
     gs.activeAuctions = {};
+    gs.decisionPhase = null;
+    gs.roundsSinceGlobalPayday = 0;
+    gs.globalPaydayPending = false;
+    gs.globalPaydayInProgress = false;
+    gs.globalPaydayNumber = 0;
+    gs.finalRoundStarted = false;
+    gs.finalRoundPendingPlayerIds = [];
 
     // 重置牌組
     gs.smallDealDeck = new Deck(SMALL_DEALS);
@@ -2665,25 +3413,12 @@ io.on('connection', (socket: Socket) => {
       socket.emit('error', { message: '玩家不存在或已出局。' });
       return;
     }
-
-    const _tvCB = player.cash; const _tvFB = player.monthlyCashflow; const _tvNWB = calcNetWorth(player);
-    const result = goTravel(player, payload.destinationId);
-    socket.emit('travelResult', result);
-
-    if (result.success) {
-      logPlayerEvent(player, gs, 'travel', `前往「${result.destination?.name ?? payload.destinationId}」（體驗值 +${result.lifeExperienceGained}）`, _tvCB, _tvFB, _tvNWB, { lifeExpGained: result.lifeExperienceGained });
-      console.log(`[travel] ${player.name}（${gs.gameId}）前往 ${result.destination?.name}！體驗值 +${result.lifeExperienceGained}`);
-      emitToRoom(gs.gameId, 'playerTraveled', {
-        playerId: player.id,
-        playerName: player.name,
-        destinationName: result.destination?.name,
-        destinationRegion: result.destination?.region,
-        lifeExperienceGained: result.lifeExperienceGained,
-        statEffect: result.destination?.statEffect,
-        travelPenaltyRemaining: player.travelPenaltyRemaining,
-      });
-      emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+    if (gs.decisionPhase) {
+      socket.emit('error', { message: '決策階段中請先完成目前選擇，主持人揭曉後再行動。' });
+      return;
     }
+
+    executeTravelAction(socket, gs, player, payload.destinationId);
   });
 
   // ----------------------------------------------------------
@@ -2698,26 +3433,12 @@ io.on('connection', (socket: Socket) => {
       socket.emit('error', { message: '玩家不存在或已出局。' });
       return;
     }
-
-    const currentAge = getCurrentAge(gs);
-    const result = attendSocialEvent(player, currentAge);
-    socket.emit('socialEventResult', result);
-
-    if (result.success) {
-      const { RELATIONSHIP_MARRIAGE_THRESHOLD: threshold } = require('./gameConfig');
-      if (
-        result.newRelationshipPoints !== undefined &&
-        result.newRelationshipPoints >= threshold &&
-        !player.isMarried
-      ) {
-        socket.emit('marriageThresholdReached', {
-          playerId: player.id,
-          relationshipPoints: result.newRelationshipPoints,
-          threshold,
-        });
-      }
-      emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+    if (gs.decisionPhase) {
+      socket.emit('error', { message: '決策階段中請先完成目前選擇，主持人揭曉後再行動。' });
+      return;
     }
+
+    executeSocialAction(socket, gs, player);
   });
 
   // ----------------------------------------------------------
@@ -2803,6 +3524,10 @@ io.on('connection', (socket: Socket) => {
   socket.on('requestPlayerAnalysis', (payload?: { targetPlayerId?: string }) => {
     const gs = getRoomState(socket);
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (gs.gamePhase !== GamePhase.GameOver) {
+      socket.emit('error', { message: '完整決策分析會在遊戲結束後的復盤階段開放。' });
+      return;
+    }
 
     const targetId = payload?.targetPlayerId ?? socket.id;
     const target = gs.players.get(targetId);
@@ -2825,6 +3550,11 @@ io.on('connection', (socket: Socket) => {
     const crisisCount = eventLog.filter((e) => e.type === 'crisis').length;
     const travelCount = eventLog.filter((e) => e.type === 'travel').length;
     const paydayCount = eventLog.filter((e) => e.type === 'payday').length;
+    const firstAssetAge = eventLog.find((e) =>
+      e.type === 'asset_buy' &&
+      (e.cashflowAfter > e.cashflowBefore || Number(e.meta?.monthlyCashflow ?? 0) > 0)
+    )?.age ?? null;
+    const escapeAge = eventLog.find((e) => e.type === 'rat_race_escaped')?.age ?? null;
 
     // 現金流歷史：每次發薪日的現金流快照（用於折線圖）
     const cashflowHistory = eventLog
@@ -2874,6 +3604,17 @@ io.on('connection', (socket: Socket) => {
         finalNetWorth: calcNetWorth(target),
         finalCashflow: target.monthlyCashflow,
         finalPassiveIncome: target.totalPassiveIncome,
+        finalCash: target.cash,
+        finalExpenses: target.totalExpenses,
+        finalHP: target.stats.health,
+        finalNetwork: target.stats.network,
+        totalDebt: target.liabilities.reduce((sum, liability) => sum + liability.totalDebt, 0),
+        insuranceCount: Object.values(target.insurance).filter(Boolean).length,
+        firstAssetAge,
+        escapeAge,
+        socialClass: target.socialClass,
+        continuedEducation: target.hasContinuedEducation,
+        secondLifeReview: buildSecondLifeReview(target),
       },
       cashflowHistory,
       keyDecisions,
@@ -2891,6 +3632,10 @@ io.on('connection', (socket: Socket) => {
   socket.on('requestRoomAnalysis', () => {
     const gs = getRoomState(socket);
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (gs.gamePhase !== GamePhase.GameOver) {
+      socket.emit('error', { message: '全場分析會在遊戲結束後的復盤階段開放。' });
+      return;
+    }
 
     const currentAge = Math.round(getCurrentAge(gs));
 
@@ -2911,6 +3656,16 @@ io.on('connection', (socket: Socket) => {
         finalNetWorth: calcNetWorth(p),
         finalCashflow: p.monthlyCashflow,
         finalPassiveIncome: p.totalPassiveIncome,
+        finalExpenses: p.totalExpenses,
+        finalHP: p.stats.health,
+        finalNetwork: p.stats.network,
+        insuranceCount: Object.values(p.insurance).filter(Boolean).length,
+        firstAssetAge: p.eventLog.find((e) =>
+          e.type === 'asset_buy' &&
+          (e.cashflowAfter > e.cashflowBefore || Number(e.meta?.monthlyCashflow ?? 0) > 0)
+        )?.age ?? null,
+        escapeAge: p.eventLog.find((e) => e.type === 'rat_race_escaped')?.age ?? null,
+        secondLifeReview: buildSecondLifeReview(p),
         score,
         cashflowHistory: p.eventLog
           .filter((e) => e.type === 'payday')
@@ -2970,7 +3725,7 @@ io.on('connection', (socket: Socket) => {
           const wasCurrentTurn = gs.currentPlayerTurnId === socket.id;
           gs.removePlayer(socket.id);
           if (wasCurrentTurn && gs.playerOrder.length > 0) {
-            gs.advanceToNextTurn();
+            advanceTurn(gs);
           }
           console.log(`[斷線] 玩家 ${player.name} 重連逾時，已移除。房間 ${roomId} 剩 ${gs.players.size} 人`);
           emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
@@ -3043,37 +3798,134 @@ io.on('connection', (socket: Socket) => {
 // 發薪日規劃輔助函數
 // ============================================================
 
-function waitForPaydayPlan(socket: Socket, player: Player): Promise<PaydayPlanPayload> {
+interface HostDecisionContext {
+  phaseId: string;
+  wasAlreadyPaused: boolean;
+}
+
+function beginHostDecisionPhase(
+  gs: GameState,
+  player: Pick<Player, 'id' | 'name'>,
+  kind: DecisionPhaseState['kind'],
+  title: string,
+): HostDecisionContext {
+  const wasAlreadyPaused = gs.pausedAt !== null;
+  if (!wasAlreadyPaused) pauseGameClock(gs);
+
+  const phaseId = `decision-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const reminderSeconds: Record<DecisionPhaseState['kind'], number> = {
+    payday: 90,
+    deal: 60,
+    charity: 45,
+    crisis: 45,
+    relationship: 45,
+    marriage: 60,
+    startup: 45,
+    auction: 30,
+  };
+  gs.decisionPhase = {
+    id: phaseId,
+    kind,
+    title,
+    playerId: player.id,
+    playerName: player.name,
+    submitted: false,
+    startedAt: Date.now(),
+    reminderEndsAt: Date.now() + reminderSeconds[kind] * 1000,
+  };
+
+  emitToRoom(gs.gameId, 'decisionPhaseStarted', gs.decisionPhase);
+  emitToRoom(gs.gameId, 'gamePaused', {
+    reason: title,
+    currentAge: Math.round(getCurrentAge(gs) * 10) / 10,
+    controlledByHost: true,
+  });
+  emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  return { phaseId, wasAlreadyPaused };
+}
+
+function waitForHostControlledDecision<T>(
+  socket: Socket,
+  gs: GameState,
+  context: HostDecisionContext,
+  eventName: 'submitPaydayPlan' | 'submitCardDecision',
+  fallback: T,
+): Promise<T> {
   return new Promise((resolve) => {
-    const emptyPlan: PaydayPlanPayload = {
-      investInFQUpgrade: false,
-      investInHealthMaintenance: false,
-      investInHealthBoost: false,
-      investInSkillTraining: false,
-      investInNetwork: false,
-      stockDCAAmount: 0,
-      buyInsuranceTypes: [],
-    };
+    let submittedValue = fallback;
+    let hasSubmitted = false;
 
     const cleanup = () => {
-      clearTimeout(timer);
-      socket.off('submitPaydayPlan', onPlan);
+      socket.off(eventName, onDecision);
       socket.off('disconnect', onDisconnect);
+      const current = decisionReleaseWaiters.get(gs.gameId);
+      if (current?.phaseId === context.phaseId) decisionReleaseWaiters.delete(gs.gameId);
     };
-    const onPlan = (plan: PaydayPlanPayload) => { cleanup(); resolve(plan ?? emptyPlan); };
-    const onDisconnect = () => {
-      cleanup();
-      console.log(`[paydayPlan] ${player.name} 斷線，自動略過規劃`);
-      resolve(emptyPlan);
-    };
-    const timer = setTimeout(() => {
-      cleanup();
-      console.log(`[paydayPlan] ${player.name} 逾時自動略過規劃`);
-      resolve(emptyPlan);
-    }, PAYDAY_PLANNING_TIMEOUT_MS);
 
-    socket.once('submitPaydayPlan', onPlan);
+    const onDecision = (value: T) => {
+      if (hasSubmitted) return;
+      hasSubmitted = true;
+      submittedValue = value ?? fallback;
+      if (gs.decisionPhase?.id === context.phaseId) {
+        gs.decisionPhase.submitted = true;
+        emitToRoom(gs.gameId, 'decisionPhaseUpdated', gs.decisionPhase);
+        emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+      }
+      socket.emit('decisionSubmitted', { phaseId: context.phaseId });
+    };
+
+    const onDisconnect = () => {
+      socket.off(eventName, onDecision);
+      console.log(`[decisionPhase] ${gs.decisionPhase?.playerName ?? socket.id} 斷線，等待主持人收束`);
+    };
+
+    const release = () => {
+      cleanup();
+      if (gs.decisionPhase?.id === context.phaseId) gs.decisionPhase = null;
+      emitToRoom(gs.gameId, 'decisionPhaseEnded', {
+        phaseId: context.phaseId,
+        submitted: hasSubmitted,
+      });
+      if (!context.wasAlreadyPaused) {
+        resumeGameClock(gs);
+        emitToRoom(gs.gameId, 'gameResumed', {
+          resumedAt: new Date(),
+          currentAge: Math.round(getCurrentAge(gs) * 10) / 10,
+        });
+      }
+      emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+      resolve(submittedValue);
+    };
+
+    socket.once(eventName, onDecision);
     socket.once('disconnect', onDisconnect);
+    decisionReleaseWaiters.set(gs.gameId, { phaseId: context.phaseId, release });
+  });
+}
+
+/** 群體競標沒有單一 submit 事件，只等待主持人決定何時收束。 */
+function waitForHostRelease(gs: GameState, context: HostDecisionContext): Promise<void> {
+  return new Promise((resolve) => {
+    const release = () => {
+      const current = decisionReleaseWaiters.get(gs.gameId);
+      if (current?.phaseId === context.phaseId) decisionReleaseWaiters.delete(gs.gameId);
+      if (gs.decisionPhase?.id === context.phaseId) gs.decisionPhase = null;
+      emitToRoom(gs.gameId, 'decisionPhaseEnded', {
+        phaseId: context.phaseId,
+        submitted: false,
+      });
+      if (!context.wasAlreadyPaused) {
+        resumeGameClock(gs);
+        emitToRoom(gs.gameId, 'gameResumed', {
+          resumedAt: new Date(),
+          currentAge: Math.round(getCurrentAge(gs) * 10) / 10,
+        });
+      }
+      emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+      resolve();
+    };
+
+    decisionReleaseWaiters.set(gs.gameId, { phaseId: context.phaseId, release });
   });
 }
 
@@ -3083,41 +3935,13 @@ function waitForPaydayPlan(socket: Socket, player: Player): Promise<PaydayPlanPa
 
 function waitForCardDecision(
   socket: Socket,
-  timeoutMs = 15000
+  gs: GameState,
+  player: Player,
+  kind: DecisionPhaseState['kind'],
+  title: string,
 ): Promise<Record<string, unknown> | null> {
-  return new Promise((resolve) => {
-    const cleanup = () => {
-      clearTimeout(timer);
-      socket.off('submitCardDecision', onDecision);
-      socket.off('disconnect', onDisconnect);
-    };
-    const onDecision = (decision: Record<string, unknown>) => { cleanup(); resolve(decision ?? null); };
-    const onDisconnect = () => { cleanup(); resolve(null); };
-    const timer = setTimeout(() => { cleanup(); resolve(null); }, timeoutMs);
-    socket.once('submitCardDecision', onDecision);
-    socket.once('disconnect', onDisconnect);
-  });
-}
-
-function countAlivePlayers(gs: GameState): number {
-  let count = 0;
-  gs.players.forEach((p) => { if (p.isAlive) count++; });
-  return count;
-}
-
-function waitForAllPlanningDone(gs: GameState, timeoutMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    const deadline = Date.now() + timeoutMs;
-    const check = () => {
-      const alive = countAlivePlayers(gs);
-      if (gs.paydayPlanningConfirmed.size >= alive || Date.now() >= deadline) {
-        resolve();
-      } else {
-        setTimeout(check, 500);
-      }
-    };
-    check();
-  });
+  const context = beginHostDecisionPhase(gs, player, kind, title);
+  return waitForHostControlledDecision(socket, gs, context, 'submitCardDecision', null);
 }
 
 // ============================================================
@@ -3149,10 +3973,10 @@ async function handleLandingSquare(
         // ⚠ 修正：playerRoll 的 passedPaydays 已經呼叫 triggerPayday + paydayCount++ 了，
         // 此處不再重複加 monthlyCashflow / paydayCount，只做「外圈發薪日專屬獎勵」：
         //   1. 資產總值 × 1% 紅利現金（applyFastTrackPaydayBonus）
-        //   2. 所有資產 currentValue × 1.15 增值（applyFastTrackAppreciation）
+        //   2. 所有資產 currentValue × 1.06 增值（applyFastTrackAppreciation）
         const bonus = applyFastTrackPaydayBonus(player);
         applyFastTrackAppreciation(player);
-        emitCellEvent(socket, roomId, player.name, 'FT 發薪日獎勵', `💰 外圈發薪日獎勵！紅利現金 +$${bonus.toLocaleString()} + 全資產 +15% 增值。`);
+        emitCellEvent(socket, roomId, player.name, 'FT 發薪日獎勵', `💰 外圈發薪日獎勵！紅利現金 +$${bonus.toLocaleString()} + 全資產 +6% 增值。`);
         emitToRoom(roomId, 'fastTrackPayday', {
           playerId: player.id, playerName: player.name,
           cashflow: 0, bonus, cashAfter: player.cash,
@@ -3166,22 +3990,18 @@ async function handleLandingSquare(
         const { BIG_DEALS } = require('./gameCards');
         const deal: DealCard = BIG_DEALS[Math.floor(Math.random() * BIG_DEALS.length)];
         emitCellEvent(socket, roomId, player.name, 'FT 大交易', `💼 外圈大型投資機會：${deal.title}！`);
-        pauseGameClock(gs);
-        emitToRoom(roomId, 'gamePaused', { reason: '外圈大型交易', currentAge: Math.round(getCurrentAge(gs) * 10) / 10 });
         const _ftLoanAvailable = getAvailableLoan(player);
         socket.emit('fastTrackDealCard', {
           squareType: ftSqType,
           deal,
           isFastTrack: true,
+          playerCash: player.cash,
           creditScore: player.creditScore,
           loanAvailable: _ftLoanAvailable,
         });
-        // 等待玩家決策（30 秒逾時自動略過）
-        const ftDealDecision = await waitForCardDecision(socket, 30000);
-        resumeGameClock(gs);
-        emitToRoom(roomId, 'gameResumed', { resumedAt: new Date() });
+        const ftDealDecision = await waitForCardDecision(socket, gs, player, 'deal', '外圈大型交易');
         const ftCost = deal.asset.downPayment ?? deal.asset.cost;
-        if (ftDealDecision?.accept === true) {
+        if (ftDealDecision?.accepted === true || ftDealDecision?.accept === true) {
           // 先處理槓桿借款（現金不足→借差額；現金已足且選 leverage→主動槓桿借款留現金）
           if (ftDealDecision.useLeverage === true && ftCost > 0) {
             const _ftAvailableLoan = getAvailableLoan(player);
@@ -3220,7 +4040,7 @@ async function handleLandingSquare(
         break;
       }
       case FastTrackSquareType.NetworkSummit: {
-        const ntPerLevel = 75_000;
+        const ntPerLevel = 30_000;
         const ntBonus = player.stats.network * ntPerLevel;
         player.cash += ntBonus;
         player.lifeExperience += 8;
@@ -3234,27 +4054,32 @@ async function handleLandingSquare(
       case FastTrackSquareType.Charity: {
         const charityAmount = Math.round(player.monthlyCashflow * 0.1);
         if (player.cash >= charityAmount && charityAmount > 0) {
-          player.cash -= charityAmount;
-          player.charityTotal = (player.charityTotal ?? 0) + charityAmount;
-          player.lifeExperience += 15;
-          player.legacyBonusPoints += 5;
-          emitCellEvent(socket, roomId, player.name, 'FT 慈善', `❤️ 外圈慈善！捐出 $${charityAmount.toLocaleString()}，累積慈善 $${player.charityTotal.toLocaleString()}，生命體驗 +15、傳承 +5。`);
-          emitToRoom(roomId, 'fastTrackCharity', {
-            playerId: player.id, playerName: player.name,
-            amount: charityAmount, legacyBonus: 5, charityTotal: player.charityTotal,
-          });
-          checkBucketGoals(player, gs, roomId, socket);
+          socket.emit('charityCardPending', { amount: charityAmount });
+          const charityDecision = await waitForCardDecision(socket, gs, player, 'charity', '外圈慈善選擇');
+          if (charityDecision?.donate === true) {
+            player.cash -= charityAmount;
+            player.charityTotal = (player.charityTotal ?? 0) + charityAmount;
+            player.lifeExperience += 15;
+            player.legacyBonusPoints += 5;
+            emitCellEvent(socket, roomId, player.name, 'FT 慈善', `❤️ 外圈慈善！捐出 $${charityAmount.toLocaleString()}，累積慈善 $${player.charityTotal.toLocaleString()}，生命體驗 +15、傳承 +5。`);
+            emitToRoom(roomId, 'fastTrackCharity', {
+              playerId: player.id, playerName: player.name,
+              amount: charityAmount, legacyBonus: 5, charityTotal: player.charityTotal,
+            });
+            checkBucketGoals(player, gs, roomId, socket);
+          } else {
+            emitCellEvent(socket, roomId, player.name, 'FT 慈善', '❤️ 這次選擇保留資金，略過捐款。');
+          }
         } else {
           emitCellEvent(socket, roomId, player.name, 'FT 慈善', '❤️ 外圈慈善格，現金不足或現金流為零，跳過捐款。');
         }
         break;
       }
       case FastTrackSquareType.TaxPlanning: {
-        const taxSaving = Math.round(player.expenses.taxes * 0.2);
-        player.cash += taxSaving;
-        emitCellEvent(socket, roomId, player.name, 'FT 稅務規劃', `📊 稅務優化！節省稅款 +$${taxSaving.toLocaleString()}。`);
+        player.taxPlanningCreditRate = Math.max(player.taxPlanningCreditRate ?? 0, 0.3);
+        emitCellEvent(socket, roomId, player.name, 'FT 稅務規劃', '📊 稅務優化完成！下次年度結算可減免 30% 應繳稅額。');
         emitToRoom(roomId, 'fastTrackTaxPlanning', {
-          playerId: player.id, playerName: player.name, taxSaving,
+          playerId: player.id, playerName: player.name, taxCreditRate: player.taxPlanningCreditRate,
         });
         break;
       }
@@ -3263,15 +4088,13 @@ async function handleLandingSquare(
         const amounts = [300_000, 750_000, 1_500_000];
         const investmentAmount = amounts[Math.floor(Math.random() * amounts.length)];
         emitCellEvent(socket, roomId, player.name, 'FT 科技新創', `💡 科技新創機會！投入 $${investmentAmount.toLocaleString()} 擲骰決定成敗（≥4 成功）。`);
-        pauseGameClock(gs);
-        emitToRoom(roomId, 'gamePaused', { reason: '科技新創投資機會', currentAge: Math.round(getCurrentAge(gs) * 10) / 10 });
         socket.emit('techStartupOffer', {
           playerId: player.id,
           playerName: player.name,
           investmentAmount,
           playerCash: player.cash,
         });
-        const startupDecision = await waitForCardDecision(socket, 20000);
+        const startupDecision = await waitForCardDecision(socket, gs, player, 'startup', '科技新創投資');
         if (startupDecision?.invest === true && player.cash >= investmentAmount) {
           player.cash -= investmentAmount;
           const diceRoll = rollDice(1);
@@ -3309,8 +4132,6 @@ async function handleLandingSquare(
         } else {
           socket.emit('techStartupResult', { playerId: player.id, invested: false, investmentAmount });
         }
-        resumeGameClock(gs);
-        emitToRoom(roomId, 'gameResumed', { currentAge: Math.round(getCurrentAge(gs) * 10) / 10 });
         break;
       }
       case FastTrackSquareType.GlobalWave: {
@@ -3326,10 +4147,39 @@ async function handleLandingSquare(
       case FastTrackSquareType.Partnership: {
         const others = [...gs.players.values()].filter((p) => p.id !== player.id && p.isAlive);
         if (others.length > 0) {
-          emitCellEvent(socket, roomId, player.name, 'FT 合夥機會', '🤝 合夥機會！可邀請其他玩家共同投資，雙方各得 +15 生命體驗。');
-          socket.emit('partnershipOpportunity', {
+          emitCellEvent(socket, roomId, player.name, 'FT 合夥機會', '🤝 合夥機會！先選擇邀請對象，再由對方決定是否合作。');
+          socket.emit('fastTrackPartnershipOptions', {
             availablePartners: others.map((p) => ({ id: p.id, name: p.name })),
           });
+          const partnerPick = await waitForCardDecision(socket, gs, player, 'relationship', '外圈合夥：選擇夥伴');
+          const targetId = typeof partnerPick?.targetPlayerId === 'string' ? partnerPick.targetPlayerId : null;
+          const target = targetId ? gs.players.get(targetId) : undefined;
+          const targetSocket = target ? io.sockets.sockets.get(target.id) : undefined;
+
+          if (target?.isAlive && targetSocket && !target.isDisconnected) {
+            const estimatedDividend = Math.max(
+              3_000,
+              Math.min(50_000, Math.round((player.totalPassiveIncome + target.totalPassiveIncome) * 0.03)),
+            );
+            targetSocket.emit('fastTrackPartnershipInvitation', {
+              offerorId: player.id,
+              offerorName: player.name,
+              estimatedDividend,
+            });
+            const response = await waitForCardDecision(targetSocket, gs, target, 'relationship', `回應 ${player.name} 的合夥邀請`);
+            if (response?.accepted === true && player.isAlive && target.isAlive) {
+              const dividend = applyPartnershipBenefits(gs, player, target);
+              emitCellEvent(socket, roomId, player.name, 'FT 合夥成功', `🤝 ${player.name} 與 ${target.name} 合作成功，雙方各得生命體驗 +15、分紅 $${dividend.toLocaleString()}。`);
+              console.log(`[fastTrackPartnership] ${player.name} 與 ${target.name} 合夥成功，分紅 $${dividend}`);
+            } else {
+              emitToRoom(roomId, 'partnershipDeclined', { offerorId: player.id, targetId: target.id });
+              emitCellEvent(socket, roomId, player.name, 'FT 合夥機會', `🤝 ${target.name} 婉拒了本次合作。`);
+            }
+          } else if (targetId) {
+            emitCellEvent(socket, roomId, player.name, 'FT 合夥機會', '🤝 對方目前無法回應，本次合夥略過。');
+          } else {
+            emitCellEvent(socket, roomId, player.name, 'FT 合夥機會', '🤝 這次選擇不發出合夥邀請。');
+          }
         } else {
           emitCellEvent(socket, roomId, player.name, 'FT 合夥機會', '🤝 合夥機會格，但目前沒有其他存活玩家，跳過。');
         }
@@ -3347,7 +4197,7 @@ async function handleLandingSquare(
             `⚠️ 外圈危機：${c.title}！${crisisResult.wasInsured ? '保險豁免' : `現金 -$${crisisResult.effectiveCost.toLocaleString()}`}，跳過 ${crisisResult.turnsLost} 回合`);
           logPlayerEvent(player, gs, 'crisis', `外圈危機：${c.title}`, _ftcCB, _ftcFB, _ftcNWB, { cardId: c.id, cardTitle: c.title, deathTriggered: crisisResult.deathTriggered });
           if (crisisResult.deathTriggered) {
-            handlePlayerDeath(player, gs);
+            eliminatePlayer(player, gs, 'fastTrackCrisis', `外圈危機「${c.title}」導致死亡`);
             emitToRoom(roomId, 'playerDied', {
               playerId: player.id,
               playerName: player.name,
@@ -3369,7 +4219,14 @@ async function handleLandingSquare(
         emitCellEvent(socket, roomId, player.name, 'FT 人生旅程', '✈️ 外圈人生旅程！可選擇更遠的旅遊目的地，獲得豐富的生命體驗。');
         socket.emit('fastTrackTravelOptions', {
           destinations: outerDests.map((d) => ({ id: d.id, name: d.name, region: d.region, cost: d.cost, lifeExpGained: d.lifeExpGained })),
+          playerCash: player.cash,
         });
+        const travelDecision = await waitForCardDecision(socket, gs, player, 'relationship', '外圈生命歷練');
+        if (typeof travelDecision?.destinationId === 'string') {
+          executeTravelAction(socket, gs, player, travelDecision.destinationId);
+        } else {
+          emitCellEvent(socket, roomId, player.name, 'FT 人生旅程', '✈️ 這次選擇留在原地，保存資金。');
+        }
         break;
       }
       case FastTrackSquareType.Relationship: {
@@ -3386,8 +4243,8 @@ async function handleLandingSquare(
         break;
       }
       case FastTrackSquareType.AssetLeverage: {
-        // 資產槓桿：自動給予被動收入 × 3 的現金獎勵
-        const bonus = Math.max(player.totalPassiveIncome * 3, 150_000);
+        // 資產槓桿：以既有被動收入為基礎，提供一次性但有上限感的資金放大。
+        const bonus = Math.max(player.totalPassiveIncome * 2, 75_000);
         player.cash += bonus;
         emitCellEvent(socket, roomId, player.name, 'FT 資產槓桿', `🚀 資產槓桿！獲得 +$${bonus.toLocaleString()} 現金獎勵。`);
         socket.emit('assetLeverageBonus', {
@@ -3415,7 +4272,7 @@ async function handleLandingSquare(
         const crisisResult = applyCrisisCard(player, diseaseCard);
         emitCellEvent(socket, roomId, player.name, 'FT 疾病危機', `🏥 疾病危機：${diseaseCard.title}！HP -20，請確認保險狀態。`);
         if (crisisResult.deathTriggered) {
-          handlePlayerDeath(player, gs);
+          eliminatePlayer(player, gs, 'diseaseCrisis', `疾病危機「${diseaseCard.title}」導致死亡`);
           emitToRoom(roomId, 'playerDied', {
             playerId: player.id,
             playerName: player.name,
@@ -3453,8 +4310,8 @@ async function handleLandingSquare(
       // 解鎖邏輯由 playerRoll 內 crossedCell24 偵測處理；停在此格只發提示訊息
       emitCellEvent(socket, roomId, player.name, '第二人生',
         player.hasPassedSecondLife
-          ? '🌟 第二人生格！被動收入 ≥ 支出即可脫出老鼠賽跑。'
-          : '🌟 你抵達了第二人生格！從此符合脫出老鼠賽跑的條件。');
+          ? '🌟 第二人生格！系統正在檢視你的財務基礎與人生累積。'
+          : '🌟 你抵達了第二人生格！從此可以接受第二人生資格檢視。');
       break;
 
     case SquareType.Baby: {
@@ -3641,7 +4498,7 @@ async function handleLandingSquare(
         creditScore: player.creditScore,
         loanAvailable: _loanAvailable,
       });
-      const decision = await waitForCardDecision(socket);
+      const decision = await waitForCardDecision(socket, gs, player, 'deal', dealTypeName);
 
       if (decision && decision.accepted) {
         // 玩家A接受 → 正常交易流程
@@ -3702,7 +4559,7 @@ async function handleLandingSquare(
           effect: { type: 'dealAccepted', card: chosen },
         });
       } else {
-        // 玩家A放棄 → 廣播競標給所有玩家（每張抽到的牌各開一場 20 秒拍賣）
+        // 玩家A放棄 → 每張抽到的牌依序開放全場競標，由主持人逐場收束。
         emitToRoom(roomId, 'cardApplied', {
           playerId: player.id,
           squareType,
@@ -3712,10 +4569,10 @@ async function handleLandingSquare(
         // ⚠ 修正：以前 NT≥5 抽 2 張時只拍賣 drawnCards[0]，drawnCards[1] 直接消失
         if (!gs.activeAuctions) gs.activeAuctions = {};
 
-        drawnCards.forEach((auctionCard, idx) => {
+        for (const [idx, auctionCard] of drawnCards.entries()) {
           const minBid = auctionCard.asset.downPayment ?? auctionCard.asset.cost ?? 0;
           const auctionId = `auction-${Date.now()}-${idx}`;
-          const auctionEndTime = Date.now() + 20000;
+          const auctionEndTime = 0;
           gs.activeAuctions![auctionId] = {
             dealCardId: auctionCard.id,
             startTime: Date.now(), endTime: auctionEndTime,
@@ -3734,44 +4591,53 @@ async function handleLandingSquare(
               monthlyCashflow: auctionCard.asset.monthlyCashflow,
             },
             endsAt: auctionEndTime,
+            controlledByHost: true,
           });
 
-          // 20 秒後結算
-          setTimeout(() => {
-            const auction = gs.activeAuctions?.[auctionId];
-            if (!auction) return;
-            delete gs.activeAuctions![auctionId];
+          const decisionContext = beginHostDecisionPhase(
+            gs,
+            { id: '__all_players__', name: '全體玩家' },
+            'auction',
+            `交易競標：${auctionCard.title}`,
+          );
+          await waitForHostRelease(gs, decisionContext);
 
-            if (auction.highestBidderId && auction.highestBid >= minBid) {
-              const winner = gs.players.get(auction.highestBidderId);
-              if (winner && winner.cash >= auction.highestBid) {
-                const _wCB = winner.cash; const _wFB = winner.monthlyCashflow; const _wNWB = calcNetWorth(winner);
-                winner.cash -= auction.highestBid;
-                player.cash += auction.highestBid;
-                acceptDealCard(winner, auctionCard);
-                logPlayerEvent(winner, gs, 'asset_buy', `競標得標：${auctionCard.title}（月現金流 ${(auctionCard.asset.monthlyCashflow ?? 0) >= 0 ? '+' : ''}$${auctionCard.asset.monthlyCashflow ?? 0}）`, _wCB, _wFB, _wNWB, { cardId: auctionCard.id, cardTitle: auctionCard.title });
-                emitToRoom(roomId, 'dealAuctionEnded', {
-                  auctionId,
-                  winnerId: auction.highestBidderId,
-                  winnerName: auction.highestBidderName,
-                  winningBid: auction.highestBid,
-                  cardName: auctionCard.title,
-                  hadBids: true,
-                });
-                emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
-                deck.discard(auctionCard);
-              } else {
-                deck.discard(auctionCard);
-              }
-            } else {
+          const auction = gs.activeAuctions?.[auctionId];
+          if (!auction) {
+            deck.discard(auctionCard);
+            continue;
+          }
+          delete gs.activeAuctions![auctionId];
+
+          if (auction.highestBidderId && auction.highestBid >= minBid) {
+            const winner = gs.players.get(auction.highestBidderId);
+            if (winner && winner.cash >= auction.highestBid) {
+              const _wCB = winner.cash; const _wFB = winner.monthlyCashflow; const _wNWB = calcNetWorth(winner);
+              winner.cash -= auction.highestBid;
+              player.cash += auction.highestBid;
+              acceptDealCard(winner, auctionCard);
+              logPlayerEvent(winner, gs, 'asset_buy', `競標得標：${auctionCard.title}（月現金流 ${(auctionCard.asset.monthlyCashflow ?? 0) >= 0 ? '+' : ''}$${auctionCard.asset.monthlyCashflow ?? 0}）`, _wCB, _wFB, _wNWB, { cardId: auctionCard.id, cardTitle: auctionCard.title, monthlyCashflow: auctionCard.asset.monthlyCashflow });
               emitToRoom(roomId, 'dealAuctionEnded', {
-                auctionId, winnerId: null, winnerName: null,
-                winningBid: 0, cardName: auctionCard.title, hadBids: false,
+                auctionId,
+                winnerId: auction.highestBidderId,
+                winnerName: auction.highestBidderName,
+                winningBid: auction.highestBid,
+                cardName: auctionCard.title,
+                hadBids: true,
               });
+              emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
               deck.discard(auctionCard);
+              continue;
             }
-          }, 20000);
-        });
+          }
+
+          emitToRoom(roomId, 'dealAuctionEnded', {
+            auctionId, winnerId: null, winnerName: null,
+            winningBid: 0, cardName: auctionCard.title, hadBids: false,
+          });
+          emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+          deck.discard(auctionCard);
+        }
       }
       break;
     }
@@ -3782,7 +4648,7 @@ async function handleLandingSquare(
 
       emitCellEvent(socket, roomId, player.name, '慈善捐款', `❤️ 慈善格子！捐出 $${donationAmount.toLocaleString()} 可獲得生命體驗與傳承加成，是否參與？`);
       socket.emit('charityCardPending', { amount: donationAmount });
-      const decision = await waitForCardDecision(socket);
+      const decision = await waitForCardDecision(socket, gs, player, 'charity', '慈善捐款');
       const donate = decision?.donate === true;
 
       applyCharityDonation(player, card, donate);
@@ -3829,8 +4695,8 @@ async function handleLandingSquare(
       emitCellEvent(socket, roomId, player.name, '危機事件', `⚠️ 危機來臨：${card.title}！`);
 
       if (player.stats.network >= 3 && !player.stats.networkCrisisSkipUsed) {
-        socket.emit('crisisNTSkipAvailable', { card, timeoutMs: 15000 });
-        const decision = await waitForCardDecision(socket, 15000);
+        socket.emit('crisisNTSkipAvailable', { card, timeoutMs: 0, controlledByHost: true });
+        const decision = await waitForCardDecision(socket, gs, player, 'crisis', '危機應對');
 
         if (decision?.useNTSkip === true) {
           player.stats.networkCrisisSkipUsed = true;
@@ -3849,31 +4715,14 @@ async function handleLandingSquare(
       logPlayerEvent(player, gs, 'crisis', `危機事件：${card.title}`, _crCB, _crFB, _crNWB, { cardId: card.id, cardTitle: card.title, deathTriggered: result.deathTriggered });
 
       if (result.deathTriggered) {
-        const deathAge = Math.round(getCurrentAge(gs));
-        const finalScore = calculateLifeScore(player, deathAge);
-        handlePlayerDeath(player, gs);
+        const { deathAge, finalScore } = eliminatePlayer(
+          player,
+          gs,
+          'crisis',
+          `危機事件「${card.title}」導致死亡`,
+        );
 
         console.log(`[crisis] ${player.name}（${roomId}）死亡（${deathAge} 歲），評分：${finalScore.total}`);
-
-        emitToRoom(roomId, 'playerFinalScore', {
-          playerId: player.id,
-          playerName: player.name,
-          deathAge,
-          cause: 'crisis',
-          score: finalScore,
-          profession: player.profession.name,
-          quadrant: player.profession.quadrant,
-          isMarried: player.isMarried,
-          numberOfChildren: player.numberOfChildren,
-          lifeExperience: player.lifeExperience,
-        });
-
-        emitToRoom(roomId, 'playerEliminated', {
-          playerId: player.id,
-          playerName: player.name,
-          deathAge,
-          cause: 'crisis',
-        });
       }
       break;
     }
@@ -3882,21 +4731,16 @@ async function handleLandingSquare(
       const relCard = RELATIONSHIP_EVENTS[Math.floor(Math.random() * RELATIONSHIP_EVENTS.length)];
       emitCellEvent(socket, roomId, player.name, '人際關係', `🤝 人際關係格子：${relCard.title}`);
 
-      // ── 機遇型事件：等待玩家 15 秒決策 ──
+      // ── 機遇型事件：由主持人控制決策階段 ──
       if (relCard.eventCategory === 'opportunity') {
-        pauseGameClock(gs);
-        emitToRoom(roomId, 'gamePaused', { reason: '人際關係決策', currentAge: Math.round(getCurrentAge(gs) * 10) / 10 });
-
-        socket.emit('relationshipCardDrawn', { card: relCard, timeoutMs: 15000 });
-        const relDecision = await waitForCardDecision(socket, 15000);
+        socket.emit('relationshipCardDrawn', { card: relCard, timeoutMs: 0, controlledByHost: true });
+        const relDecision = await waitForCardDecision(socket, gs, player, 'relationship', '人際關係決策');
 
         // rel-004 擲骰賭注型：伺服器自動擲骰
         let diceResult: number | undefined;
         if (relCard.effect.gambleSuccess) {
           if (relDecision?.accept === false) {
             // 玩家選擇放棄
-            resumeGameClock(gs);
-            emitToRoom(roomId, 'gameResumed', { reason: '玩家放棄人際機遇' });
             emitToRoom(roomId, 'cardApplied', { playerId: player.id, squareType, effect: { type: 'relationshipDeclined', card: relCard } });
             break;
           }
@@ -3919,12 +4763,7 @@ async function handleLandingSquare(
 
         // 婚姻視窗觸發（rel-009 相親）
         if (relResult.triggerMarriageWindow && relDecision?.accept !== false) {
-          resumeGameClock(gs);
-          emitToRoom(roomId, 'gameResumed', { reason: '人際關係事件結束' });
           await triggerMarriageWindow(socket, player, gs);
-        } else {
-          resumeGameClock(gs);
-          emitToRoom(roomId, 'gameResumed', { reason: '人際關係事件結束' });
         }
 
         // SmallDeal 額外抽牌（rel-002 同學會重聚）
@@ -3974,21 +4813,16 @@ async function triggerMarriageWindow(
 
   const card = MARRIAGE_CARDS[Math.floor(Math.random() * MARRIAGE_CARDS.length)];
 
-  pauseGameClock(gs);
-  emitToRoom(roomId, 'gamePaused', { reason: '婚姻決策視窗', currentAge: Math.round(currentAge * 10) / 10 });
-
   socket.emit('marriageWindowOpened', {
     card,
     currentAge: Math.round(currentAge * 10) / 10,
     inPeakWindow: inPeak,
-    timeoutMs: 30000,
+    timeoutMs: 0,
+    controlledByHost: true,
   });
 
-  const decision = await waitForCardDecision(socket, 30000);
+  const decision = await waitForCardDecision(socket, gs, player, 'marriage', '婚姻決策');
   const acceptMarriage = decision?.acceptMarriage === true;
-
-  resumeGameClock(gs);
-  emitToRoom(roomId, 'gameResumed', { resumedAt: new Date(), currentAge: Math.round(getCurrentAge(gs) * 10) / 10 });
 
   if (acceptMarriage) {
     const _wmCB = player.cash; const _wmFB = player.monthlyCashflow; const _wmNWB = calcNetWorth(player);
@@ -4020,7 +4854,7 @@ async function triggerMarriageWindow(
 // 發薪日規劃選項計算輔助
 // ============================================================
 
-function buildAffordableOptions(player: Player): object {
+function buildAffordableOptions(player: Player, settlementMonths = 1): object {
   const {
     HP_MAINTENANCE_COST: maintCost,
     HP_BOOST_COST: boostCost,
@@ -4030,6 +4864,9 @@ function buildAffordableOptions(player: Player): object {
   } = require('./gameConfig');
 
   const fqCost = getFQUpgradeCost(player.stats.financialIQ);
+  const coveredMonths = Math.max(1, Math.floor(settlementMonths));
+  const totalMaintenanceCost = maintCost * coveredMonths;
+  const totalBoostCost = boostCost + maintCost * (coveredMonths - 1);
 
   return {
     fqUpgrade: {
@@ -4038,8 +4875,8 @@ function buildAffordableOptions(player: Player): object {
       currentFQ: player.stats.financialIQ,
       nextFQ: Math.min(10, player.stats.financialIQ + 1),
     },
-    healthMaintenance: { available: player.cash >= maintCost, cost: maintCost },
-    healthBoost: { available: player.cash >= boostCost, cost: boostCost },
+    healthMaintenance: { available: player.cash >= totalMaintenanceCost, cost: totalMaintenanceCost },
+    healthBoost: { available: player.cash >= totalBoostCost, cost: totalBoostCost },
     skillTraining: { available: player.cash >= skillCost && player.stats.careerSkill < SKILL_CAREER_CHANGE_THRESHOLD, cost: skillCost, currentSK: player.stats.careerSkill },
     networkInvest: { available: player.cash >= ntCost && player.stats.network < (player.profession.salaryType === 'nt_driven' ? Infinity : 10), cost: ntCost, currentNT: player.stats.network },
   };
@@ -4064,13 +4901,12 @@ function buildAvailableProfessions(player: Player): object[] {
 }
 
 // ============================================================
-// 時鐘廣播與遊戲終局檢查（輪詢所有房間）
+// 主持人活動倒數廣播（輪詢所有房間）
 // ============================================================
 
 /**
- * 每 5 秒輪詢所有進行中的房間：
- * - 廣播時鐘更新給該房間的玩家
- * - 檢查是否達到 100 歲觸發結算
+ * 每 5 秒廣播回合年齡與活動剩餘時間。
+ * 活動倒數歸零不會結束遊戲；100 歲終局只由完整回合推進。
  */
 setInterval(() => {
   for (const [roomId, gs] of rooms) {
@@ -4081,39 +4917,11 @@ setInterval(() => {
     const currentAge = getCurrentAge(gs);
 
     emitToRoom(roomId, 'gameClock', {
-      currentAge: Math.round(currentAge * 10) / 10,
+      currentAge,
       currentStage: getLifeStage(currentAge),
+      remainingTimeMs: getRemainingActivityTimeMs(gs),
       isPaused: false,
     });
-
-    if (currentAge >= 100) {
-      gs.gamePhase = GamePhase.GameOver;
-
-      const finalScores = Array.from(gs.players.values()).map((p) => ({
-        playerId: p.id,
-        playerName: p.name,
-        deathAge: Math.round(currentAge),
-        score: calculateLifeScore(p, Math.round(currentAge)),
-        isAlive: p.isAlive,
-        profession: p.profession.name,
-        quadrant: p.profession.quadrant,
-      }));
-
-      finalScores.sort((a, b) => b.score.total - a.score.total);
-
-      console.log(`[gameEnded] 房間 ${roomId} 遊戲結束！`);
-      finalScores.forEach((s, idx) => {
-        console.log(`  ${idx + 1}. ${s.playerName}（${s.profession}）: ${s.score.total} 分`);
-      });
-
-      emitToRoom(roomId, 'gameEnded', {
-        reason: 'timeUp',
-        finalAge: Math.round(currentAge),
-        finalScores,
-      });
-
-      emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
-    }
   }
 }, 5000);
 

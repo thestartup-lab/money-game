@@ -1,0 +1,277 @@
+/* 高齡友善手機介面：只套用在玩家手機頁，不影響主持人與大螢幕。 */
+.senior-mobile {
+  min-height: 100dvh;
+  background: #07111f;
+  color: #f8fafc;
+  font-family: -apple-system, BlinkMacSystemFont, "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  font-size: 18px;
+  line-height: 1.55;
+  letter-spacing: 0.012em;
+  -webkit-text-size-adjust: 100%;
+  text-rendering: optimizeLegibility;
+}
+
+.senior-mobile .card {
+  border: 2px solid #334155;
+  border-radius: 18px;
+  background: #111e31;
+  padding: 18px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+
+.senior-mobile .text-\[10px\],
+.senior-mobile .text-\[11px\],
+.senior-mobile .text-xs {
+  font-size: 0.94rem !important;
+  line-height: 1.45 !important;
+}
+
+.senior-mobile .text-sm {
+  font-size: 1.02rem !important;
+  line-height: 1.5 !important;
+}
+
+.senior-mobile .text-base { font-size: 1.1rem !important; }
+.senior-mobile .text-lg { font-size: 1.25rem !important; }
+.senior-mobile .text-xl { font-size: 1.45rem !important; }
+.senior-mobile .text-2xl { font-size: 1.75rem !important; }
+
+/* 原介面的次要灰字過暗；清晰版仍保留層級，但達到可辨識對比。 */
+.senior-mobile .text-gray-300 { color: #f1f5f9 !important; }
+.senior-mobile .text-gray-400 { color: #d5deea !important; }
+.senior-mobile .text-gray-500 { color: #b5c2d3 !important; }
+.senior-mobile .text-gray-600 { color: #94a3b8 !important; }
+.senior-mobile .placeholder-gray-400::placeholder,
+.senior-mobile .placeholder-gray-500::placeholder { color: #aebccc !important; }
+
+.senior-mobile button,
+.senior-mobile input,
+.senior-mobile select {
+  font: inherit;
+}
+
+.senior-mobile button {
+  min-height: 52px;
+  border-width: 2px;
+  font-size: 1rem !important;
+  line-height: 1.25;
+  touch-action: manipulation;
+}
+
+.senior-mobile button:focus-visible,
+.senior-mobile input:focus-visible,
+.senior-mobile select:focus-visible {
+  outline: 4px solid #fde047;
+  outline-offset: 3px;
+}
+
+.senior-mobile button:disabled {
+  opacity: 0.58 !important;
+}
+
+.senior-mobile .btn-primary {
+  border: 2px solid #34d399;
+  background: #047857;
+  color: #fff;
+  padding: 13px 18px;
+  font-weight: 800;
+}
+
+.senior-mobile .btn-secondary {
+  border: 2px solid #64748b;
+  background: #334155;
+  color: #fff;
+  padding: 13px 18px;
+  font-weight: 750;
+}
+
+.senior-mobile .btn-danger {
+  border: 2px solid #f87171;
+  background: #b91c1c;
+  padding: 13px 18px;
+}
+
+.senior-mobile input,
+.senior-mobile select,
+.senior-mobile .input-field {
+  min-height: 56px;
+  border: 2px solid #64748b;
+  border-radius: 14px;
+  background: #0f1b2d;
+  color: #fff;
+  padding: 12px 14px;
+  font-size: 1.08rem !important;
+}
+
+.senior-mobile .senior-form-label {
+  display: block;
+  margin-bottom: 7px;
+  color: #f8fafc;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.senior-mobile .senior-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 14px;
+  padding: calc(12px + env(safe-area-inset-top)) 16px 13px;
+  border-bottom: 3px solid #334155;
+  background: rgba(9, 20, 35, 0.97);
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(12px);
+}
+
+.senior-mobile .senior-player-name {
+  overflow: hidden;
+  color: #fff;
+  font-size: 1.35rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.senior-mobile .senior-player-role {
+  overflow: hidden;
+  color: #d5deea;
+  font-size: 0.94rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.senior-mobile .senior-age {
+  color: #fde047;
+  font-size: 1.35rem;
+  font-weight: 900;
+  text-align: right;
+}
+
+.senior-mobile .senior-cashflow {
+  font-size: 1rem;
+  font-weight: 850;
+  text-align: right;
+}
+
+.senior-mobile .senior-screen-cue {
+  grid-column: 1 / -1;
+  padding: 8px 12px;
+  border: 2px solid #818cf8;
+  border-radius: 12px;
+  background: #24245d;
+  color: #eef2ff;
+  font-size: 1rem;
+  font-weight: 850;
+  text-align: center;
+}
+
+.senior-mobile .senior-turn-card {
+  margin: 16px 16px 14px;
+  padding: 16px;
+  border-width: 3px;
+  box-shadow: none;
+}
+
+.senior-mobile .senior-turn-title {
+  font-size: 1.25rem;
+  font-weight: 900;
+}
+
+.senior-mobile .senior-quarter-label {
+  display: inline-flex;
+  margin-top: 9px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: #1e293b;
+  color: #fde68a;
+  font-size: 0.94rem;
+  font-weight: 800;
+}
+
+.senior-mobile .senior-collapse-panel {
+  border-top: 3px solid #334155;
+}
+
+.senior-mobile .senior-collapse-trigger {
+  min-height: 64px;
+  background: #17263a;
+  padding: 14px 18px;
+}
+
+.senior-mobile .senior-collapse-content {
+  background: #0b1626;
+  padding: 14px 16px 20px;
+}
+
+.senior-mobile .senior-decision-card {
+  border-width: 3px;
+  padding: 18px;
+}
+
+.senior-mobile .senior-dice .card {
+  border-color: #3f7669;
+}
+
+.senior-mobile .senior-dice .grid,
+.senior-mobile .senior-decision-card .grid {
+  gap: 12px;
+}
+
+.senior-mobile .senior-payday-form {
+  background: #07111f;
+}
+
+.senior-mobile .senior-payday-form > div:first-child,
+.senior-mobile .senior-payday-form > div:last-child {
+  background: #111e31;
+}
+
+.senior-mobile .senior-payday-form section {
+  padding-bottom: 4px;
+}
+
+.senior-mobile .senior-payday-form label,
+.senior-mobile .senior-payday-form button {
+  min-height: 56px;
+}
+
+.senior-mobile .senior-action-panel > div,
+.senior-mobile .senior-financial .card {
+  border-width: 2px;
+}
+
+.senior-mobile [class*="max-h-"] {
+  scrollbar-color: #64748b #0f172a;
+  scrollbar-width: auto;
+}
+
+@media (max-width: 420px) {
+  .senior-mobile { font-size: 17px; }
+
+  .senior-mobile .grid-cols-3 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .senior-mobile .grid-cols-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .senior-mobile .senior-payday-form .grid-cols-2,
+  .senior-mobile .senior-decision-card .grid-cols-2,
+  .senior-mobile .senior-decision-card .grid-cols-3 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .senior-mobile *,
+  .senior-mobile *::before,
+  .senior-mobile *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

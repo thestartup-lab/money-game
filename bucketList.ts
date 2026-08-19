@@ -7,6 +7,7 @@
 
 import type { Player, GameState } from './gameDataModels';
 import { AssetType } from './gameConstants';
+import { getCurrentAge } from './gameLogic';
 
 export interface BucketListGoal {
   id: string;
@@ -110,10 +111,7 @@ export const BUCKET_LIST_GOALS: BucketListGoal[] = [
     description: '健康存活到 80 歲（依然在世且 HP > 0）。',
     legacyReward: 20,
     lifeExpReward: 25,
-    isAchieved: (p) => {
-      const age = (p.startAge ?? 20) + Math.floor((p.lifeExperience ?? 0) / 100);
-      return age >= 80 && p.isAlive && (p.stats?.health ?? 0) > 0;
-    },
+    isAchieved: (p, gs) => getCurrentAge(gs) >= 80 && p.isAlive && (p.stats?.health ?? 0) > 0,
   },
 ];
 

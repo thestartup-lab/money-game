@@ -39,8 +39,17 @@ function BoardPreview() {
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center p-4 gap-4">
       <h1 className="text-emerald-400 font-bold text-lg">棋盤預覽</h1>
-      <GameBoard players={demoPLayers} currentTurnPlayerId="2" />
-      <p className="text-gray-500 text-xs">橘框 = 當前回合玩家 ▎ 白圈 = 你 ▎ 半透明 = 臥病</p>
+      <div className="h-[min(78vh,760px)] w-full max-w-[1360px]">
+        <GameBoard
+          players={demoPLayers}
+          currentTurnPlayerId="2"
+          completedRoundsInCycle={2}
+          showPlayerPanel={false}
+          showMiniMap={false}
+          enableCalibration
+        />
+      </div>
+      <p className="text-gray-500 text-xs">發光棋子 = 當前回合玩家 ▎ 中央三段圓盤 = 統一發薪進度</p>
     </div>
   );
 }

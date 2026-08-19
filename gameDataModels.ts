@@ -178,6 +178,22 @@ export interface MarketEvent {
   turnsRemaining: number;
 }
 
+/**
+ * 全場決策階段。玩家可在手機送出選擇，但只有主持人能收束階段並繼續遊戲。
+ * submitted 只公開「是否已送出」，不公開實際選項，避免大螢幕洩漏策略。
+ */
+export interface DecisionPhaseState {
+  id: string;
+  kind: 'payday' | 'deal' | 'charity' | 'crisis' | 'relationship' | 'marriage' | 'startup' | 'auction';
+  title: string;
+  playerId: string;
+  playerName: string;
+  submitted: boolean;
+  startedAt: number;
+  /** 提醒用倒數終點；歸零不會自動送出或結束，仍由主持人決定。 */
+  reminderEndsAt: number;
+}
+
 // ============================================================
 // 玩家成長數值
 // ============================================================
@@ -205,6 +221,8 @@ export interface PlayerStats {
  * 每個 boolean 代表「是否選擇該投資項目」，實際扣款由 statsSystem 驗證。
  */
 export interface PaydayPlanPayload {
+  /** 季度制結算涵蓋的月份；省略時視為舊版單月發薪。 */
+  settlementMonths?: number;
   /** 升級財商值（費用依當前 FQ 等級而定，見 FQ_UPGRADE_COSTS） */
   investInFQUpgrade: boolean;
   /** 維護健康：阻止本次 HP 自然衰退（費用 $3,000） */
@@ -219,6 +237,11 @@ export interface PaydayPlanPayload {
   stockDCAAmount: number;
   /** 本次購買的保險類型（已持有的將被跳過）*/
   buyInsuranceTypes: Array<'medical' | 'life' | 'property'>;
+  /** 發薪日同步選擇的生活行動；由主持人收束決策後才執行。 */
+  lifeChoice?:
+    | { type: 'none' }
+    | { type: 'travel'; destinationId: string; destinationName?: string }
+    | { type: 'social' };
 }
 
 // ============================================================
@@ -317,7 +340,7 @@ export class Player {
   numberOfChildren: number;
   /**
    * 累計發薪日次數。每次 triggerPayday 時遞增。
-   * 每 4 次觸發一次年度累進稅結算（4 個發薪日 = 遊戲一圈 = 一年）。
+   * 每 12 個月觸發一次年度累進稅結算。
    */
   paydayCount: number;
   /**
@@ -406,12 +429,14 @@ export class Player {
    * true 時 totalIncome 套用 FAST_TRACK_INCOME_MULTIPLIER（被動收入加倍）。
    */
   isInFastTrack: boolean;
-  /** 外圈當前位置（0–15），進入 FastTrack 後獨立計算。 */
+  /** 外圈當前位置（0–16），進入 FastTrack 後獨立計算。 */
   fastTrackPosition: number;
   /** 已造訪過的旅遊目的地 ID 清單（每個目的地只計一次體驗值）。 */
   visitedDestinations: string[];
   /** 旅遊特殊事件（如南極探險）直接累積的傳承分加分點數。 */
   legacyBonusPoints: number;
+  /** 外圈稅務規劃累積的「下一次年度稅」減免比例；年度結算後歸零。 */
+  taxPlanningCreditRate: number;
   /**
    * 是否已完成 Pre-20 流程（投胎、分配成長點數、選職業）。
    * startGame 時會驗證所有玩家均為 true 才允許啟動。
@@ -423,8 +448,8 @@ export class Player {
    * 使用旅遊或社交活動後扣 1；自由行程職業不受此限制（值保持 Infinity）。
    */
   actionTokensThisPayday: number;
-  /** 進修代價：true 時下一個發薪日自動跳過（少一回合）。 */
-  skipFirstPayday: boolean;
+  /** 進修尚需延後的完整人生回合數；通常為 1。 */
+  educationTurnsToSkip: number;
   /** 玩家是否處於斷線等待重連狀態（30 秒內可重新加入恢復資料）。 */
   isDisconnected: boolean;
   /** 玩家是否已至少路過「第二人生」格一次；路過後才能進入 FastTrack。 */
@@ -507,9 +532,10 @@ export class Player {
     this.fastTrackPosition = 0;
     this.visitedDestinations = [];
     this.legacyBonusPoints = 0;
+    this.taxPlanningCreditRate = 0;
     this.pre20Done = false;
     this.actionTokensThisPayday = profession.hasFlexibleSchedule ? Infinity : 1;
-    this.skipFirstPayday = false;
+    this.educationTurnsToSkip = 0;
     this.isDisconnected = false;
     this.hasPassedSecondLife = false;
     this.eventLog = [];
@@ -595,6 +621,7 @@ export class GameState {
   playerOrder: string[];
   currentPlayerTurnId: string;
   gamePhase: GamePhase;
+  /** 已完成的全體人生回合數；每增加 1，遊戲年齡增加 4 歲。 */
   turnNumber: number;
   marketEvents: MarketEvent[];
   createdAt: Date;
@@ -625,8 +652,8 @@ export class GameState {
     cardInfo?: { name: string; monthlyCashflow: number; downPayment: number };
   }>;
 
-  // ── 時鐘驅動年齡系統 ────────────────────────────────────────
-  /** 遊戲正式開始時的時間戳（startGame 事件觸發時設定；null = 尚未開始） */
+  // ── 回合年齡＋主持人活動倒數 ─────────────────────────────────
+  /** 活動倒數開始時間；只供主持人掌控總時長，不再決定遊戲年齡。 */
   gameStartTime: Date | null;
   /** 遊戲總時長（毫秒）。預設 90 分鐘 = 5,400,000 ms，主持人可設定 */
   gameDurationMs: number;
@@ -637,6 +664,23 @@ export class GameState {
 
   /** 當前發薪日規劃中已確認完成的玩家 ID 集合（全員確認後自動恢復時鐘） */
   paydayPlanningConfirmed: Set<string>;
+
+  /** 主持人控制的目前決策階段；null 表示正在正常推進棋盤。 */
+  decisionPhase: DecisionPhaseState | null;
+
+  /** 完成第 19 個全體回合、來到 96 歲後進入公平的最後一輪。 */
+  finalRoundStarted: boolean;
+  /** 尚未完成最後一次行動的存活玩家 ID，依實際回合順序排列。 */
+  finalRoundPendingPlayerIds: string[];
+
+  /** 距離上次全體發薪日已完成的完整輪數（0–3）。 */
+  roundsSinceGlobalPayday: number;
+  /** 第三輪結束後等待伺服器啟動全體季度結算。 */
+  globalPaydayPending: boolean;
+  /** 全體季度結算正在依序進行。 */
+  globalPaydayInProgress: boolean;
+  /** 已完成的全體發薪次數。 */
+  globalPaydayNumber: number;
 
   // ── 牌組 ──────────────────────────────────────────────────
   smallDealDeck: Deck<DealCard>;
@@ -659,6 +703,13 @@ export class GameState {
     this.pausedAt = null;
     this.totalPausedMs = 0;
     this.paydayPlanningConfirmed = new Set();
+    this.decisionPhase = null;
+    this.finalRoundStarted = false;
+    this.finalRoundPendingPlayerIds = [];
+    this.roundsSinceGlobalPayday = 0;
+    this.globalPaydayPending = false;
+    this.globalPaydayInProgress = false;
+    this.globalPaydayNumber = 0;
     this.smallDealDeck = new Deck(SMALL_DEALS);
     this.bigDealDeck   = new Deck(BIG_DEALS);
     this.doodadDeck    = new Deck(DOODADS);
@@ -676,6 +727,7 @@ export class GameState {
   removePlayer(playerId: string): void {
     this.players.delete(playerId);
     this.playerOrder = this.playerOrder.filter((id) => id !== playerId);
+    this.finalRoundPendingPlayerIds = this.finalRoundPendingPlayerIds.filter((id) => id !== playerId);
   }
 
   /**
@@ -684,6 +736,12 @@ export class GameState {
    */
   advanceToNextTurn(): void {
     if (this.playerOrder.length === 0) return;
+
+    if (this.finalRoundStarted) {
+      this.finalRoundPendingPlayerIds = this.finalRoundPendingPlayerIds.filter(
+        (id) => id !== this.currentPlayerTurnId
+      );
+    }
 
     const currentIndex = this.playerOrder.indexOf(this.currentPlayerTurnId);
     const total = this.playerOrder.length;
@@ -697,6 +755,12 @@ export class GameState {
         this.currentPlayerTurnId = nextId;
         if (nextIndex <= currentIndex) {
           this.turnNumber += 1;
+          if (!this.finalRoundStarted && !this.globalPaydayInProgress && !this.globalPaydayPending) {
+            this.roundsSinceGlobalPayday += 1;
+            if (this.roundsSinceGlobalPayday >= 3) {
+              this.globalPaydayPending = true;
+            }
+          }
         }
         return;
       }

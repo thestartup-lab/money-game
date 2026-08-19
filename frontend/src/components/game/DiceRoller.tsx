@@ -19,7 +19,7 @@ export default function DiceRoller({ isMyTurn, isBedridden, onRoll, lastRoll, di
 
   if (isBedridden) {
     return (
-      <div className="card text-center text-red-400">
+      <div className="senior-dice card text-center text-red-300 font-bold">
         🛏 臥床中，無法行動
         <p className="text-xs text-gray-500 mt-1">等待下回合判定是否自然死亡</p>
       </div>
@@ -28,15 +28,15 @@ export default function DiceRoller({ isMyTurn, isBedridden, onRoll, lastRoll, di
 
   if (!isMyTurn) {
     return (
-      <div className="card text-center text-gray-500">
+      <div className="senior-dice card text-center text-gray-300 font-bold">
         ⏳ 等待其他玩家行動中…
       </div>
     );
   }
 
   return (
-    <div className="card space-y-3">
-      <p className="text-center text-emerald-400 font-semibold">輪到你了！</p>
+    <div className="senior-dice card space-y-3">
+      <p className="text-center text-emerald-300 font-black text-xl">輪到你了！</p>
 
       {lastRoll && (
         <div className="text-center">
@@ -49,18 +49,19 @@ export default function DiceRoller({ isMyTurn, isBedridden, onRoll, lastRoll, di
         <button
           className="btn-primary"
           disabled={rolling || !!disabled}
-          onClick={() => handleRoll(1)}
+          onClick={() => handleRoll(2)}
         >
-          {rolling ? '🎲 擲中…' : '🎲 擲 1 顆'}
+          {rolling ? '🎲 擲中…' : '🎲🎲 快速推進'}
         </button>
         <button
           className="btn-secondary"
           disabled={rolling || !!disabled}
-          onClick={() => handleRoll(2)}
+          onClick={() => handleRoll(1)}
         >
-          🎲🎲 擲 2 顆
+          🎲 精準移動
         </button>
       </div>
+      <p className="text-center text-[11px] text-gray-500">兩顆骰走得快；一顆骰保留落點控制</p>
     </div>
   );
 }

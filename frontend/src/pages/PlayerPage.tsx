@@ -3,14 +3,13 @@ import { io, Socket } from 'socket.io-client';
 import type { GameState, Player, PlayerAnalysis, ActiveEvent, PaydayFormData, PaydayPlanPayload, LifeChoice } from '../types/game';
 import FinancialStatement from '../components/game/FinancialStatement';
 import DiceRoller from '../components/game/DiceRoller';
-import DiceRollOverlay, { type DiceRollData } from '../components/game/DiceRollOverlay';
 import ActionPanel from '../components/game/ActionPanel';
 import AnalysisPage from './AnalysisPage';
 import EventCard from '../components/game/EventCard';
 import PaydayPlanForm from '../components/game/PaydayPlanForm';
 import CollapsePanel from '../components/game/CollapsePanel';
-import { innerCircleConfig, outerCircleConfig } from '../components/game/boardConfig';
-import IntroSheet from '../components/game/IntroSheet';
+import DecisionCountdown from '../components/game/DecisionCountdown';
+import '../components/game/MobileClarity.css';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
@@ -64,12 +63,12 @@ export default function PlayerPage() {
   const [notifications, setNotifications] = useState<string[]>([]);
   const [lastRoll, setLastRoll] = useState<{ rolled: number; newPosition: number } | undefined>();
   const [rollingLocked, setRollingLocked] = useState(false);
-  const [diceAnim, setDiceAnim] = useState<DiceRollData | null>(null);
 
   // 互動機制 state
   type CongratulatableEvent = { targetId: string; targetName: string; event: string };
   type ActiveAuction = {
     auctionId: string; triggeredByName: string; endsAt: number;
+    controlledByHost?: boolean;
     card?: { id: string; name: string; description?: string; minBid: number; monthlyCashflow?: number };
     minBid: number; highestBid: number; highestBidderName?: string;
   };
@@ -96,7 +95,6 @@ export default function PlayerPage() {
     newProfession: string;
     salaryChange?: number;
   } | null>(null);
-  const [showIntro, setShowIntro] = useState(false);
 
   // Join form state — pre-fill room code from URL ?room=XXX
   const [playerName, setPlayerName] = useState('');
@@ -221,27 +219,27 @@ export default function PlayerPage() {
       setLastRoll(p);
       setRollingLocked(false);
     });
-    s.on('playerRolled', (p: { playerId: string; playerName: string; colorIndex: number; dice: number[]; total: number; oldPosition: number; newPosition: number }) => {
-      // 只為自己播放動畫，避免他人擲骰時干擾自己手機畫面
-      if (p.playerId !== s.id) return;
-      setDiceAnim({ ...p, key: Date.now() });
-    });
     s.on('paydayPlanningRequired', (p: PaydayFormData) => {
       setPaydayForm(p);
       addNotification('💰 發薪日到了！請規劃你的投資');
     });
-    s.on('paydaySkipped', (_p: { playerId?: string; reason?: string }) => {
-      addNotification('📚 進修中，本次發薪日跳過。');
-    });
     s.on('turnSkipped', (p: { reason?: string; turnsRemaining?: number }) => {
-      const reason = p.reason === 'bedridden' ? '臥床中' : p.reason === 'turnsToSkip' ? '行動跳過' : '回合跳過';
+      setRollingLocked(false);
+      const reason = p.reason === 'education'
+        ? '進修中，25歲後開始職涯'
+        : p.reason === 'bedridden'
+          ? '臥床中'
+          : p.reason === 'turnsToSkip' || p.reason === 'crisis'
+            ? '行動跳過'
+            : '回合跳過';
       const remaining = (p.turnsRemaining ?? 0) > 0 ? `（剩餘 ${p.turnsRemaining} 回）` : '';
       addNotification(`⏭️ ${reason}，本回合跳過${remaining}。`);
     });
-    s.on('ratRaceEscaped', (p: { playerName: string; canCongratulate?: boolean; playerId?: string }) => {
-      addNotification(`🎉 ${p.playerName} 脫出老鼠賽跑！`);
+    s.on('ratRaceEscaped', (p: { playerName: string; routeLabel?: string; canCongratulate?: boolean; playerId?: string }) => {
+      const route = p.routeLabel ? `，完成「${p.routeLabel}」` : '';
+      addNotification(`🎉 ${p.playerName}${route}，進入第二人生！`);
       if (p.canCongratulate && p.playerId !== s.id) {
-        setCongratulatableEvent({ targetId: p.playerId ?? '', targetName: p.playerName, event: '脫出老鼠賽跑' });
+        setCongratulatableEvent({ targetId: p.playerId ?? '', targetName: p.playerName, event: '進入第二人生' });
       }
     });
     s.on('marriageWindowOpened', (p: { card: { title: string; description: string; monthlyBonus: number; lifeExpGain: number }; currentAge: number; inPeakWindow: boolean; timeoutMs: number }) => {
@@ -273,14 +271,13 @@ export default function PlayerPage() {
         setCongratulatableEvent({ targetId: p.playerId ?? '', targetName: p.playerName, event: '結婚' });
       }
     });
-    s.on('dealAuctionStarted', (p: { auctionId: string; triggeredBy: string; triggeredByName: string; endsAt: number; isSpecialAuction?: boolean; card?: { id: string; name: string; description?: string; minBid: number; monthlyCashflow?: number }; }) => {
+    s.on('dealAuctionStarted', (p: { auctionId: string; triggeredBy: string; triggeredByName: string; endsAt: number; controlledByHost?: boolean; isSpecialAuction?: boolean; card?: { id: string; name: string; description?: string; minBid: number; monthlyCashflow?: number }; }) => {
       // 特殊拍賣由主持人觸發，所有玩家都應該收到（包含主持人也不過濾，因主持人不是玩家）
       if (!p.isSpecialAuction && p.triggeredBy === s.id) return;
       const minBid = p.card?.minBid ?? 0;
-      const durationSec = Math.max(1, Math.round((p.endsAt - Date.now()) / 1000));
       const prefix = p.isSpecialAuction
-        ? `🔨 主持人開啟特殊拍賣！${durationSec} 秒內可搶標`
-        : `🔔 ${p.triggeredByName} 放棄交易！${durationSec} 秒內可出價搶標`;
+        ? '🔨 主持人開啟特殊拍賣！由主持人決定結束時間'
+        : `🔔 ${p.triggeredByName} 放棄交易！由主持人決定競標時間`;
       addNotification(`${prefix}（${p.card?.name ?? ''}，起標 $${minBid.toLocaleString()}）`);
       setActiveAuction({ ...p, minBid, highestBid: 0 });
     });
@@ -354,6 +351,23 @@ export default function PlayerPage() {
     s.on('playerFinalScore', (p: { playerName: string; deathAge: number; score: { total: number } }) => {
       addNotification(`${p.playerName} 在 ${p.deathAge} 歲結束人生（${p.score.total} 分）`);
     });
+    s.on('finalRoundStarted', () => {
+      addNotification('⏳ 現在是 96 歲，人生進入最後一輪；全員完成後來到 100 歲。');
+    });
+    s.on('annualTaxResult', (p: {
+      playerId: string;
+      taxAmount: number;
+      taxCreditAmount?: number;
+      cashAfterTax: number;
+    }) => {
+      if (p.playerId !== s.id) return;
+      const saving = (p.taxCreditAmount ?? 0) > 0 ? `，稅務規劃省下 $${fmt(p.taxCreditAmount ?? 0)}` : '';
+      addNotification(`📊 年度稅 $${fmt(p.taxAmount)}${saving}；稅後現金 $${fmt(p.cashAfterTax)}`);
+    });
+    s.on('decisionPhaseEnded', () => {
+      setActiveEvent(null);
+      setPaydayForm(null);
+    });
     s.on('globalEventAnnouncement', (p: { event: { title: string; description: string } }) => {
       addNotification(`📢 全局事件：${p.event?.title ?? ''} — ${p.event?.description ?? ''}`);
       setActiveEvent({ kind: 'global_event', title: p.event?.title ?? '全局事件', description: p.event?.description ?? '' });
@@ -408,6 +422,48 @@ export default function PlayerPage() {
     s.on('charityCardPending', (p: { amount: number }) => {
       setActiveEvent({ kind: 'charity', amount: p.amount });
     });
+    s.on('fastTrackDealCard', (p: {
+      deal: { id: string; title: string; description?: string; asset: { downPayment?: number; cost: number; monthlyCashflow: number } };
+      playerCash?: number;
+      creditScore?: number;
+      loanAvailable?: number;
+    }) => {
+      setActiveEvent({
+        kind: 'deal_pick',
+        cards: [{
+          id: p.deal.id,
+          name: p.deal.title,
+          description: p.deal.description,
+          downPayment: p.deal.asset.downPayment ?? p.deal.asset.cost,
+          monthlyCashflow: p.deal.asset.monthlyCashflow,
+        }],
+        playerCash: p.playerCash ?? 0,
+        creditScore: p.creditScore,
+        loanAvailable: p.loanAvailable,
+      });
+    });
+    s.on('fastTrackTravelOptions', (p: {
+      destinations: Array<{ id: string; name: string; region: string; cost: number; lifeExpGained: number }>;
+      playerCash: number;
+    }) => {
+      setActiveEvent({ kind: 'fast_track_travel', destinations: p.destinations, playerCash: p.playerCash });
+    });
+    s.on('fastTrackPartnershipOptions', (p: {
+      availablePartners: Array<{ id: string; name: string }>;
+    }) => {
+      setActiveEvent({ kind: 'partnership_pick', availablePartners: p.availablePartners });
+    });
+    s.on('fastTrackPartnershipInvitation', (p: {
+      offerorId: string;
+      offerorName: string;
+      estimatedDividend: number;
+    }) => {
+      setActiveEvent({
+        kind: 'partnership_response',
+        offerorName: p.offerorName,
+        dividendEstimate: p.estimatedDividend,
+      });
+    });
     s.on('techStartupOffer', (p: { investmentAmount: number; playerCash: number }) => {
       setActiveEvent({ kind: 'tech_startup_offer', investmentAmount: p.investmentAmount, playerCash: p.playerCash });
     });
@@ -426,11 +482,9 @@ export default function PlayerPage() {
       addNotification(`💹 資產出售！淨收益 ${sign}$${p.netCashChange.toLocaleString()}（賣價 $${p.proceeds.toLocaleString()}${p.debtSettled > 0 ? `，清償負債 $${p.debtSettled.toLocaleString()}` : ''}）`);
     });
 
-    // 發薪日規劃完成廣播：非當前玩家自動回報 planningDone，避免遊戲卡住等待 30 秒
+    // 發薪日結果在主持人收束決策後才公開。
     s.on('paydayPlanResult', (p: { playerId: string; planResult?: { stockDCA?: { executed: boolean; amount: number; newPortfolioValue: number } } }) => {
-      if (p.playerId !== s.id) {
-        s.emit('planningDone');
-      } else if (p.planResult?.stockDCA?.executed) {
+      if (p.playerId === s.id && p.planResult?.stockDCA?.executed) {
         addNotification(`📈 發薪日定投 $${fmt(p.planResult.stockDCA.amount)}，股票組合總值 $${fmt(p.planResult.stockDCA.newPortfolioValue)}`);
       }
       setPaydayForm(null);
@@ -508,8 +562,8 @@ export default function PlayerPage() {
       }
     });
 
-    s.on('gameClock', (p: { currentAge: number }) => {
-      setGameState((gs) => gs ? { ...gs, currentAge: p.currentAge } : gs);
+    s.on('gameClock', (p: { currentAge: number; remainingTimeMs?: number }) => {
+      setGameState((gs) => gs ? { ...gs, currentAge: p.currentAge, remainingTimeMs: p.remainingTimeMs ?? gs.remainingTimeMs } : gs);
     });
 
     return () => { s.disconnect(); };
@@ -523,12 +577,7 @@ export default function PlayerPage() {
   }
 
   function handlePaydaySubmit(plan: PaydayPlanPayload, lifeChoice: LifeChoice) {
-    emit('submitPaydayPlan', plan);
-    if (lifeChoice.type === 'travel') {
-      emit('goTravel', { destinationId: (lifeChoice as { type: 'travel'; destinationId: string; destinationName: string }).destinationId });
-    } else if (lifeChoice.type === 'social') {
-      emit('attendSocialEvent');
-    }
+    emit('submitPaydayPlan', { ...plan, lifeChoice });
     setPaydayForm(null);
   }
 
@@ -539,21 +588,26 @@ export default function PlayerPage() {
   // ── JOIN VIEW ──
   if (view === 'join') {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
+      <div className="senior-mobile min-h-screen flex items-center justify-center p-4">
         <div className="card w-full max-w-sm space-y-4">
-          <h1 className="text-2xl font-bold text-center text-emerald-400">百歲人生</h1>
-          <p className="text-center text-gray-400 text-sm">輸入你的名字加入遊戲</p>
+          <h1 className="text-2xl font-black text-center text-emerald-300">百歲人生</h1>
+          <p className="text-center text-gray-400 text-sm">輸入資料，加入現場遊戲</p>
 
           {!connected && <p className="text-center text-yellow-400 text-sm">連線中…</p>}
 
-          <input
-            className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 text-lg"
-            placeholder="你的名字"
-            value={playerName}
-            onChange={(e) => setPlayerName(e.target.value)}
-            maxLength={12}
-            autoFocus
-          />
+          <div>
+            <label className="senior-form-label" htmlFor="player-name">你的名字</label>
+            <input
+              id="player-name"
+              className="w-full bg-gray-800 border border-gray-600 rounded-xl px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 text-lg"
+              placeholder="例如：王小明"
+              value={playerName}
+              onChange={(e) => setPlayerName(e.target.value)}
+              maxLength={12}
+              autoComplete="name"
+              autoFocus
+            />
+          </div>
 
           {roomLocked && roomCode ? (
             <div className="flex items-center gap-2 bg-gray-800 border border-emerald-700 rounded-xl px-3 py-2">
@@ -567,20 +621,24 @@ export default function PlayerPage() {
               </button>
             </div>
           ) : (
-            <input
-              className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-white placeholder-gray-500 tracking-widest focus:outline-none focus:border-emerald-500"
-              style={{ textTransform: 'uppercase' }}
-              placeholder="房間代碼 (e.g. ABC123)"
-              value={roomCode}
-              onChange={(e) => setRoomCode(e.target.value)}
-              autoCapitalize="characters"
-              autoCorrect="off"
-              spellCheck={false}
-              maxLength={6}
-            />
+            <div>
+              <label className="senior-form-label" htmlFor="room-code">房間代碼</label>
+              <input
+                id="room-code"
+                className="w-full bg-gray-800 border border-gray-600 rounded-xl px-3 py-2 text-white placeholder-gray-500 tracking-widest focus:outline-none focus:border-emerald-500"
+                style={{ textTransform: 'uppercase' }}
+                placeholder="例如：ABC123"
+                value={roomCode}
+                onChange={(e) => setRoomCode(e.target.value)}
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                maxLength={6}
+              />
+            </div>
           )}
 
-          {error && <p className="text-red-400 text-sm text-center">{error}</p>}
+          {error && <p className="text-red-300 text-sm text-center font-bold" role="alert">{error}</p>}
           <button
             className="btn-primary w-full text-lg py-3"
             disabled={!connected || !playerName.trim() || roomCode.length < 4}
@@ -605,7 +663,7 @@ export default function PlayerPage() {
     const hasContinuedEdu = myPlayer?.hasContinuedEducation ?? false;
 
     return (
-      <div className="min-h-screen p-4 space-y-4 max-w-lg mx-auto">
+      <div className="senior-mobile min-h-screen p-4 space-y-4 max-w-lg mx-auto">
         {/* 標題 */}
         <div className="card text-center">
           <h2 className="text-xl font-bold text-emerald-400">20 歲前的人生</h2>
@@ -741,13 +799,13 @@ export default function PlayerPage() {
                 <div className="bg-red-950 border border-red-800 rounded-lg p-2 space-y-1">
                   <p className="text-red-400 font-semibold">進修代價</p>
                   <p className="text-gray-300">$450,000 學貸（每月 -$9,000）</p>
-                  <p className="text-gray-300">跳過第一個發薪日</p>
+                  <p className="text-gray-300">第一個人生回合用於進修，暫停行動</p>
                 </div>
               </div>
               {hasContinuedEdu ? (
                 <div className="bg-emerald-950 border border-emerald-700 rounded-xl p-3 space-y-2">
                   <p className="text-emerald-300 font-bold text-sm">✓ 進修完成！你從 25 歲開始職涯</p>
-                  <p className="text-xs text-gray-400">進修期間 22–25 歲，跳過第一個發薪日作為代價</p>
+                  <p className="text-xs text-gray-400">進修期間 22–25 歲，第一個人生回合會自動交棒；發薪不再重複扣除</p>
                   <div className="space-y-1 pt-2 border-t border-emerald-800/60">
                     <p className="text-xs text-white font-semibold">已解鎖高階職業（保證分配，不會抽到初階）：</p>
                     <div className="flex items-start gap-1.5">
@@ -996,15 +1054,6 @@ export default function PlayerPage() {
 
   // ── GAME VIEW ──
   if ((view === 'game' || view === 'gameover') && myPlayer && gameState) {
-    // 找到目前格子（快車道時用 fastTrackPosition，內圈時用 currentPosition）
-    const isOnFastTrack = !!myPlayer.isInFastTrack;
-    const trackConfig = isOnFastTrack ? outerCircleConfig : innerCircleConfig;
-    const rawPos = isOnFastTrack
-      ? (myPlayer.fastTrackPosition ?? 0)
-      : (myPlayer.currentPosition ?? 0);
-    const pos = trackConfig.length > 0 ? rawPos % trackConfig.length : 0;
-    const cellConfig = trackConfig[pos];
-
     // 顯示用年齡：優先取後端算好的 personalAge；舊版 server 退回前端計算
     const personalAge =
       myPlayer.personalAge ?? Math.max(myPlayer.startAge ?? 20, gameState.currentAge);
@@ -1013,20 +1062,15 @@ export default function PlayerPage() {
     const notifCount = notifications.length;
 
     return (
-      <div className="min-h-screen bg-gray-900 flex flex-col max-w-lg mx-auto relative">
-
-        {/* ── 擲骰動畫 overlay（自己擲骰時播放） ── */}
-        {diceAnim && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center pointer-events-none">
-            <DiceRollOverlay data={diceAnim} onDone={() => setDiceAnim(null)} size="small" />
-          </div>
-        )}
+      <div className="senior-mobile min-h-screen bg-gray-900 flex flex-col max-w-lg mx-auto relative">
 
         {/* ── 發薪日全螢幕表單（最高層） ── */}
         {paydayForm && myPlayer && (
           <PaydayPlanForm
+            key={`${paydayForm.paydayPosition}-${paydayForm.paydayIndex ?? 0}`}
             data={paydayForm}
             playerCash={myPlayer.cash}
+            reminderEndsAt={gameState?.decisionPhase?.reminderEndsAt}
             onSubmit={handlePaydaySubmit}
           />
         )}
@@ -1059,48 +1103,42 @@ export default function PlayerPage() {
         )}
 
         {/* ── TopBar ── */}
-        <div className="bg-gray-800 border-b border-gray-700 px-4 py-2 flex items-center justify-between">
+        <header className="senior-topbar">
           <div className="min-w-0">
-            <div className="text-white font-bold text-sm truncate">{myPlayer.name}</div>
-            <div className="text-gray-400 text-xs truncate">{myPlayer.profession.name}
+            <div className="senior-player-name">{myPlayer.name}</div>
+            <div className="senior-player-role">{myPlayer.profession.name}
               {myPlayer.isInFastTrack && <span className="ml-1 text-yellow-400">★ FastTrack</span>}
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0 ml-2">
-            <button
-              className="text-xs px-2 py-1 rounded-lg bg-emerald-900/60 hover:bg-emerald-900 border border-emerald-700 text-emerald-300 transition-colors"
-              onClick={() => setShowIntro(true)}
-            >
-              策略指南
-            </button>
-            <div className="text-right">
-              <div className="text-yellow-300 font-bold text-sm">
-                {personalAge.toFixed(1)} 歲
-              </div>
-              {gameState.isPaused && <div className="text-orange-400 text-xs">⏸ 暫停</div>}
-              <div className={`text-xs font-bold ${myPlayer.monthlyCashflow >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {myPlayer.monthlyCashflow >= 0 ? '+' : ''}${fmt(myPlayer.monthlyCashflow)}/月
-              </div>
+          <div>
+            <div className="senior-age">{Math.round(personalAge)} 歲</div>
+            <div className="text-right text-xs font-bold text-yellow-200">
+              人生輪 {Math.min(gameState.totalLifeRounds ?? 20, (gameState.completedLifeRounds ?? gameState.turnNumber) + 1)}/{gameState.totalLifeRounds ?? 20}
+            </div>
+            {gameState.isPaused ? <div className="text-orange-300 text-xs text-right font-bold">⏸ 暫停</div> : null}
+            <div className={`senior-cashflow ${myPlayer.monthlyCashflow >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+              {myPlayer.monthlyCashflow >= 0 ? '+' : ''}${fmt(myPlayer.monthlyCashflow)}/月
             </div>
           </div>
-        </div>
+          <div className="senior-screen-cue">📺 棋盤與公開結果，請抬頭看大螢幕</div>
+        </header>
 
         {/* ── 主要捲動區 ── */}
         <div className="flex-1 overflow-y-auto">
 
-          {/* 目前格子大圖 */}
-          {!isGameOver && cellConfig && (
-            <div className="mx-4 mt-4 mb-2 rounded-2xl border border-gray-700 bg-gray-800 p-4 text-center">
-              <div className="text-5xl mb-2">{cellConfig.icon}</div>
-              <div className="text-white font-bold text-lg">{cellConfig.name}</div>
-              <div className="text-gray-400 text-xs mt-0.5">
-                {isOnFastTrack ? '外圈' : '內圈'} 第 {pos + 1} 格 / 共 {trackConfig.length} 格
-              </div>
-              {cellConfig.description && (
-                <div className="mt-2 text-xs text-emerald-300 bg-emerald-950/50 rounded-xl px-3 py-2 text-left">
-                  {cellConfig.description}
-                </div>
-              )}
+          {!isGameOver && (
+            <div className={`senior-turn-card rounded-2xl border text-center ${isMyTurn ? 'border-emerald-400 bg-emerald-950/70' : 'border-slate-500 bg-slate-800'}`}>
+              <p className={`senior-turn-title ${isMyTurn ? 'text-emerald-200' : 'text-white'}`}>
+                {isMyTurn ? '輪到你了，抬頭看大螢幕' : `等待 ${gameState.players.find((p) => p.id === gameState.currentPlayerTurnId)?.name ?? '其他玩家'} 行動`}
+              </p>
+              <p className="mt-1 text-xs text-gray-400">手機只處理擲骰與私人選擇</p>
+              <span className="senior-quarter-label">
+                {gameState.globalPaydayInProgress
+                  ? '本季全體發薪中'
+                  : gameState.finalRoundStarted
+                    ? '96 歲 · 第 20 輪（最後一輪）'
+                    : `人生第 ${Math.min(gameState.totalLifeRounds ?? 20, (gameState.completedLifeRounds ?? gameState.turnNumber) + 1)} 輪 · 發薪進度 ${Math.min(3, (gameState.roundsSinceGlobalPayday ?? 0) + 1)}/3`}
+              </span>
             </div>
           )}
 
@@ -1108,45 +1146,42 @@ export default function PlayerPage() {
           {activeEvent && (
             <div className="mx-4 mb-3">
               <EventCard
+                key={JSON.stringify(activeEvent)}
                 event={activeEvent}
                 onDecision={handleCardDecision}
                 onDismiss={() => setActiveEvent(null)}
+                reminderEndsAt={gameState.decisionPhase?.reminderEndsAt}
               />
             </div>
           )}
 
           {/* 擲骰區 */}
-          {!isGameOver && (
+          {!isGameOver && !gameState.decisionPhase && (
             <div className="mx-4 mb-3">
               <DiceRoller
                 isMyTurn={isMyTurn}
                 isBedridden={myPlayer.isBedridden}
                 onRoll={(count) => { setRollingLocked(true); emit('playerRoll', { diceCount: count }); }}
                 lastRoll={lastRoll}
-                disabled={rollingLocked}
+                disabled={rollingLocked || gameState.isPaused}
               />
             </div>
           )}
 
-          {/* 幸福指數提示 */}
-          {!isGameOver && (() => {
-            const cf = myPlayer.monthlyCashflow;
-            const exp = myPlayer.totalExpenses;
-            const hp = myPlayer.stats.health;
-            const nt = myPlayer.stats.network;
-            const travels = myPlayer.visitedDestinations?.length ?? 0;
-            let hint = '';
-            let hintColor = 'text-emerald-300';
-            if (hp < 40) { hint = '❤️ 健康警告！少旅遊多休養，維護生命體驗指數'; hintColor = 'text-red-400'; }
-            else if (cf < 0) { hint = '📉 現金流為負，賣掉負現金流資產讓錢幫你工作'; hintColor = 'text-red-400'; }
-            else if (!myPlayer.isMarried && nt < 3) { hint = '🤝 NT 人脈偏低，多社交事件可提升人際關係指數'; hintColor = 'text-pink-400'; }
-            else if (cf < 7_500) { hint = '💡 持續投資小交易，增加被動收入'; hintColor = 'text-yellow-400'; }
-            else if (travels < 3) { hint = '✈️ 多出去走走！旅遊可提升生命體驗指數'; hintColor = 'text-teal-400'; }
-            else if (cf >= exp && !myPlayer.isInFastTrack) { hint = '🚀 被動收入已超越支出，快準備脫出老鼠賽跑！'; hintColor = 'text-emerald-400'; }
-            return hint ? (
-              <div className={`mx-4 text-xs px-3 py-2 rounded-xl bg-gray-800 border border-gray-700 mb-2 ${hintColor}`}>{hint}</div>
-            ) : null;
-          })()}
+          {gameState.decisionPhase && !paydayForm && (
+            <div className="mx-4 mb-3 rounded-xl border border-indigo-700 bg-indigo-950/60 px-3 py-3 text-center">
+              <p className="text-sm font-bold text-indigo-200">
+                {gameState.decisionPhase.playerId === myId
+                  ? gameState.decisionPhase.submitted ? '選擇已送出，等待主持人揭曉' : '請在手機完成私人決策'
+                  : `${gameState.decisionPhase.playerName} 正在決策`}
+              </p>
+              <p className="mt-1 text-xs text-gray-500">討論與局勢請看大螢幕</p>
+              <DecisionCountdown
+                reminderEndsAt={gameState.decisionPhase.reminderEndsAt}
+                className="mt-2 block font-mono text-lg font-black text-yellow-300"
+              />
+            </div>
+          )}
 
           {/* 遊戲結束橫幅 */}
           {isGameOver && (
@@ -1226,7 +1261,7 @@ export default function PlayerPage() {
               <FinancialStatement player={myPlayer} />
             </CollapsePanel>
 
-            <CollapsePanel title="行動" defaultOpen={false}>
+            {!gameState.decisionPhase && <CollapsePanel title="行動" defaultOpen={false}>
               <ActionPanel
                 player={myPlayer}
                 currentAge={personalAge}
@@ -1245,7 +1280,7 @@ export default function PlayerPage() {
                 careerChangeData={careerChangeData}
                 onCareerChange={(professionId) => emit('requestCareerChange', { newProfessionId: professionId })}
               />
-            </CollapsePanel>
+            </CollapsePanel>}
 
             <CollapsePanel title="通知" badge={notifCount > 0 ? notifCount : undefined} defaultOpen={false}>
               {notifications.length > 0 ? (
@@ -1362,15 +1397,6 @@ export default function PlayerPage() {
           </div>
         </div>
 
-        {/* 策略指南 bottom sheet */}
-        {showIntro && (
-          <div className="fixed inset-0 z-50 flex flex-col justify-end">
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowIntro(false)} />
-            <div className="relative bg-gray-950 rounded-t-2xl border-t border-gray-700 h-[85vh] flex flex-col">
-              <IntroSheet onClose={() => setShowIntro(false)} mode="sheet" />
-            </div>
-          </div>
-        )}
       </div>
     );
   }
@@ -1378,7 +1404,7 @@ export default function PlayerPage() {
   // ── ANALYSIS VIEW ──
   if (view === 'analysis' && analysis) {
     return (
-      <div className="min-h-screen p-3 max-w-lg mx-auto">
+      <div className="senior-mobile min-h-screen p-3 max-w-lg mx-auto">
         <button className="btn-secondary text-sm mb-3" onClick={() => setView(isGameOver ? 'gameover' : 'game')}>
           ← 返回
         </button>
@@ -1388,9 +1414,8 @@ export default function PlayerPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center text-gray-400">
+    <div className="senior-mobile min-h-screen flex items-center justify-center text-gray-300">
       載入中…
     </div>
   );
 }
-

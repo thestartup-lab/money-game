@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import ReactECharts from 'echarts-for-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -8,12 +8,17 @@ import type { BoardPlayer } from '../components/game/GameBoard';
 import IntroSheet from '../components/game/IntroSheet';
 import DecisionHistoryView from '../components/analysis/DecisionHistoryView';
 import DiceRollOverlay, { type DiceRollData } from '../components/game/DiceRollOverlay';
+import DecisionCountdown from '../components/game/DecisionCountdown';
+import TurnIntroOverlay, { type TurnIntroData } from '../components/game/TurnIntroOverlay';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
+const remainingGameMs = (gs: GameState) => {
+  return Math.max(0, Math.round(gs.remainingTimeMs ?? gs.gameDurationMs));
+};
 
 const STAGE_LABELS: Record<string, string> = {
-  Youth: '青年期', Family: '家庭期', Peak: '壯年期', Senior: '暮年期', Legacy: '傳承期',
+  Youth: '青年期', Family: '家庭期', Transition: '轉型期', Retirement: '退休期', Legacy: '傳承期',
 };
 const PHASE_LABELS: Record<string, string> = {
   WaitingForPlayers: '等待玩家', Pre20: '開局設定', RatRace: '老鼠賽跑',
@@ -48,7 +53,7 @@ export default function DisplayScreen() {
   const [joining, setJoining] = useState(false);
   const [view, setView] = useState<'game' | 'analysis' | 'intro' | 'history'>('game');
   const [ticker, setTicker] = useState<string[]>([]);
-  // 倒數計時（毫秒），從 gameState 的 gameDurationMs 與 currentAge 算出，每秒本地遞減
+  // 主持人活動倒數：只作節奏參考，不再推動年齡或結束遊戲。
   const [countdownMs, setCountdownMs] = useState(0);
   const countdownRef = useRef(0);
   // 置中大字幕：落地事件與里程碑
@@ -64,28 +69,67 @@ export default function DisplayScreen() {
   };
   const [paydayCards, setPaydayCards] = useState<Map<string, PaydayCard>>(new Map());
   const [showPaydayOverlay, setShowPaydayOverlay] = useState(false);
+  const showPaydayOverlayRef = useRef(false);
   const paydayDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 本回合玩家行動標記
   const [playerRoundActions, setPlayerRoundActions] = useState<Map<string, string>>(new Map());
   const prevTurnIdRef = useRef<string | null>(null);
+  const prevGamePhaseRef = useRef<GameState['gamePhase'] | null>(null);
+  const [pendingTurnIntro, setPendingTurnIntro] = useState<TurnIntroData | null>(null);
+  const [activeTurnIntro, setActiveTurnIntro] = useState<TurnIntroData | null>(null);
+  const turnIntroBusyRef = useRef(false);
   // 競標面板
   type AuctionPanel = {
     auctionId: string; triggeredByName: string; cardName: string;
     minBid: number; highestBid: number; highestBidderName?: string;
     endsAt: number; secondsLeft: number;
+    controlledByHost?: boolean;
   };
   const [auctionPanel, setAuctionPanel] = useState<AuctionPanel | null>(null);
   const auctionCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [diceAnim, setDiceAnim] = useState<DiceRollData | null>(null);
+  const queuedDiceRef = useRef<DiceRollData | null>(null);
   // 骰子動畫期間：鎖定該玩家位置在 oldPosition、暫存 centerEvent，等動畫結束才釋放
   const diceAnimRef = useRef<DiceRollData | null>(null);
   const pendingCenterEventsRef = useRef<{ evt: CellEvent; autoDismissMs?: number }[]>([]);
+  const centerRevealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [positionOverride, setPositionOverride] = useState<Map<string, number>>(new Map());
   // 外圈位置 override（FastTrack 階段擲骰動畫期間鎖定 fastTrackPosition）
   const [positionOverrideOuter, setPositionOverrideOuter] = useState<Map<string, number>>(new Map());
+  const [boardFocusPlayerId, setBoardFocusPlayerId] = useState<string | undefined>();
+  const boardFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const addTicker = (msg: string) => setTicker((prev) => [msg, ...prev].slice(0, 6));
+
+  const revealPendingCenterEvent = useCallback((delayMs = 350) => {
+    if (
+      pendingCenterEventsRef.current.length === 0 ||
+      diceAnimRef.current ||
+      showPaydayOverlayRef.current ||
+      centerRevealTimer.current
+    ) return;
+
+    centerRevealTimer.current = setTimeout(() => {
+      centerRevealTimer.current = null;
+      const pending = pendingCenterEventsRef.current;
+      pendingCenterEventsRef.current = [];
+      const last = pending[pending.length - 1];
+      if (!last) return;
+
+      setCenterEvent(last.evt);
+      if (centerEventTimer.current) clearTimeout(centerEventTimer.current);
+      const dismissAfter = last.autoDismissMs ?? (last.evt.isMilestone ? 7_000 : 4_500);
+      centerEventTimer.current = setTimeout(() => setCenterEvent(null), dismissAfter);
+    }, delayMs);
+  }, []);
+
+  const dismissPaydayOverlay = useCallback(() => {
+    showPaydayOverlayRef.current = false;
+    setShowPaydayOverlay(false);
+    setPaydayCards(new Map());
+    revealPendingCenterEvent(300);
+  }, [revealPendingCenterEvent]);
 
   useEffect(() => {
     const s = io(SERVER_URL, { transports: ['websocket', 'polling'], reconnection: true, reconnectionAttempts: Infinity, reconnectionDelay: 1000, reconnectionDelayMax: 5000, randomizationFactor: 0.5, timeout: 20000 });
@@ -121,6 +165,44 @@ export default function DisplayScreen() {
     // 若後端尚未支援 joinDisplay，收到 gameStateUpdate 也視為成功
     s.on('gameStateUpdate', (gs: GameState) => {
       setGameState(gs);
+      const previousTurnId = prevTurnIdRef.current;
+      const previousPhase = prevGamePhaseRef.current;
+      const isPlaying = gs.gamePhase === 'RatRace' || gs.gamePhase === 'FastTrack';
+      const enteredPlayingPhase = isPlaying && previousPhase !== 'RatRace' && previousPhase !== 'FastTrack';
+      const turnChanged = Boolean(previousTurnId && previousTurnId !== gs.currentPlayerTurnId);
+
+      if (turnChanged) {
+        setPlayerRoundActions(new Map());
+        if (!gs.globalPaydayInProgress) setBoardFocusPlayerId(undefined);
+      }
+
+      if (isPlaying && !gs.globalPaydayInProgress && gs.currentPlayerTurnId && (enteredPlayingPhase || turnChanged || !previousTurnId)) {
+        const turnPlayer = gs.players.find((player) => player.id === gs.currentPlayerTurnId);
+        if (turnPlayer) {
+          const playerIndex = gs.players.findIndex((player) => player.id === turnPlayer.id);
+          setPendingTurnIntro({
+            key: Date.now(),
+            playerId: turnPlayer.id,
+            playerName: turnPlayer.name,
+            professionName: turnPlayer.profession?.name,
+            colorIndex: Math.max(0, playerIndex),
+          });
+          turnIntroBusyRef.current = true;
+        }
+      } else if (gs.gamePhase === 'GameOver') {
+        setPendingTurnIntro(null);
+        setActiveTurnIntro(null);
+        turnIntroBusyRef.current = false;
+        queuedDiceRef.current = null;
+      }
+
+      prevTurnIdRef.current = gs.currentPlayerTurnId ?? null;
+      prevGamePhaseRef.current = gs.gamePhase;
+      const remaining = remainingGameMs(gs);
+      if (Math.abs(countdownRef.current - remaining) > 3000 || countdownRef.current === 0) {
+        countdownRef.current = remaining;
+        setCountdownMs(remaining);
+      }
       setJoined(true);
       setJoining(false);
       // 若尚未記錄房間代碼（例如 gameStateUpdate 先於 joinDisplaySuccess 到達），從 gs 補記
@@ -128,14 +210,67 @@ export default function DisplayScreen() {
         joinedRoomRef.current = gs.roomId;
       }
     });
-    s.on('gameClock', (p: { currentAge: number }) => {
-      setGameState((gs) => gs ? { ...gs, currentAge: p.currentAge } : gs);
+    s.on('gameClock', (p: { currentAge: number; remainingTimeMs?: number }) => {
+      setGameState((gs) => gs ? { ...gs, currentAge: p.currentAge, remainingTimeMs: p.remainingTimeMs ?? gs.remainingTimeMs } : gs);
+      if (typeof p.remainingTimeMs === 'number' && Math.abs(countdownRef.current - p.remainingTimeMs) > 3_000) {
+        countdownRef.current = p.remainingTimeMs;
+        setCountdownMs(p.remainingTimeMs);
+      }
     });
     s.on('roomAnalysis', (data: typeof roomAnalysis) => { setRoomAnalysis(data); setView('analysis'); });
-    s.on('ratRaceEscaped', (p: { playerName: string; monthlyPassiveIncome: number }) => {
-      addTicker(`🚀 ${p.playerName} 脫出老鼠賽跑！被動收入 $${fmt(p.monthlyPassiveIncome)}/月`);
+    s.on('ratRaceEscaped', (p: { playerId: string; playerName: string; routeLabel?: string }) => {
+      addTicker(`🚀 ${p.playerName} 完成「${p.routeLabel ?? '第二人生'}」，正式進入外圈！`);
+      setBoardFocusPlayerId(p.playerId);
+      if (boardFocusTimerRef.current) clearTimeout(boardFocusTimerRef.current);
+      boardFocusTimerRef.current = setTimeout(() => setBoardFocusPlayerId(undefined), 6_000);
     });
     s.on('marriageAnnouncement', (p: { playerName: string }) => addTicker(`💑 ${p.playerName} 結婚了！`));
+    s.on('globalPaydayStarted', (p: { globalPaydayNumber: number; settlementMonths: number }) => {
+      setPaydayCards(new Map());
+      addTicker(`💰 第 ${p.globalPaydayNumber} 季全體發薪：一次規劃、結算 ${p.settlementMonths} 個月`);
+    });
+    s.on('globalPaydayPlayerTurn', (p: {
+      playerId: string; playerName: string; playerIndex: number; playerCount: number; globalPaydayNumber: number;
+    }) => {
+      setBoardFocusPlayerId(p.playerId);
+      setPendingTurnIntro({
+        key: Date.now(),
+        playerId: p.playerId,
+        playerName: p.playerName,
+        colorIndex: Math.max(0, p.playerIndex - 1),
+        eyebrow: `第 ${p.globalPaydayNumber} 季・${p.playerIndex}/${p.playerCount}`,
+        launchText: '的季度結算開始了',
+      });
+      turnIntroBusyRef.current = true;
+    });
+    s.on('globalPaydayCompleted', (p: {
+      globalPaydayNumber: number; nextPlayer?: { id: string; name: string; colorIndex: number; professionName?: string };
+    }) => {
+      setBoardFocusPlayerId(undefined);
+      addTicker(`✅ 第 ${p.globalPaydayNumber} 季結算完成，回到人生行動`);
+      if (p.nextPlayer) {
+        setPendingTurnIntro({
+          key: Date.now(),
+          playerId: p.nextPlayer.id,
+          playerName: p.nextPlayer.name,
+          professionName: p.nextPlayer.professionName,
+          colorIndex: p.nextPlayer.colorIndex,
+        });
+        turnIntroBusyRef.current = true;
+      }
+    });
+    s.on('finalRoundStarted', (p: { firstPlayerId: string; firstPlayerName: string }) => {
+      setBoardFocusPlayerId(p.firstPlayerId);
+      addTicker(`⏳ 最後一輪開始：${p.firstPlayerName} 先行動，每位玩家都還有一次機會`);
+      setCenterEvent({
+        playerName: p.firstPlayerName,
+        cellName: '最後一輪',
+        message: '現在是 96 歲。每位仍在場的玩家完成最後一次人生行動後，人生來到 100 歲並結算。',
+        isMilestone: true,
+      });
+      if (centerEventTimer.current) clearTimeout(centerEventTimer.current);
+      centerEventTimer.current = setTimeout(() => setCenterEvent(null), 7_000);
+    });
 
     // 發薪日決策小卡
     type PlanResult = { fqUpgrade?: { executed: boolean }; healthBoost?: { executed: boolean }; healthMaintenance?: { executed: boolean }; skillTraining?: { executed: boolean }; networkInvest?: { executed: boolean } };
@@ -162,6 +297,7 @@ export default function DisplayScreen() {
         next.set(p.playerId, card);
         return next;
       });
+      showPaydayOverlayRef.current = true;
       setShowPaydayOverlay(true);
       if (paydayDismissTimer.current) clearTimeout(paydayDismissTimer.current);
     });
@@ -179,8 +315,12 @@ export default function DisplayScreen() {
 
     s.on('playerRolled', (p: { playerId: string; playerName: string; colorIndex: number; dice: number[]; total: number; oldPosition: number; newPosition: number; isInFastTrack?: boolean }) => {
       const data = { ...p, key: Date.now() };
-      setDiceAnim(data);
       diceAnimRef.current = data;
+      if (turnIntroBusyRef.current) {
+        queuedDiceRef.current = data;
+      } else {
+        setDiceAnim(data);
+      }
       // 動畫期間先把該玩家位置鎖回 oldPosition，等骰子停才實際移動
       // 內外圈使用獨立的 override map，避免錯位
       const isOuter = p.isInFastTrack ?? false;
@@ -199,15 +339,14 @@ export default function DisplayScreen() {
 
     const showCenterEvent = (evt: CellEvent, autoDismissMs?: number) => {
       // 若骰子動畫還在播，先暫存，等 onDone 時再依序顯示
-      if (diceAnimRef.current) {
+      if (diceAnimRef.current || showPaydayOverlayRef.current) {
         pendingCenterEventsRef.current.push({ evt, autoDismissMs });
         return;
       }
       setCenterEvent(evt);
       if (centerEventTimer.current) clearTimeout(centerEventTimer.current);
-      if (autoDismissMs) {
-        centerEventTimer.current = setTimeout(() => setCenterEvent(null), autoDismissMs);
-      }
+      const dismissAfter = autoDismissMs ?? (evt.isMilestone ? 7_000 : 4_500);
+      centerEventTimer.current = setTimeout(() => setCenterEvent(null), dismissAfter);
     };
 
     s.on('cellEventBroadcast', (p: { playerId: string; playerName: string; cellName: string; message: string }) => {
@@ -241,17 +380,19 @@ export default function DisplayScreen() {
     s.on('globalEventAnnouncement', (p: { event: { title: string; description: string } }) => {
       addTicker(`📢 全局事件：${p.event.title} — ${p.event.description}`);
     });
-    s.on('annualTaxResult', (p: { playerName: string; taxAmount: number }) => {
-      addTicker(`🧾 ${p.playerName} 繳稅 $${fmt(p.taxAmount)}`);
+    s.on('annualTaxResult', (p: { playerName: string; taxAmount: number; taxCreditAmount?: number }) => {
+      const saving = (p.taxCreditAmount ?? 0) > 0 ? `（規劃省下 $${fmt(p.taxCreditAmount ?? 0)}）` : '';
+      addTicker(`🧾 ${p.playerName} 繳稅 $${fmt(p.taxAmount)}${saving}`);
     });
-    s.on('dealAuctionStarted', (p: { auctionId: string; triggeredByName: string; endsAt: number; card?: { name: string; minBid: number; monthlyCashflow?: number } }) => {
+    s.on('dealAuctionStarted', (p: { auctionId: string; triggeredByName: string; endsAt: number; controlledByHost?: boolean; card?: { name: string; minBid: number; monthlyCashflow?: number } }) => {
       const cardName = p.card?.name ?? '交易';
       const minBid = p.card?.minBid ?? 0;
       showCenterEvent({ playerName: p.triggeredByName, cellName: '🔔 開放競標！', message: `${p.triggeredByName} 放棄交易，${cardName} 開放競標！起標 $${minBid.toLocaleString()}` });
       addTicker(`🔔 ${p.triggeredByName} 放棄「${cardName}」，開放競標（起標 $${minBid.toLocaleString()}）`);
       const secondsLeft = Math.max(0, Math.round((p.endsAt - Date.now()) / 1000));
-      setAuctionPanel({ auctionId: p.auctionId, triggeredByName: p.triggeredByName, cardName, minBid, highestBid: 0, endsAt: p.endsAt, secondsLeft });
+      setAuctionPanel({ auctionId: p.auctionId, triggeredByName: p.triggeredByName, cardName, minBid, highestBid: 0, endsAt: p.endsAt, secondsLeft, controlledByHost: p.controlledByHost });
       if (auctionCountdownRef.current) clearInterval(auctionCountdownRef.current);
+      if (p.controlledByHost) return;
       auctionCountdownRef.current = setInterval(() => {
         setAuctionPanel((prev) => {
           if (!prev) return null;
@@ -275,12 +416,16 @@ export default function DisplayScreen() {
         addTicker(`🔔 ${p.cardName ?? '交易'} 競標流標，無人出價`);
       }
     });
-    return () => {
-      s.disconnect();
-      // 清理元件內所有計時器，避免 unmount 後背景仍 setState
+    const clearRuntimeTimers = () => {
       if (auctionCountdownRef.current) clearInterval(auctionCountdownRef.current);
       if (centerEventTimer.current) clearTimeout(centerEventTimer.current);
+      if (centerRevealTimer.current) clearTimeout(centerRevealTimer.current);
       if (paydayDismissTimer.current) clearTimeout(paydayDismissTimer.current);
+      if (boardFocusTimerRef.current) clearTimeout(boardFocusTimerRef.current);
+    };
+    return () => {
+      s.disconnect();
+      clearRuntimeTimers();
     };
   }, []);
 
@@ -294,16 +439,6 @@ export default function DisplayScreen() {
     }, 1000);
     return () => clearInterval(timer);
   }, [gameState?.isPaused]);
-
-  // 換人行動時清除本回合行動標記
-  useEffect(() => {
-    if (!gameState) return;
-    const newTurnId = gameState.currentPlayerTurnId;
-    if (prevTurnIdRef.current && prevTurnIdRef.current !== newTurnId) {
-      setPlayerRoundActions(new Map());
-    }
-    prevTurnIdRef.current = newTurnId ?? null;
-  }, [gameState?.currentPlayerTurnId]);
 
   // Enter 鍵手動關閉置中事件 overlay
   useEffect(() => {
@@ -319,11 +454,31 @@ export default function DisplayScreen() {
   useEffect(() => {
     if (!showPaydayOverlay) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Enter') { setShowPaydayOverlay(false); setPaydayCards(new Map()); }
+      if (e.key === 'Enter') dismissPaydayOverlay();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [showPaydayOverlay]);
+  }, [dismissPaydayOverlay, showPaydayOverlay]);
+
+  // 回合交棒不與上一位的結果畫面搶焦點；所有演出完成後才正式叫出下一位。
+  useEffect(() => {
+    if (!pendingTurnIntro || activeTurnIntro) return;
+    const visualIsBusy = Boolean(
+      diceAnim ||
+      centerEvent ||
+      showPaydayOverlay ||
+      pendingCenterEventsRef.current.length > 0 ||
+      Boolean(centerRevealTimer.current),
+    );
+    if (visualIsBusy) return;
+
+    const launchTimer = window.setTimeout(() => {
+      setActiveTurnIntro(pendingTurnIntro);
+      setPendingTurnIntro(null);
+    }, 280);
+
+    return () => window.clearTimeout(launchTimer);
+  }, [activeTurnIntro, centerEvent, diceAnim, pendingTurnIntro, showPaydayOverlay]);
 
   const emit = (ev: string, ...args: unknown[]) => socketRef.current?.emit(ev, ...args);
 
@@ -374,17 +529,6 @@ export default function DisplayScreen() {
     );
   }
 
-  // 計算剩餘毫秒（從 currentAge 反推）並同步到 countdownRef
-  const calcRemaining = (gs: GameState) => {
-    const ratio = Math.min(1, Math.max(0, (gs.currentAge - 20) / 80));
-    return Math.max(0, Math.round(gs.gameDurationMs * (1 - ratio)));
-  };
-
-  // 每次 gameState 更新時重新校正倒數
-  if (Math.abs(countdownRef.current - calcRemaining(gameState)) > 3000 || countdownRef.current === 0) {
-    countdownRef.current = calcRemaining(gameState);
-  }
-
   // 格式化為 MM:SS
   const formatCountdown = (ms: number) => {
     const totalSec = Math.max(0, Math.ceil(ms / 1000));
@@ -413,6 +557,23 @@ export default function DisplayScreen() {
     isMarried: p.isMarried,
     roundAction: playerRoundActions.get(p.id) || undefined,
   }));
+  const currentTurnIndex = gameState.playerOrder.indexOf(gameState.currentPlayerTurnId);
+  const currentTurnPlayer = gameState.players.find((p) => p.id === gameState.currentPlayerTurnId);
+  const currentTurnColorIndex = Math.max(0, gameState.players.findIndex((p) => p.id === gameState.currentPlayerTurnId));
+  const nextTurnId = currentTurnIndex >= 0 && gameState.playerOrder.length > 1
+    ? Array.from({ length: gameState.playerOrder.length - 1 }, (_, offset) =>
+        gameState.playerOrder[(currentTurnIndex + offset + 1) % gameState.playerOrder.length]
+      ).find((id) => gameState.players.find((player) => player.id === id)?.isAlive !== false)
+    : undefined;
+  const nextTurnPlayer = gameState.players.find((p) => p.id === nextTurnId);
+  const isSetupPhase = gameState.gamePhase === 'WaitingForPlayers' || gameState.gamePhase === 'Pre20';
+  const alivePlayers = gameState.players.filter((player) => player.isAlive);
+  const isMixedTrack = alivePlayers.some((player) => player.isInFastTrack) && alivePlayers.some((player) => !player.isInFastTrack);
+  const phaseLabel = gameState.finalRoundStarted
+    ? '最後一輪'
+    : isMixedTrack
+      ? '雙圈進行中'
+      : PHASE_LABELS[gameState.gamePhase] ?? gameState.gamePhase;
 
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col">
@@ -430,7 +591,10 @@ export default function DisplayScreen() {
             gameState.gamePhase === 'RatRace'    ? 'bg-blue-900 text-blue-200' :
             'bg-yellow-900 text-yellow-300'
           }`}>
-            {PHASE_LABELS[gameState.gamePhase] ?? gameState.gamePhase}
+            {phaseLabel}
+          </span>
+          <span className="whitespace-nowrap rounded-full bg-gray-800 px-2 py-0.5 text-xs font-bold text-yellow-200">
+            {gameState.currentAge} 歲 · 人生輪 {Math.min(gameState.totalLifeRounds ?? 20, (gameState.completedLifeRounds ?? gameState.turnNumber) + 1)}/{gameState.totalLifeRounds ?? 20}
           </span>
         </div>
 
@@ -439,21 +603,27 @@ export default function DisplayScreen() {
           <div className={`text-7xl font-bold tabular-nums leading-none tracking-tight ${
             countdownMs < 300_000 ? 'text-red-400' : countdownMs < 600_000 ? 'text-orange-300' : 'text-yellow-300'
           }`}>
-            {gameState.isPaused ? '⏸' : formatCountdown(countdownMs)}
+            {gameState.finalRoundStarted ? 'FINAL' : gameState.isPaused ? '⏸' : formatCountdown(countdownMs)}
           </div>
           <div className="text-base text-gray-300 mt-0.5 tracking-wide">
-            {gameState.isPaused ? '暫停中' : `剩餘時間 · ${STAGE_LABELS[gameState.currentStage] ?? gameState.currentStage}`}
+            {gameState.finalRoundStarted
+              ? '每位玩家完成最後一次行動'
+              : gameState.isPaused
+                ? '暫停中'
+                : `活動參考時間 · ${STAGE_LABELS[gameState.currentStage] ?? gameState.currentStage}`}
           </div>
         </div>
 
         {/* 右：控制按鈕 + 連線狀態 */}
         <div className="flex items-center gap-2 min-w-0 justify-end">
-          <button
-            className={`text-sm px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${view === 'intro' ? 'bg-emerald-700 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
-            onClick={() => setView(view === 'intro' ? 'game' : 'intro')}
-          >
-            策略指南
-          </button>
+          {gameState.gamePhase === 'GameOver' && (
+            <button
+              className={`text-sm px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${view === 'intro' ? 'bg-emerald-700 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
+              onClick={() => setView(view === 'intro' ? 'game' : 'intro')}
+            >
+              復盤原則
+            </button>
+          )}
           {gameState.gamePhase === 'GameOver' && (
             <>
               <button
@@ -483,7 +653,7 @@ export default function DisplayScreen() {
       </div>
 
       {/* 主體 */}
-      {view === 'intro' ? (
+      {view === 'intro' && gameState.gamePhase === 'GameOver' ? (
         <div className="flex-1 overflow-hidden">
           <IntroSheet mode="fullscreen" />
         </div>
@@ -512,22 +682,65 @@ export default function DisplayScreen() {
           {!sidebarCollapsed && (
           <div className="w-52 xl:w-60 flex-shrink-0 flex flex-col gap-3 p-3 overflow-y-auto border-r border-gray-800">
 
-            {/* QR Code */}
-            <div className="flex flex-col items-center gap-2 bg-gray-900 rounded-xl p-3">
-              <div className="bg-white rounded-lg p-2">
-                <QRCodeSVG value={playerUrl} size={150} />
+            {/* 開局顯示 QR；進行中改成全場回合焦點 */}
+            {isSetupPhase ? (
+              <div className="flex flex-col items-center gap-2 bg-gray-900 rounded-xl p-3">
+                <div className="bg-white rounded-lg p-2">
+                  <QRCodeSVG value={playerUrl} size={150} />
+                </div>
+                <p className="text-xs text-gray-400">掃碼加入遊戲</p>
+                <p className="font-mono text-2xl font-bold text-yellow-300 tracking-[0.3em]">{gameState.roomId}</p>
               </div>
-              <p className="text-xs text-gray-400">掃碼加入遊戲</p>
-              <p className="font-mono text-2xl font-bold text-yellow-300 tracking-[0.3em]">{gameState.roomId}</p>
-            </div>
+            ) : (
+              <div
+                className="rounded-2xl border-2 bg-gradient-to-br from-indigo-950 to-gray-900 p-4 shadow-xl"
+                style={{ borderColor: COLORS[currentTurnColorIndex % COLORS.length] }}
+              >
+                <p className="text-xs font-bold uppercase tracking-widest text-indigo-300">現在輪到</p>
+                <div className="mt-2 flex min-w-0 items-center gap-2">
+                  <span
+                    className="h-4 w-4 shrink-0 rounded-full border-2 border-white/80"
+                    style={{ backgroundColor: COLORS[currentTurnColorIndex % COLORS.length] }}
+                  />
+                  <p className="truncate text-3xl font-black text-white">{currentTurnPlayer?.name ?? '—'}</p>
+                </div>
+                <p className="mt-1 truncate text-sm font-semibold text-gray-300">{currentTurnPlayer?.profession?.name ?? ''}</p>
+                {currentTurnPlayer ? (
+                  <div className="mt-4 grid grid-cols-3 gap-1.5 border-t border-indigo-800 pt-3 text-center">
+                    <div className="rounded-lg bg-black/25 px-1 py-2">
+                      <p className="text-[9px] uppercase text-gray-500">年齡</p>
+                      <p className="mt-0.5 text-sm font-black text-white">{Math.floor(currentTurnPlayer.personalAge ?? gameState.currentAge)}</p>
+                    </div>
+                    <div className="rounded-lg bg-black/25 px-1 py-2">
+                      <p className="text-[9px] uppercase text-gray-500">健康</p>
+                      <p className={`mt-0.5 text-sm font-black ${currentTurnPlayer.stats.health >= 60 ? 'text-emerald-300' : currentTurnPlayer.stats.health >= 30 ? 'text-yellow-300' : 'text-red-300'}`}>
+                        {currentTurnPlayer.stats.health}
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-black/25 px-1 py-2">
+                      <p className="text-[9px] uppercase text-gray-500">月現金流</p>
+                      <p className={`mt-0.5 truncate text-xs font-black ${currentTurnPlayer.monthlyCashflow >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                        {currentTurnPlayer.monthlyCashflow >= 0 ? '+' : ''}${fmt(currentTurnPlayer.monthlyCashflow)}
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+                {nextTurnPlayer ? (
+                  <div className="mt-3 border-t border-indigo-800 pt-3">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-500">下一位準備</p>
+                    <p className="mt-1 truncate text-lg font-black text-yellow-300">{nextTurnPlayer.name}</p>
+                  </div>
+                ) : null}
+              </div>
+            )}
 
             {/* 競標面板 */}
             {auctionPanel && (
               <div className="bg-blue-950 border border-blue-500 rounded-xl p-3 space-y-1.5 animate-pulse-once">
                 <div className="flex items-center justify-between">
                   <p className="text-blue-200 font-bold text-xs">🔔 競標進行中</p>
-                  <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-full ${auctionPanel.secondsLeft <= 5 ? 'bg-red-700 text-white' : 'bg-blue-700 text-blue-100'}`}>
-                    {auctionPanel.secondsLeft}s
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${auctionPanel.controlledByHost ? 'bg-indigo-700 text-indigo-100' : auctionPanel.secondsLeft <= 5 ? 'bg-red-700 text-white' : 'bg-blue-700 text-blue-100'}`}>
+                    {auctionPanel.controlledByHost ? '主持人控制' : `${auctionPanel.secondsLeft}s`}
                   </span>
                 </div>
                 <p className="text-white text-sm font-semibold truncate">{auctionPanel.cardName}</p>
@@ -559,7 +772,15 @@ export default function DisplayScreen() {
             className="flex-1 flex items-center justify-center overflow-hidden relative"
             style={{ maxHeight: 'calc(100vh - 90px)' }}
           >
-            <GameBoard players={boardPlayers} currentTurnPlayerId={gameState.currentPlayerTurnId} />
+            <GameBoard
+              players={boardPlayers}
+              currentTurnPlayerId={gameState.currentPlayerTurnId}
+              focusPlayerId={boardFocusPlayerId}
+              completedRoundsInCycle={gameState.roundsSinceGlobalPayday ?? (gameState.turnNumber % 3)}
+              isGlobalPayday={gameState.globalPaydayInProgress ?? false}
+              showPlayerPanel={false}
+              showMiniMap={false}
+            />
 
             {/* 擲骰動畫 overlay */}
             <DiceRollOverlay
@@ -585,27 +806,56 @@ export default function DisplayScreen() {
                   });
                 }
                 // 依序播放暫存的事件（同一個 cell 通常只會有 1 個，取最後一個避免堆疊）
-                const pending = pendingCenterEventsRef.current;
-                pendingCenterEventsRef.current = [];
-                if (pending.length > 0) {
-                  // 留 0.4 秒讓玩家視線從骰子移回中央，再彈出事件
-                  setTimeout(() => {
-                    const last = pending[pending.length - 1];
-                    setCenterEvent(last.evt);
-                    if (centerEventTimer.current) clearTimeout(centerEventTimer.current);
-                    if (last.autoDismissMs) {
-                      centerEventTimer.current = setTimeout(() => setCenterEvent(null), last.autoDismissMs);
-                    }
-                  }, 400);
+                // 若發薪結果仍在畫面上，事件繼續排隊；關閉後才播放。
+                revealPendingCenterEvent(400);
+              }}
+            />
+
+            {/* 回合交棒：上一位所有結果顯示完，才放大提醒下一位 */}
+            <TurnIntroOverlay
+              key={activeTurnIntro?.key ?? 'turn-intro-idle'}
+              data={activeTurnIntro}
+              onDone={() => {
+                setActiveTurnIntro(null);
+                turnIntroBusyRef.current = false;
+                const queuedDice = queuedDiceRef.current;
+                queuedDiceRef.current = null;
+                if (queuedDice) {
+                  diceAnimRef.current = queuedDice;
+                  setDiceAnim(queuedDice);
                 }
               }}
             />
+
+            {/* 主持人控制的決策階段：只公開進度，不公開玩家選項 */}
+            {gameState.decisionPhase && !centerEvent && !diceAnim && (
+              <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/65 px-6 backdrop-blur-sm">
+                <div className="w-full max-w-2xl rounded-3xl border-2 border-indigo-400 bg-gradient-to-br from-indigo-950/95 to-gray-950/95 px-10 py-9 text-center shadow-2xl">
+                  <p className="text-sm font-bold uppercase tracking-[0.3em] text-indigo-300">全場決策時間</p>
+                  <p className="mt-3 text-5xl font-black text-white">{gameState.decisionPhase.title}</p>
+                  <p className="mt-4 text-2xl font-bold text-yellow-300">{gameState.decisionPhase.playerName}</p>
+                  <DecisionCountdown
+                    reminderEndsAt={gameState.decisionPhase.reminderEndsAt}
+                    className="mt-5 block font-mono text-7xl font-black tracking-tight text-yellow-300"
+                  />
+                  <div className={`mx-auto mt-6 inline-flex items-center gap-2 rounded-full px-5 py-2 text-lg font-bold ${gameState.decisionPhase.submitted ? 'bg-emerald-700 text-emerald-100' : 'bg-amber-700 text-amber-100'}`}>
+                    <span className={`h-3 w-3 rounded-full ${gameState.decisionPhase.submitted ? 'bg-emerald-200' : 'animate-pulse bg-amber-200'}`} />
+                    {gameState.decisionPhase.kind === 'auction'
+                      ? '公開競標進行中，主持人決定結束時間'
+                      : gameState.decisionPhase.submitted
+                        ? '選擇已送出，等待主持人揭曉'
+                        : '思考與討論中'}
+                  </div>
+                  <p className="mt-5 text-sm text-gray-400">決策內容保密；由主持人掌握討論與揭曉時機</p>
+                </div>
+              </div>
+            )}
 
             {/* 發薪日決策小卡 overlay */}
             {showPaydayOverlay && paydayCards.size > 0 && (
               <div
                 className="absolute inset-0 flex flex-col items-center justify-center z-40 bg-black/60 backdrop-blur-sm pointer-events-auto cursor-pointer"
-                onClick={() => { setShowPaydayOverlay(false); setPaydayCards(new Map()); }}
+                onClick={dismissPaydayOverlay}
               >
                 <p className="text-yellow-300 font-bold text-lg mb-4 tracking-wide">💵 本次發薪日決策</p>
                 <div className="flex flex-wrap justify-center gap-3 max-w-5xl px-4">
@@ -689,6 +939,10 @@ export default function DisplayScreen() {
 function RoomAnalysisView({ analysis }: { analysis: { roomId: string; players: RoomPlayerSummary[]; currentAge: number } }) {
   const [selected, setSelected] = useState<string | null>(null);
   const players = analysis.players;
+  const winner = players[0];
+  const winnerTurningPoints = (winner?.eventLog ?? [])
+    .filter((event) => ['asset_buy', 'career_change', 'rat_race_escaped', 'crisis', 'travel', 'marriage'].includes(event.type))
+    .slice(0, 5);
 
   const indicator = RADAR_DIMENSIONS.map((d) => ({ name: d.label, max: 100 }));
 
@@ -753,6 +1007,33 @@ function RoomAnalysisView({ analysis }: { analysis: { roomId: string; players: R
           ))}
         </div>
       </div>
+
+      {winner && (
+        <div className="card border-indigo-700 bg-indigo-950/45">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest text-indigo-300">賽後共同復盤</p>
+              <h3 className="mt-1 text-lg font-black text-white">🧭 {winner.playerName} 的勝利路線</h3>
+              <p className="mt-1 text-xs text-gray-400">觀察關鍵轉折，不把冠軍路線當成唯一標準答案。</p>
+            </div>
+            <div className="rounded-xl bg-gray-900 px-4 py-2 text-right text-xs text-gray-400">
+              <div>首筆資產：{winner.firstAssetAge == null ? '未發生' : `${Math.round(winner.firstAssetAge)} 歲`}</div>
+              <div>脫出內圈：{winner.escapeAge == null ? '未脫出' : `${Math.round(winner.escapeAge)} 歲`}</div>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {winnerTurningPoints.length > 0 ? winnerTurningPoints.map((event, index) => (
+              <div key={`${event.age}-${event.type}-${index}`} className="rounded-xl border border-gray-700 bg-gray-900/70 p-3">
+                <p className="text-xs font-bold text-yellow-300">{Math.round(event.age)} 歲 · 關鍵轉折</p>
+                <p className="mt-1 text-xs leading-relaxed text-gray-300">{event.description}</p>
+              </div>
+            )) : (
+              <p className="text-sm text-gray-500">本局沒有足夠的關鍵事件紀錄。</p>
+            )}
+          </div>
+          <p className="mt-4 text-sm font-semibold text-indigo-200">討論：如果交換起始階層與職業，這條路線還成立嗎？</p>
+        </div>
+      )}
 
       {/* 雷達圖比較 */}
       <div className="card">

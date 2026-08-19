@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import './GameBoard.css';
+import { innerCircleConfig, outerCircleConfig } from './boardConfig';
 
 // ============================================================
 // 型別定義（與 PlayerPage.tsx 中的用法相容）
@@ -25,6 +26,17 @@ export interface BoardPlayer {
 interface GameBoardProps {
   players: BoardPlayer[];
   currentTurnPlayerId?: string;
+  /** 特殊流程（例如季度結算、剛晉級外圈）可暫時指定大螢幕跟隨的玩家。 */
+  focusPlayerId?: string;
+  /** 大螢幕已有獨立側欄時可關閉，避免資訊卡壓住棋盤格。 */
+  showPlayerPanel?: boolean;
+  /** 僅供棋盤調校頁使用，不在正式遊戲中顯示。 */
+  enableCalibration?: boolean;
+  showMiniMap?: boolean;
+  /** 已完成的季度輪數（0–2）；第三輪結束進入統一發薪日。 */
+  completedRoundsInCycle?: number;
+  /** 全體玩家是否正處於統一發薪日。 */
+  isGlobalPayday?: boolean;
 }
 
 const PLAYER_COLORS = [
@@ -36,86 +48,57 @@ const PLAYER_COLORS = [
 // 依 1.png 圖片目測校準：時鐘中心 ≈ (44%, 46%)
 // 螺旋由內圈（順時針）展開至外圈
 // ── 內圈 25 格（index 0–24）────────────────────────────────
-const INNER_CELL_POSITIONS: [number, number][] = [
-  // [left%, top%]  — 使用者以校準工具實測
-  [39.8, 28.4],  //  0 發薪日
-  [46.6, 27.1],  //  1 小交易
-  [53.3, 31.4],  //  2 意外支出
-  [58.2, 43.5],  //  3 小交易
-  [59.0, 56.8],  //  4 大交易
-  [56.0, 70.9],  //  5 危機事件
-  [49.2, 82.5],  //  6 發薪日
-  [40.7, 87.7],  //  7 小交易
-  [31.4, 86.3],  //  8 意外支出
-  [23.6, 78.2],  //  9 添丁
-  [17.2, 67.9],  // 10 人際關係
-  [15.0, 51.7],  // 11 慈善捐款
-  [15.9, 37.3],  // 12 發薪日
-  [20.7, 22.7],  // 13 意外支出
-  [28.5, 13.1],  // 14 大交易
-  [37.5, 10.5],  // 15 小交易
-  [45.8, 10.0],  // 16 市場行情
-  [53.7, 12.2],  // 17 危機事件
-  [60.8, 21.0],  // 18 發薪日
-  [65.8, 32.6],  // 19 小交易
-  [68.0, 47.7],  // 20 人際關係
-  [72.2, 59.8],  // 21 大交易
-  [80.3, 64.4],  // 22 裁員
-  [86.4, 53.8],  // 23 危機事件
-  [88.9, 40.7],  // 24 第二人生
-];
+function buildTrackPositions(cellCount: number): [number, number][] {
+  return Array.from({ length: cellCount }, (_, index) => {
+    const angle = (Math.PI * 2 * index) / cellCount - Math.PI / 2;
+    return [50 + Math.cos(angle) * 43, 50 + Math.sin(angle) * 40];
+  });
+}
 
-// ── 外圈 FastTrack 17 格（index 0–16）— 使用者以校準工具實測
-const OUTER_CELL_POSITIONS: [number, number][] = [
-  [ 9.9, 17.6],  //  0 FT 發薪日
-  [16.6, 42.7],  //  1 FT 小交易
-  [22.1, 65.4],  //  2 FT 大交易
-  [32.6, 76.8],  //  3 FT 人際關係
-  [44.1, 82.6],  //  4 FT 發薪日
-  [56.4, 87.9],  //  5 FT 危機事件
-  [69.5, 82.1],  //  6 FT 科技新創
-  [78.7, 71.8],  //  7 FT 資產槓桿
-  [85.2, 61.0],  //  8 FT 發薪日
-  [85.8, 42.7],  //  9 FT 大交易
-  [78.5, 27.5],  // 10 FT 人際關係
-  [67.5, 20.5],  // 11 FT 小交易
-  [55.5, 10.7],  // 12 FT 發薪日
-  [44.7, 17.9],  // 13 FT 大交易
-  [35.9, 40.0],  // 14 FT 科技新創
-  [37.8, 59.0],  // 15 FT 資產槓桿
-  [45.2, 60.8],  // 16 疾病危機
-];
+const INNER_CELL_POSITIONS = buildTrackPositions(innerCircleConfig.length);
+const OUTER_CELL_POSITIONS = buildTrackPositions(outerCircleConfig.length);
 
 function getPos(idx: number, isOuter: boolean): { left: string; top: string } {
   const table = isOuter ? OUTER_CELL_POSITIONS : INNER_CELL_POSITIONS;
   const [l, t] = table[Math.min(idx, table.length - 1)] ?? [50, 50];
-  return { left: `${l}%`, top: `${t}%` };
+  // 棋子稍微往軌道內側移，避免遮住格名與圖示。
+  const inward = 0.88;
+  return {
+    left: `${50 + (l - 50) * inward}%`,
+    top: `${50 + (t - 50) * inward}%`,
+  };
 }
 
 // ============================================================
 // 主組件 — 雙底圖切換：1.png（內圈）/ 2.png（外圈）
 // ============================================================
-export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
-  const [boardView, setBoardView] = useState<'inner' | 'outer'>('inner');
+export function GameBoard({
+  players,
+  currentTurnPlayerId,
+  focusPlayerId,
+  showPlayerPanel = true,
+  enableCalibration = false,
+  showMiniMap = true,
+  completedRoundsInCycle = 0,
+  isGlobalPayday = false,
+}: GameBoardProps) {
+  const [manualBoardView, setManualBoardView] = useState<{ anchor: string; view: 'inner' | 'outer' } | null>(null);
   const [calibrate, setCalibrate] = useState(false);
 
-  // 自動切換：跟隨「當前回合玩家」所在的圈
-  // 設計：當輪到外圈玩家時自動切到外圈、輪回內圈玩家時切回內圈。
-  // useEffect 只在換人時觸發，使用者本回合內手動切後不會被搶回去（直到下次換人）。
-  useEffect(() => {
-    if (!currentTurnPlayerId) return;
-    const turnPlayer = players.find((p) => p.id === currentTurnPlayerId);
-    if (!turnPlayer) return;
-    setBoardView(turnPlayer.isInFastTrack ? 'outer' : 'inner');
-    // 注意：依賴只放 currentTurnPlayerId，避免 players 陣列每幀變動觸發
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTurnPlayerId]);
+  const automaticFocusId = focusPlayerId ?? currentTurnPlayerId;
+  const focusedPlayer = players.find((player) => player.id === automaticFocusId);
+  const focusedTrack = focusedPlayer?.isInFastTrack ? 'outer' : focusedPlayer ? 'inner' : null;
+  const automaticAnchor = `${automaticFocusId ?? 'none'}:${focusedTrack ?? 'inner'}`;
+  const boardView = manualBoardView?.anchor === automaticAnchor
+    ? manualBoardView.view
+    : focusedTrack ?? 'inner';
+  const setBoardViewManual = (view: 'inner' | 'outer') => {
+    setManualBoardView({ anchor: automaticAnchor, view });
+  };
 
-  const setBoardViewManual = setBoardView;
-
-  const bgImage = boardView === 'inner' ? "url('/1.png')" : "url('/2.png')";
   const isOuter = boardView === 'outer';
   const posTable = isOuter ? OUTER_CELL_POSITIONS : INNER_CELL_POSITIONS;
+  const squareConfig = isOuter ? outerCircleConfig : innerCircleConfig;
 
   const visiblePlayers = players.filter((p) =>
     boardView === 'inner' ? !p.isInFastTrack : p.isInFastTrack
@@ -127,9 +110,40 @@ export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
   return (
     <div className="gameboard-scroll">
       <div
-        className="gameboard-wrapper"
-        style={{ backgroundImage: bgImage }}
+        className={`gameboard-wrapper board-surface ${isOuter ? 'is-outer' : 'is-inner'}`}
       >
+
+        <div className="board-orbit board-orbit-outer" />
+        <div className="board-orbit board-orbit-inner" />
+        <div className="board-constellation constellation-a">✦ · ✧ · ✦</div>
+        <div className="board-constellation constellation-b">✧ · ✦ · ✧</div>
+
+        {/* ══ 精準的程式化格位：文字與棋子永遠使用同一組座標 ══ */}
+        {!calibrate && squareConfig.map((square, idx) => {
+          const [left, top] = posTable[idx];
+          return (
+            <div
+              key={square.id}
+              className={`quarter-board-cell type-${square.type}`}
+              style={{
+                left: `${left}%`,
+                top: `${top}%`,
+                '--cell-color': square.color,
+                '--cell-border': square.borderColor,
+              } as React.CSSProperties}
+            >
+              <span className="quarter-board-cell-index">{idx + 1}</span>
+              <span className="quarter-board-cell-icon">{square.icon}</span>
+              <span className="quarter-board-cell-name">{square.name}</span>
+            </div>
+          );
+        })}
+
+        <QuarterDial
+          completedRounds={completedRoundsInCycle}
+          isGlobalPayday={isGlobalPayday}
+          isOuter={isOuter}
+        />
 
         {/* ══ 切換按鈕 ══ */}
         <button
@@ -140,15 +154,17 @@ export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
         </button>
 
         {/* ══ 校準模式切換 ══ */}
-        <button
-          className="board-calibrate-toggle"
-          onClick={() => setCalibrate((v) => !v)}
-        >
-          {calibrate ? '關閉校準' : '🔧 校準'}
-        </button>
+        {enableCalibration ? (
+          <button
+            className="board-calibrate-toggle"
+            onClick={() => setCalibrate((v) => !v)}
+          >
+            {calibrate ? '關閉校準' : '🔧 校準'}
+          </button>
+        ) : null}
 
         {/* ══ 對方圈 mini-map（當對方圈有玩家時才顯示）══ */}
-        {!calibrate && otherTrackPlayers.length > 0 && (
+        {!calibrate && showMiniMap && otherTrackPlayers.length > 0 && (
           <MiniMap
             isOuter={!isOuter}
             players={otherTrackPlayers}
@@ -222,7 +238,7 @@ export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
         })()}
 
         {/* ══ 當前回合玩家資訊大卡（右下角）══ */}
-        {(() => {
+        {showPlayerPanel && (() => {
           const activePlayer = players.find((p) => p.id === currentTurnPlayerId)
             ?? players.find((p) => p.isAlive !== false);
           if (!activePlayer) return null;
@@ -295,6 +311,43 @@ export function GameBoard({ players, currentTurnPlayerId }: GameBoardProps) {
           );
         })()}
       </div>
+    </div>
+  );
+}
+
+function QuarterDial({
+  completedRounds,
+  isGlobalPayday,
+  isOuter,
+}: {
+  completedRounds: number;
+  isGlobalPayday: boolean;
+  isOuter: boolean;
+}) {
+  const completed = Math.min(3, Math.max(0, completedRounds));
+  const currentRound = Math.min(3, completed + 1);
+  const roundsLeft = Math.max(0, 3 - completed);
+
+  return (
+    <div className={`quarter-dial${isGlobalPayday ? ' is-payday' : ''}`}>
+      <div className="quarter-dial-rings" />
+      <p className="quarter-dial-kicker">{isOuter ? 'FASTTRACK · 同步季曆' : '人生季度'}</p>
+      <p className="quarter-dial-title">
+        {isGlobalPayday ? '全體發薪日' : `第 ${currentRound} 輪`}
+      </p>
+      <div className="quarter-dial-segments" aria-label={`季度進度 ${completed}/3`}>
+        {[0, 1, 2].map((index) => (
+          <span
+            key={index}
+            className={`quarter-dial-segment${index < completed ? ' is-complete' : ''}${index === completed && !isGlobalPayday ? ' is-current' : ''}`}
+          >
+            {index + 1}
+          </span>
+        ))}
+      </div>
+      <p className="quarter-dial-status">
+        {isGlobalPayday ? '本季三個月統一結算' : `再 ${roundsLeft} 輪進入統一發薪`}
+      </p>
     </div>
   );
 }

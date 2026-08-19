@@ -13,7 +13,7 @@ export default function FinancialStatement({ player }: Props) {
     player.liabilities.reduce((s, l) => s + l.totalDebt, 0);
 
   return (
-    <div className="space-y-3">
+    <div className="senior-financial space-y-3">
       {/* 頂部摘要 */}
       <div className="grid grid-cols-2 gap-3">
         <div className="card text-center">

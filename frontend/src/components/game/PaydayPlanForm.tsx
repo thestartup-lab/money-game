@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { PaydayFormData, PaydayPlanPayload, LifeChoice } from '../../types/game';
+import DecisionCountdown from './DecisionCountdown';
 
 interface PaydayPlanFormProps {
   data: PaydayFormData;
   playerCash: number;
+  reminderEndsAt?: number;
   onSubmit: (plan: PaydayPlanPayload, lifeChoice: LifeChoice) => void;
 }
 
@@ -15,7 +17,7 @@ const INSURANCE_CONFIG = {
 
 const DCA_AMOUNTS = [15_000, 30_000, 75_000] as const;
 
-export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPlanFormProps) {
+export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSubmit }: PaydayPlanFormProps) {
   const [checks, setChecks] = useState({
     fqUpgrade: false,
     healthBoost: false,
@@ -27,43 +29,7 @@ export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPla
   const [buyIns, setBuyIns] = useState<Array<'medical' | 'life' | 'property'>>([]);
   const [lifeChoice, setLifeChoice] = useState<LifeChoice>({ type: 'none' });
   const [showTravelList, setShowTravelList] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState(Math.ceil((data.timeoutMs ?? 30000) / 1000));
-
-  // 使用 ref 保存最新的 handleSubmit，避免計時器閉包過期
-  const handleSubmitRef = useRef<() => void>(() => {});
-
-  // 每次切換到「另一個發薪日表單」（同回合多發薪、重連等）時重置倒數
-  useEffect(() => {
-    setSecondsLeft(Math.ceil((data.timeoutMs ?? 30000) / 1000));
-    // 切換表單時重置選項（避免上一發薪的勾選殘留到下一筆）
-    setChecks({
-      fqUpgrade: false,
-      healthBoost: false,
-      healthMaint: false,
-      skillTraining: false,
-      networkInvest: false,
-    });
-    setDcaAmount(0);
-    setBuyIns([]);
-    setLifeChoice({ type: 'none' });
-    setShowTravelList(false);
-  }, [data.paydayPosition, data.paydayIndex, data.timeoutMs]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setSecondsLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          handleSubmitRef.current();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [data.paydayPosition, data.paydayIndex]);
-
-  const totalCost = useMemo(() => {
+  const totalCost = (() => {
     let cost = 0;
     if (checks.fqUpgrade)    cost += data.affordableOptions.fqUpgrade.cost ?? 0;
     if (checks.healthBoost)  cost += data.affordableOptions.healthBoost.cost;
@@ -77,7 +43,7 @@ export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPla
       if (dest) cost += dest.cost;
     }
     return cost;
-  }, [checks, dcaAmount, buyIns, lifeChoice]);
+  })();
 
   const remaining = playerCash - totalCost;
 
@@ -109,24 +75,34 @@ export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPla
     };
     onSubmit(plan, lifeChoice);
   }
-  // 每次 render 都更新 ref，確保計時器用最新狀態
-  handleSubmitRef.current = handleSubmit;
-
   const ins = data.currentInsurance;
 
   return (
-    <div className="fixed inset-0 z-50 bg-gray-900 flex flex-col overflow-hidden">
+    <div className="senior-payday-form fixed inset-0 z-50 bg-gray-900 flex flex-col overflow-hidden">
       {/* 標題列 */}
       <div className="bg-gray-800 px-4 py-3 flex items-center justify-between border-b border-gray-700">
         <div>
           <div className="text-yellow-400 font-bold text-base">
-            💰 發薪日！{data.totalPaydays && data.totalPaydays > 1 ? `（第 ${data.paydayIndex ?? 1}/${data.totalPaydays} 次）` : ''}
+            💰 {data.globalPayday ? `第 ${data.globalPaydayNumber ?? ''} 季全體發薪` : '發薪日！'}{!data.globalPayday && data.combinedPlanning && data.totalPaydays
+              ? `（本回合 ${data.totalPaydays} 次結算）`
+              : data.totalPaydays && data.totalPaydays > 1
+                ? `（第 ${data.paydayIndex ?? 1}/${data.totalPaydays} 次）`
+                : ''}
           </div>
+          {data.globalPayday ? (
+            <div className="text-xs font-semibold text-emerald-300">
+              本次涵蓋 {data.settlementMonths ?? 3} 個月，只做一次季度配置
+            </div>
+          ) : data.combinedPlanning ? (
+            <div className="text-xs font-semibold text-emerald-300">只需規劃一次，薪資將依序結算</div>
+          ) : null}
           <div className="text-xs text-gray-400">現金：${playerCash.toLocaleString()}</div>
         </div>
         <div className="text-right">
-          <div className={`text-sm font-bold ${secondsLeft <= 10 ? 'text-red-400' : 'text-gray-300'}`}>⏱ {secondsLeft}秒</div>
-          <div className="text-xs text-gray-400">自動送出</div>
+          {reminderEndsAt ? (
+            <DecisionCountdown reminderEndsAt={reminderEndsAt} className="font-mono text-lg font-black text-yellow-300" />
+          ) : null}
+          <div className="text-xs font-bold text-indigo-300">🎙 主持人控制 · 倒數僅提醒</div>
         </div>
       </div>
 
@@ -180,8 +156,8 @@ export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPla
           <div className="space-y-2">
             {[
               { key: 'fqUpgrade' as const,     label: `財商升級 FQ ${data.currentStats.financialIQ}→${data.currentStats.financialIQ + 1}`, opt: data.affordableOptions.fqUpgrade,     icon: '📈' },
-              { key: 'healthBoost' as const,    label: `積極健康 HP +20（現 ${data.currentStats.health}）`,                                   opt: data.affordableOptions.healthBoost,   icon: '💪' },
-              { key: 'healthMaint' as const,    label: '健康維護（防 HP 衰退）',                                                               opt: data.affordableOptions.healthMaintenance, icon: '🛡' },
+              { key: 'healthBoost' as const,    label: `積極健康 HP +20（現 ${data.currentStats.health}${data.globalPayday ? '，含整季維護' : ''}）`, opt: data.affordableOptions.healthBoost, icon: '💪' },
+              { key: 'healthMaint' as const,    label: data.globalPayday ? '整季健康維護（防 3 個月 HP 衰退）' : '健康維護（防 HP 衰退）', opt: data.affordableOptions.healthMaintenance, icon: '🛡' },
               { key: 'skillTraining' as const,  label: `進修培訓 SK +20（現 ${data.currentStats.careerSkill}）`,                              opt: data.affordableOptions.skillTraining, icon: '📚' },
               { key: 'networkInvest' as const,  label: `人脈拓展 NT +1（現 ${data.currentStats.network}）`,                                   opt: data.affordableOptions.networkInvest, icon: '🤝' },
             ].map(({ key, label, opt, icon }) => {
@@ -226,7 +202,7 @@ export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPla
             <div className="flex items-center gap-2 mb-2">
               <span className="text-lg">📊</span>
               <div>
-                <div className="text-sm text-white font-semibold">股票定期定額</div>
+                <div className="text-sm text-white font-semibold">股票定期定額{data.globalPayday ? '（本季一次配置）' : ''}</div>
                 {data.stockDCAPortfolioValue > 0 && (
                   <div className="text-xs text-green-400">
                     目前持倉：${data.stockDCAPortfolioValue.toLocaleString()}（每發薪日 +0.5% 增值，+0.25% 現金股息）
@@ -366,17 +342,10 @@ export default function PaydayPlanForm({ data, playerCash, onSubmit }: PaydayPla
             剩餘：<span className="font-bold">${remaining.toLocaleString()}</span>
           </span>
         </div>
-        {/* 倒數進度條 */}
-        <div className="w-full bg-gray-700 rounded-full h-1 mb-3">
-          <div
-            className={`h-1 rounded-full transition-all ${secondsLeft <= 10 ? 'bg-red-500' : 'bg-blue-500'}`}
-            style={{ width: `${(secondsLeft / Math.ceil((data.timeoutMs ?? 30000) / 1000)) * 100}%` }}
-          />
-        </div>
         <button
           className="w-full py-3 rounded-xl font-bold text-sm bg-blue-600 hover:bg-blue-500 text-white transition-colors"
           onClick={handleSubmit}
-        >確認送出</button>
+        >確認送出，等待主持人揭曉</button>
       </div>
     </div>
   );

@@ -2,6 +2,7 @@ import type { PlayerAnalysis } from '../types/game';
 import LifeTimeline from '../components/analysis/LifeTimeline';
 import FinalScoreRadar from '../components/analysis/FinalScoreRadar';
 import DecisionImpactCard from '../components/analysis/DecisionImpactCard';
+import VictoryRouteReview from '../components/analysis/VictoryRouteReview';
 
 interface Props { analysis: PlayerAnalysis }
 
@@ -140,6 +141,9 @@ export default function AnalysisPage({ analysis }: Props) {
 
       {/* 評分雷達圖 */}
       <FinalScoreRadar score={score} playerName={analysis.playerName} />
+
+      {/* 賽後才解鎖的高勝率路線復盤；遊戲中不提供提示 */}
+      <VictoryRouteReview analysis={analysis} />
 
       {/* 決策影響分析 */}
       <DecisionImpactCard analysis={analysis} />

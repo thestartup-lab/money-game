@@ -33,36 +33,34 @@ export interface BoardSquare {
 // ============================================================
 
 /**
- * 老鼠賽跑圈的完整棋盤。
- * 發薪日固定在 0、6、12、18 格（與 gameConfig.ts 的 PAYDAY_LOCATIONS 一致）。
- * Crisis 格位於 5、11（改為 Crisis）、17、23 — 共 3 格。
+ * 老鼠賽跑圈的 24 格棋盤。發薪改為每三個完整輪次統一觸發，
+ * 因此地圖只保留會產生選擇或人生事件的格位。
  */
 export const BOARD: readonly BoardSquare[] = [
-  { index: 0,  type: SquareType.Payday,     label: '發薪日' },
-  { index: 1,  type: SquareType.SmallDeal,  label: '小交易' },
-  { index: 2,  type: SquareType.Doodad,     label: '意外支出' },
-  { index: 3,  type: SquareType.SmallDeal,  label: '小交易' },
-  { index: 4,  type: SquareType.BigDeal,    label: '大交易' },
-  { index: 5,  type: SquareType.Crisis,     label: '危機事件' },
-  { index: 6,  type: SquareType.Payday,     label: '發薪日' },
-  { index: 7,  type: SquareType.SmallDeal,  label: '小交易' },
-  { index: 8,  type: SquareType.Doodad,     label: '意外支出' },
-  { index: 9,  type: SquareType.Baby,       label: '添丁' },
+  { index: 0,  type: SquareType.SmallDeal,    label: '小交易' },
+  { index: 1,  type: SquareType.Doodad,       label: '意外支出' },
+  { index: 2,  type: SquareType.Relationship, label: '人際關係' },
+  { index: 3,  type: SquareType.BigDeal,      label: '大交易' },
+  { index: 4,  type: SquareType.Crisis,       label: '危機事件' },
+  { index: 5,  type: SquareType.Charity,      label: '慈善捐款' },
+  { index: 6,  type: SquareType.SmallDeal,    label: '小交易' },
+  { index: 7,  type: SquareType.Market,       label: '市場行情' },
+  { index: 8,  type: SquareType.Doodad,       label: '意外支出' },
+  { index: 9,  type: SquareType.Baby,         label: '家庭事件' },
   { index: 10, type: SquareType.Relationship, label: '人際關係' },
-  { index: 11, type: SquareType.Charity,    label: '慈善捐款' },
-  { index: 12, type: SquareType.Payday,     label: '發薪日' },
-  { index: 13, type: SquareType.Doodad,     label: '意外支出' },
-  { index: 14, type: SquareType.BigDeal,    label: '大交易' },
-  { index: 15, type: SquareType.SmallDeal,  label: '小交易' },
-  { index: 16, type: SquareType.Market,     label: '市場行情' },
-  { index: 17, type: SquareType.Crisis,     label: '危機事件' },
-  { index: 18, type: SquareType.Payday,     label: '發薪日' },
-  { index: 19, type: SquareType.SmallDeal,  label: '小交易' },
-  { index: 20, type: SquareType.Relationship, label: '人際關係' },
-  { index: 21, type: SquareType.BigDeal,    label: '大交易' },
-  { index: 22, type: SquareType.Downsizing, label: '裁員' },
-  { index: 23, type: SquareType.Crisis,     label: '危機事件' },
-  { index: 24, type: SquareType.SecondLife, label: '第二人生' },
+  { index: 11, type: SquareType.BigDeal,      label: '大交易' },
+  { index: 12, type: SquareType.Crisis,       label: '危機事件' },
+  { index: 13, type: SquareType.SmallDeal,    label: '小交易' },
+  { index: 14, type: SquareType.Market,       label: '市場行情' },
+  { index: 15, type: SquareType.Doodad,       label: '意外支出' },
+  { index: 16, type: SquareType.Downsizing,   label: '職涯轉折' },
+  { index: 17, type: SquareType.Relationship, label: '人際關係' },
+  { index: 18, type: SquareType.BigDeal,      label: '大交易' },
+  { index: 19, type: SquareType.Charity,      label: '慈善捐款' },
+  { index: 20, type: SquareType.SmallDeal,    label: '小交易' },
+  { index: 21, type: SquareType.Crisis,       label: '危機事件' },
+  { index: 22, type: SquareType.Market,       label: '市場行情' },
+  { index: 23, type: SquareType.SecondLife,   label: '第二人生' },
 ];
 
 // ============================================================
@@ -1139,7 +1137,7 @@ export const DISEASE_CRISIS_EVENTS: CrisisCard[] = [
  * @param position 玩家當前位置（0-23）
  */
 // ============================================================
-// 外圈棋盤（FastTrack，16 格）
+// 外圈棋盤（FastTrack，17 格）
 // ============================================================
 
 export enum FastTrackSquareType {
@@ -1171,19 +1169,19 @@ export interface FastTrackSquare {
  * 玩家脫出老鼠賽跑後切換到此棋盤循環行走。
  */
 export const FAST_TRACK_BOARD: readonly FastTrackSquare[] = [
-  { index: 0,  type: FastTrackSquareType.PaydayBonus,       label: '發薪+紅利'  },
+  { index: 0,  type: FastTrackSquareType.GlobalWave,        label: '時代浪潮'  },
   { index: 1,  type: FastTrackSquareType.BigRealEstate,     label: '大型房地產' },
   { index: 2,  type: FastTrackSquareType.StockOpportunity,  label: '股市大機會' },
   { index: 3,  type: FastTrackSquareType.NetworkSummit,     label: '人脈峰會'  },
   { index: 4,  type: FastTrackSquareType.Charity,           label: '慈善格'    },
   { index: 5,  type: FastTrackSquareType.BusinessDeal,      label: '事業擴張'  },
-  { index: 6,  type: FastTrackSquareType.PaydayBonus,       label: '發薪+紅利'  },
+  { index: 6,  type: FastTrackSquareType.BigRealEstate,     label: '大型房地產' },
   { index: 7,  type: FastTrackSquareType.TaxPlanning,       label: '稅務規劃'  },
   { index: 8,  type: FastTrackSquareType.TechStartup,       label: '科技新創'  },
   { index: 9,  type: FastTrackSquareType.GlobalWave,        label: '時代浪潮'  },
   { index: 10, type: FastTrackSquareType.Partnership,       label: '合夥機會'  },
   { index: 11, type: FastTrackSquareType.Crisis,            label: '危機考驗'  },
-  { index: 12, type: FastTrackSquareType.PaydayBonus,       label: '發薪+紅利'  },
+  { index: 12, type: FastTrackSquareType.LifeJourney,       label: '生命歷練'  },
   { index: 13, type: FastTrackSquareType.LifeJourney,       label: '生命歷練'  },
   { index: 14, type: FastTrackSquareType.Relationship,      label: '人際關係'  },
   { index: 15, type: FastTrackSquareType.AssetLeverage,     label: '資產槓桿'  },
@@ -1191,7 +1189,7 @@ export const FAST_TRACK_BOARD: readonly FastTrackSquare[] = [
 ];
 
 /** 外圈發薪格索引 */
-export const FAST_TRACK_PAYDAY_LOCATIONS = [0, 6, 12];
+export const FAST_TRACK_PAYDAY_LOCATIONS: readonly number[] = [];
 
 export function getFastTrackSquareType(position: number): FastTrackSquareType {
   const square = FAST_TRACK_BOARD[position % FAST_TRACK_BOARD.length];
@@ -1199,9 +1197,9 @@ export function getFastTrackSquareType(position: number): FastTrackSquareType {
 }
 
 export function getSquareType(position: number): SquareType {
-  // 注意：BOARD 共 25 格（0-24），與 RAT_RACE_TRACK_SIZE 一致
+  // BOARD 共 24 格（0-23），與 RAT_RACE_TRACK_SIZE 一致
   const square = BOARD[position % BOARD.length];
-  return square?.type ?? SquareType.Payday;
+  return square?.type ?? SquareType.SmallDeal;
 }
 
 /**
