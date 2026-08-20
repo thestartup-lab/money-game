@@ -188,7 +188,7 @@ interface RoomAdminCredential {
 }
 
 const roomAdminCredentials = new Map<string, RoomAdminCredential>();
-const MIN_ADMIN_PASSWORD_LENGTH = 8;
+const MIN_ADMIN_PASSWORD_LENGTH = 3;
 const MAX_ACTIVE_ROOMS = 100;
 const roomCreationRate = new Map<string, { count: number; resetAt: number }>();
 const adminLoginRate = new Map<string, { count: number; resetAt: number }>();

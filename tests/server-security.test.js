@@ -66,11 +66,11 @@ test('房間專屬密碼、來源限制與主持人權限不能被繞過', async
   t.after(() => admin.disconnect());
 
   const shortPasswordErrorPromise = waitForEvent(admin, 'error');
-  admin.emit('createRoom', { roomId: 'SAFE01', password: '123' });
-  assert.match((await shortPasswordErrorPromise).message, /至少需要 8/);
+  admin.emit('createRoom', { roomId: 'SAFE01', password: '12' });
+  assert.match((await shortPasswordErrorPromise).message, /至少需要 3/);
 
   const createdPromise = waitForEvent(admin, 'roomCreated');
-  admin.emit('createRoom', { roomId: 'SAFE01', password: 'secure-passphrase' });
+  admin.emit('createRoom', { roomId: 'SAFE01', password: '123' });
   assert.equal((await createdPromise).roomId, 'SAFE01');
 
   const attacker = await connect();

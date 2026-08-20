@@ -6,6 +6,7 @@ import DecisionCountdown from '../components/game/DecisionCountdown';
 import './AdminClarity.css';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
+const MIN_ADMIN_PASSWORD_LENGTH = 3;
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
 
 const GLOBAL_EVENTS = [
@@ -135,12 +136,18 @@ export default function AdminPage() {
     s.on('globalEventAnnouncement', (p: { event: { title: string; description: string } }) => addLog(`全局事件：${p.event?.title ?? '未知事件'}`));
     s.on('adaptiveDirectorStatus', (p: AdaptiveDirectorStatus) => setAdaptiveDirector(p));
     s.on('playerStatUpdated', (p: { playerName: string }) => addLog(`玩家數值已更新：${p.playerName}`));
-    s.on('error', (p: { message: string }) => addLog(`錯誤：${p.message}`));
+    s.on('error', (p: { message: string }) => {
+      const message = p.message ?? '操作失敗，請再試一次。';
+      addLog(`錯誤：${message}`);
+      setLoginError(message);
+    });
 
     return () => { s.disconnect(); };
   }, []);
 
   const emit = (event: string, ...args: unknown[]) => socketRef.current?.emit(event, ...args);
+  const passwordLength = password.trim().length;
+  const passwordReady = passwordLength >= MIN_ADMIN_PASSWORD_LENGTH;
 
   // ── LOGIN VIEW ──
   if (!loggedIn) {
@@ -169,12 +176,25 @@ export default function AdminPage() {
               id="admin-password"
               className="w-full"
               type="password"
-              placeholder="至少 8 個字元"
+              placeholder="至少 3 個字元"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setLoginError('');
+              }}
             />
+            <p
+              className={`mt-2 text-sm font-bold ${passwordReady ? 'text-emerald-400' : 'text-amber-300'}`}
+              aria-live="polite"
+            >
+              {passwordReady
+                ? '密碼可以使用。'
+                : passwordLength === 0
+                  ? '請輸入至少 3 個字元；可沿用原本的主持人密碼。'
+                  : `還需要 ${MIN_ADMIN_PASSWORD_LENGTH - passwordLength} 個字元。`}
+            </p>
           </div>
-          <p className="-mt-3 text-xs leading-relaxed text-gray-400">
+          <p className="-mt-3 text-sm leading-relaxed text-gray-300">
             建立房間時會設定這一間的專屬密碼；重新登入同一房間時請使用相同密碼。
           </p>
           <div>
@@ -201,7 +221,7 @@ export default function AdminPage() {
           {/* 建立新房間（自訂或隨機代號） */}
           <button
             className="btn-primary w-full"
-            disabled={!connected || password.trim().length < 8}
+            disabled={!connected || !passwordReady}
             onClick={() => {
               setLoginError('');
               pendingLoginPasswordRef.current = password;
@@ -209,14 +229,20 @@ export default function AdminPage() {
               emit('createRoom', { password, roomId: loginRoomId.toUpperCase() || undefined });
             }}
           >
-            {loginRoomId ? `建立房間「${loginRoomId.toUpperCase()}」` : '建立新房間（自動產生代號）'}
+            {!connected
+              ? '正在連接伺服器…'
+              : !passwordReady
+                ? '請先輸入至少 3 碼密碼'
+                : loginRoomId
+                  ? `建立房間「${loginRoomId.toUpperCase()}」`
+                  : '建立新房間（自動產生代號）'}
           </button>
 
           {/* 加入已有房間 */}
           {loginRoomId && (
             <button
               className="btn-secondary w-full"
-              disabled={!connected || password.trim().length < 8}
+              disabled={!connected || !passwordReady}
               onClick={() => {
                 setLoginError('');
                 autoReloginPasswordRef.current = password;
