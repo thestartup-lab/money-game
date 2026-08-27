@@ -188,10 +188,36 @@ interface RoomAdminCredential {
 }
 
 const roomAdminCredentials = new Map<string, RoomAdminCredential>();
-const MIN_ADMIN_PASSWORD_LENGTH = 3;
+const DEFAULT_ADMIN_PASSWORD = '123';
 const MAX_ACTIVE_ROOMS = 100;
+const EMPTY_ROOM_CLEANUP_MS = 30 * 60 * 1000;
 const roomCreationRate = new Map<string, { count: number; resetAt: number }>();
 const adminLoginRate = new Map<string, { count: number; resetAt: number }>();
+const emptyRoomCleanupTimers = new Map<string, NodeJS.Timeout>();
+
+function cancelEmptyRoomCleanup(roomId: string): void {
+  const timer = emptyRoomCleanupTimers.get(roomId);
+  if (!timer) return;
+  clearTimeout(timer);
+  emptyRoomCleanupTimers.delete(roomId);
+}
+
+function scheduleEmptyRoomCleanup(roomId: string): void {
+  if (emptyRoomCleanupTimers.has(roomId)) return;
+  const gs = rooms.get(roomId);
+  if (!gs || gs.adminSocketId || gs.players.size > 0) return;
+
+  const timer = setTimeout(() => {
+    emptyRoomCleanupTimers.delete(roomId);
+    const current = rooms.get(roomId);
+    if (!current || current.adminSocketId || current.players.size > 0) return;
+    rooms.delete(roomId);
+    roomAdminCredentials.delete(roomId);
+    console.log(`[autoCleanup] 空房間 ${roomId} 已在 30 分鐘後自動清除`);
+  }, EMPTY_ROOM_CLEANUP_MS);
+  timer.unref?.();
+  emptyRoomCleanupTimers.set(roomId, timer);
+}
 
 function consumeRateLimit(
   store: Map<string, { count: number; resetAt: number }>,
@@ -1470,14 +1496,14 @@ io.on('connection', (socket: Socket) => {
   // 主持人：建立房間 (createRoom)
   // ----------------------------------------------------------
   /**
-   * 建立時由主持人設定此房間專屬密碼。
-   * Client → Server: { password: string }
+   * 新房統一使用主持人通用密碼（預設 123）。
+   * Client → Server: { roomId?: string }
    * Server → Caller: roomCreated { roomId, joinCode } | error
    *
    * 建立新的獨立遊戲房間，回傳給主持人的 joinCode 供玩家加入使用。
    * 同一主持人可建立多個房間（多開場次）。
    */
-  socket.on('createRoom', (payload: { password: string; roomId?: string }) => {
+  socket.on('createRoom', (payload?: { roomId?: string }) => {
     const rateKey = socket.handshake.address || socket.id;
     if (!consumeRateLimit(roomCreationRate, rateKey, 5, 10 * 60 * 1000)) {
       socket.emit('error', { message: '建立房間次數過多，請稍後再試。' });
@@ -1487,13 +1513,7 @@ io.on('connection', (socket: Socket) => {
       socket.emit('error', { message: '目前房間已達上限，請稍後再試。' });
       return;
     }
-    const password = payload?.password ?? '';
-    if (password.trim().length < MIN_ADMIN_PASSWORD_LENGTH) {
-      socket.emit('error', { message: `主持人密碼至少需要 ${MIN_ADMIN_PASSWORD_LENGTH} 個字元。` });
-      return;
-    }
-
-    const customCode = payload.roomId?.trim().toUpperCase();
+    const customCode = payload?.roomId?.trim().toUpperCase();
     if (customCode) {
       if (rooms.has(customCode)) {
         socket.emit('error', { message: `房間代碼「${customCode}」已存在，請換一個。` });
@@ -1507,8 +1527,9 @@ io.on('connection', (socket: Socket) => {
     const roomCode = customCode || generateRoomCode();
     const gs = new GameState(roomCode);
     gs.adminSocketId = socket.id;
-    roomAdminCredentials.set(roomCode, createRoomAdminCredential(password));
+    roomAdminCredentials.set(roomCode, createRoomAdminCredential(DEFAULT_ADMIN_PASSWORD));
     rooms.set(roomCode, gs);
+    cancelEmptyRoomCleanup(roomCode);
 
     // 主持人也加入 Socket.io 房間（可接收廣播）
     socket.join(roomCode);
@@ -1553,6 +1574,7 @@ io.on('connection', (socket: Socket) => {
 
     emitToRoom(roomId, 'roomDeleted', { roomId, reason: '主持人已關閉房間。' });
 
+    cancelEmptyRoomCleanup(roomId);
     rooms.delete(roomId);
     roomAdminCredentials.delete(roomId);
 
@@ -1599,7 +1621,18 @@ io.on('connection', (socket: Socket) => {
     }
     adminLoginRate.delete(rateKey);
 
+    const previousRoomId = socketRoomMap.get(socket.id);
+    if (previousRoomId && previousRoomId !== targetRoomId) {
+      const previousRoom = rooms.get(previousRoomId);
+      if (previousRoom?.adminSocketId === socket.id) {
+        previousRoom.adminSocketId = undefined;
+        scheduleEmptyRoomCleanup(previousRoomId);
+      }
+      socket.leave(previousRoomId);
+    }
+
     gs.adminSocketId = socket.id;
+    cancelEmptyRoomCleanup(targetRoomId);
     socket.join(targetRoomId);
     socketRoomMap.set(socket.id, targetRoomId);
 
@@ -1669,6 +1702,7 @@ io.on('connection', (socket: Socket) => {
         socket.emit('error', { message: `房間代碼「${roomCode}」不存在，請確認後再試。` });
         return;
       }
+      cancelEmptyRoomCleanup(roomCode);
 
       if (gs.gamePhase === GamePhase.GameOver) {
         socket.emit('error', { message: '此房間的遊戲已結束，無法加入。' });
@@ -3407,6 +3441,10 @@ io.on('connection', (socket: Socket) => {
       socket.emit('error', { message: '只有管理員可以啟動遊戲。' });
       return;
     }
+    if (gs.players.size === 0) {
+      socket.emit('error', { message: '目前沒有玩家，請先讓至少一位玩家加入後再啟動遊戲。' });
+      return;
+    }
 
     // pre20Done 為硬性條件：任何在線玩家未完成職業選擇都不允許開始
     // （斷線中的玩家不擋，他們重連會自動恢復）
@@ -4010,6 +4048,7 @@ io.on('connection', (socket: Socket) => {
     if (socket.id === gs.adminSocketId) {
       gs.adminSocketId = undefined;
       console.log(`[斷線] 房間 ${roomId} 管理員離線，等待重新登入`);
+      scheduleEmptyRoomCleanup(roomId);
     }
 
     const player = gs.players.get(socket.id);
@@ -4029,22 +4068,15 @@ io.on('connection', (socket: Socket) => {
           }
           console.log(`[斷線] 玩家 ${player.name} 重連逾時，已移除。房間 ${roomId} 剩 ${gs.players.size} 人`);
           emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+          scheduleEmptyRoomCleanup(roomId);
         }
       }, 10 * 60 * 1000);
     }
 
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
 
-    // 若房間已空且遊戲結束，延遲 30 分鐘後自動清理
-    if (gs.players.size === 0 && gs.gamePhase === GamePhase.GameOver) {
-      setTimeout(() => {
-        if (rooms.has(roomId) && rooms.get(roomId)!.players.size === 0) {
-          rooms.delete(roomId);
-          roomAdminCredentials.delete(roomId);
-          console.log(`[autoCleanup] 房間 ${roomId} 已自動清除（遊戲結束且無玩家）`);
-        }
-      }, 30 * 60 * 1000);
-    }
+    // 任何階段只要無主持人且無玩家，30 分鐘後都會自動清除。
+    scheduleEmptyRoomCleanup(roomId);
   });
 
   // ----------------------------------------------------------
@@ -4058,6 +4090,7 @@ io.on('connection', (socket: Socket) => {
       socket.emit('rejoinFailed', { message: `房間 ${roomCode} 不存在或已結束。` });
       return;
     }
+    cancelEmptyRoomCleanup(roomCode);
 
     // 在房間內尋找同名且處於斷線狀態的玩家
     let foundPlayer: Player | undefined;

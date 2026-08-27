@@ -31,7 +31,7 @@ function connect(origin = 'http://127.0.0.1:5173') {
   return waitForEvent(socket, 'connect').then(() => socket);
 }
 
-test('房間專屬密碼、來源限制與主持人權限不能被繞過', async (t) => {
+test('主持人通用密碼、零玩家防呆、來源限制與權限不能被繞過', async (t) => {
   const server = spawn(process.execPath, ['dist/socketServer.js'], {
     cwd: process.cwd(),
     env: { ...process.env, PORT: String(PORT), NODE_ENV: 'test' },
@@ -65,13 +65,13 @@ test('房間專屬密碼、來源限制與主持人權限不能被繞過', async
   const admin = await connect();
   t.after(() => admin.disconnect());
 
-  const shortPasswordErrorPromise = waitForEvent(admin, 'error');
-  admin.emit('createRoom', { roomId: 'SAFE01', password: '12' });
-  assert.match((await shortPasswordErrorPromise).message, /至少需要 3/);
-
   const createdPromise = waitForEvent(admin, 'roomCreated');
-  admin.emit('createRoom', { roomId: 'SAFE01', password: '123' });
+  admin.emit('createRoom', { roomId: 'SAFE01' });
   assert.equal((await createdPromise).roomId, 'SAFE01');
+
+  const noPlayerStartPromise = waitForEvent(admin, 'error');
+  admin.emit('startGame');
+  assert.match((await noPlayerStartPromise).message, /沒有玩家/);
 
   const attacker = await connect();
   t.after(() => attacker.disconnect());
@@ -83,7 +83,11 @@ test('房間專屬密碼、來源限制與主持人權限不能被繞過', async
   attacker.emit('adminLogin', { roomId: 'SAFE01', password: 'wrong-password' });
   assert.match((await wrongLoginPromise).message, /密碼錯誤/);
 
-  const announcementPromise = waitForEvent(admin, 'globalEventAnnouncement');
-  admin.emit('triggerGlobalEvent', { roomId: 'SAFE01', eventId: 'inflation' });
+  const loginSuccessPromise = waitForEvent(attacker, 'adminLoginSuccess');
+  attacker.emit('adminLogin', { roomId: 'SAFE01', password: '123' });
+  assert.equal((await loginSuccessPromise).roomId, 'SAFE01');
+
+  const announcementPromise = waitForEvent(attacker, 'globalEventAnnouncement');
+  attacker.emit('triggerGlobalEvent', { roomId: 'SAFE01', eventId: 'inflation' });
   assert.equal((await announcementPromise).event.id, 'inflation');
 });

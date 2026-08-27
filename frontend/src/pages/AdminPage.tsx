@@ -6,8 +6,28 @@ import DecisionCountdown from '../components/game/DecisionCountdown';
 import './AdminClarity.css';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
-const MIN_ADMIN_PASSWORD_LENGTH = 3;
+const DEFAULT_ADMIN_PASSWORD = '123';
+const ADMIN_ROOM_STORAGE_KEY = 'money-game-admin-room';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
+
+function readRememberedAdminRoom(): string {
+  try {
+    return window.localStorage.getItem(ADMIN_ROOM_STORAGE_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function rememberAdminRoom(roomId: string): void {
+  try {
+    if (roomId) window.localStorage.setItem(ADMIN_ROOM_STORAGE_KEY, roomId);
+    else window.localStorage.removeItem(ADMIN_ROOM_STORAGE_KEY);
+  } catch {
+    // 瀏覽器停用儲存時仍可手動使用 123 登入，不阻斷主持流程。
+  }
+}
+
+const INITIAL_REMEMBERED_ADMIN_ROOM = readRememberedAdminRoom();
 
 const GLOBAL_EVENTS = [
   { id: 'stock_crash',       label: '股市崩盤',   color: 'bg-red-700 hover:bg-red-600' },
@@ -24,6 +44,7 @@ interface AdminRoom {
   roomId: string;
   phase: string;
   playerCount: number;
+  gamePhase?: string;
 }
 
 interface StatsEdit {
@@ -44,9 +65,7 @@ interface AdaptiveDirectorStatus {
 
 export default function AdminPage() {
   const socketRef = useRef<Socket | null>(null);
-  const pendingLoginPasswordRef = useRef<string>(''); // 建立房間後自動登入用
-  const autoReloginPasswordRef = useRef<string>('');  // 斷線重連自動登入用
-  const autoReloginRoomIdRef = useRef<string>('');    // 斷線重連自動登入用
+  const autoReloginRoomIdRef = useRef<string>(INITIAL_REMEMBERED_ADMIN_ROOM);
   const [connected, setConnected] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
   const [roomId, setRoomId] = useState('');
@@ -55,8 +74,7 @@ export default function AdminPage() {
   const [log, setLog] = useState<string[]>([]);
 
   // Login form
-  const [password, setPassword] = useState('');
-  const [loginRoomId, setLoginRoomId] = useState('');
+  const [loginRoomId, setLoginRoomId] = useState(INITIAL_REMEMBERED_ADMIN_ROOM);
   const [loginError, setLoginError] = useState('');
 
   const [adaptiveDirector, setAdaptiveDirector] = useState<AdaptiveDirectorStatus | null>(null);
@@ -78,9 +96,9 @@ export default function AdminPage() {
       setConnected(true);
       s.emit('listRooms');
       // 若有儲存的登入資訊，自動重新登入（斷線重連情境）
-      if (autoReloginPasswordRef.current && autoReloginRoomIdRef.current) {
+      if (autoReloginRoomIdRef.current) {
         s.emit('adminLogin', {
-          password: autoReloginPasswordRef.current,
+          password: DEFAULT_ADMIN_PASSWORD,
           roomId: autoReloginRoomIdRef.current,
         });
       }
@@ -95,13 +113,14 @@ export default function AdminPage() {
       // 儲存登入資訊供斷線重連使用
       if (p.roomId) {
         autoReloginRoomIdRef.current = p.roomId;
-        if (pendingLoginPasswordRef.current) {
-          autoReloginPasswordRef.current = pendingLoginPasswordRef.current;
-        }
+        setLoginRoomId(p.roomId);
+        rememberAdminRoom(p.roomId);
         s.emit('getAdaptiveDirectorStatus', { roomId: p.roomId });
       }
     });
     s.on('adminLoginFail', (p: { message: string }) => {
+      autoReloginRoomIdRef.current = '';
+      rememberAdminRoom('');
       setLoginError(p.message ?? '登入失敗');
     });
 
@@ -109,13 +128,23 @@ export default function AdminPage() {
       setRoomId(p.roomId);
       addLog(`房間已建立：${p.roomId}`);
       s.emit('listRooms');
-      // 建立房間後自動用正確的 roomId 登入
-      if (pendingLoginPasswordRef.current) {
-        s.emit('adminLogin', { password: pendingLoginPasswordRef.current, roomId: p.roomId });
-        pendingLoginPasswordRef.current = '';
-      }
+      // 新房統一使用主持人密碼 123，建立後立即進入。
+      s.emit('adminLogin', { password: DEFAULT_ADMIN_PASSWORD, roomId: p.roomId });
     });
-    s.on('roomList', (rooms: AdminRoom[]) => setRoomList(rooms ?? []));
+    s.on('roomDeleted', (p: { roomId: string }) => {
+      if (autoReloginRoomIdRef.current !== p.roomId) return;
+      autoReloginRoomIdRef.current = '';
+      rememberAdminRoom('');
+      setLoggedIn(false);
+      setGameState(null);
+      setRoomId('');
+      setLoginRoomId('');
+      s.emit('listRooms');
+    });
+    s.on('roomList', (rooms: AdminRoom[]) => setRoomList((rooms ?? []).map((room) => ({
+      ...room,
+      phase: room.phase ?? room.gamePhase ?? 'WaitingForPlayers',
+    }))));
 
     s.on('gameStateUpdate', (gs: GameState) => {
       setGameState(gs);
@@ -146,8 +175,6 @@ export default function AdminPage() {
   }, []);
 
   const emit = (event: string, ...args: unknown[]) => socketRef.current?.emit(event, ...args);
-  const passwordLength = password.trim().length;
-  const passwordReady = passwordLength >= MIN_ADMIN_PASSWORD_LENGTH;
 
   // ── LOGIN VIEW ──
   if (!loggedIn) {
@@ -170,33 +197,11 @@ export default function AdminPage() {
             </span>
           </div>
 
-          <div>
-            <label className="admin-field-label" htmlFor="admin-password">主持人密碼</label>
-            <input
-              id="admin-password"
-              className="w-full"
-              type="password"
-              placeholder="至少 3 個字元"
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                setLoginError('');
-              }}
-            />
-            <p
-              className={`mt-2 text-sm font-bold ${passwordReady ? 'text-emerald-400' : 'text-amber-300'}`}
-              aria-live="polite"
-            >
-              {passwordReady
-                ? '密碼可以使用。'
-                : passwordLength === 0
-                  ? '請輸入至少 3 個字元；可沿用原本的主持人密碼。'
-                  : `還需要 ${MIN_ADMIN_PASSWORD_LENGTH - passwordLength} 個字元。`}
-            </p>
+          <div className="rounded-2xl border border-emerald-700 bg-emerald-950/60 px-4 py-3 text-center">
+            <p className="text-sm font-bold text-emerald-200">主持人通用密碼</p>
+            <p className="mt-1 font-mono text-4xl font-black tracking-[0.3em] text-yellow-300">123</p>
+            <p className="mt-2 text-sm text-emerald-100">同一台電腦會自動記住房間，重新整理也會直接回來。</p>
           </div>
-          <p className="-mt-3 text-sm leading-relaxed text-gray-300">
-            建立房間時會設定這一間的專屬密碼；重新登入同一房間時請使用相同密碼。
-          </p>
           <div>
             <label className="admin-field-label" htmlFor="admin-room-code">房間代碼</label>
             <input
@@ -221,32 +226,27 @@ export default function AdminPage() {
           {/* 建立新房間（自訂或隨機代號） */}
           <button
             className="btn-primary w-full"
-            disabled={!connected || !passwordReady}
+            disabled={!connected}
             onClick={() => {
               setLoginError('');
-              pendingLoginPasswordRef.current = password;
-              autoReloginPasswordRef.current = password;
-              emit('createRoom', { password, roomId: loginRoomId.toUpperCase() || undefined });
+              emit('createRoom', { password: DEFAULT_ADMIN_PASSWORD, roomId: loginRoomId.toUpperCase() || undefined });
             }}
           >
             {!connected
               ? '正在連接伺服器…'
-              : !passwordReady
-                ? '請先輸入至少 3 碼密碼'
-                : loginRoomId
-                  ? `建立房間「${loginRoomId.toUpperCase()}」`
-                  : '建立新房間（自動產生代號）'}
+              : loginRoomId
+                ? `建立房間「${loginRoomId.toUpperCase()}」`
+                : '建立新房間（自動產生代號）'}
           </button>
 
           {/* 加入已有房間 */}
           {loginRoomId && (
             <button
               className="btn-secondary w-full"
-              disabled={!connected || !passwordReady}
+              disabled={!connected}
               onClick={() => {
                 setLoginError('');
-                autoReloginPasswordRef.current = password;
-                emit('adminLogin', { password, roomId: loginRoomId.toUpperCase() });
+                emit('adminLogin', { password: DEFAULT_ADMIN_PASSWORD, roomId: loginRoomId.toUpperCase() });
               }}
             >
               加入已有房間「{loginRoomId.toUpperCase()}」
@@ -262,11 +262,13 @@ export default function AdminPage() {
                   className="w-full rounded-xl border border-slate-600 bg-slate-900/70 px-4 py-3 text-left text-sm transition-colors hover:border-indigo-400 hover:bg-slate-800"
                   onClick={() => {
                     setLoginRoomId(r.roomId);
+                    setLoginError('');
+                    emit('adminLogin', { password: DEFAULT_ADMIN_PASSWORD, roomId: r.roomId });
                   }}
                 >
                   <span className="font-mono font-black tracking-widest text-yellow-300">{r.roomId}</span>
                   <span className="ml-3 text-gray-300">{r.phase}</span>
-                  <span className="float-right text-gray-400">{r.playerCount} 人</span>
+                  <span className="float-right text-gray-400">{r.playerCount} 人 · 點擊進入</span>
                 </button>
               ))}
             </div>
@@ -355,9 +357,12 @@ export default function AdminPage() {
             onClick={() => {
               if (window.confirm('確定要刪除目前房間？')) {
                 emit('deleteRoom');
+                autoReloginRoomIdRef.current = '';
+                rememberAdminRoom('');
                 setLoggedIn(false);
                 setGameState(null);
                 setRoomId('');
+                setLoginRoomId('');
               }
             }}
           >
@@ -450,11 +455,15 @@ export default function AdminPage() {
             {isStartable && (
               <button
                 className="btn-primary w-full text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={notReadyPlayers.length > 0}
-                title={notReadyPlayers.length > 0 ? '尚有玩家未完成職業選擇，無法開始' : '開始 20 回合遊戲'}
+                disabled={players.length === 0 || notReadyPlayers.length > 0}
+                title={players.length === 0
+                  ? '請先讓至少一位玩家加入'
+                  : notReadyPlayers.length > 0
+                    ? '尚有玩家未完成職業選擇，無法開始'
+                    : '開始 20 回合遊戲'}
                 onClick={() => emit('startGame')}
               >
-                開始 20 回合遊戲
+                {players.length === 0 ? '請先讓玩家加入' : '開始 20 回合遊戲'}
               </button>
             )}
             {isStartable && notReadyPlayers.length > 0 && (
@@ -772,7 +781,7 @@ export default function AdminPage() {
                           <button
                             className="bg-indigo-900 hover:bg-indigo-800 text-indigo-200 text-xs font-bold py-2 px-2 rounded-xl transition-colors"
                             onClick={() => {
-                              emit('adminLogin', { password: autoReloginPasswordRef.current, roomId: r.roomId });
+                              emit('adminLogin', { password: DEFAULT_ADMIN_PASSWORD, roomId: r.roomId });
                             }}
                           >
                             切換
