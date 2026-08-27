@@ -111,6 +111,7 @@ export default function HostControlPage() {
       rememberedRoomRef.current = '';
       rememberAdminRoom('');
       setLoggedIn(false);
+      setRoomInput('');
       setMessage(payload.message ?? '無法進入房間，請再試一次。');
     });
     socket.on('gameStateUpdate', (nextGameState: GameState) => setGameState(nextGameState));
