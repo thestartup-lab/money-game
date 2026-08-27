@@ -194,6 +194,35 @@ const EMPTY_ROOM_CLEANUP_MS = 30 * 60 * 1000;
 const roomCreationRate = new Map<string, { count: number; resetAt: number }>();
 const adminLoginRate = new Map<string, { count: number; resetAt: number }>();
 const emptyRoomCleanupTimers = new Map<string, NodeJS.Timeout>();
+const roomAdminSocketIds = new Map<string, Set<string>>();
+
+function hasRoomAdmin(gs: GameState): boolean {
+  return (roomAdminSocketIds.get(gs.gameId)?.size ?? 0) > 0 || Boolean(gs.adminSocketId);
+}
+
+function isRoomAdmin(socket: Socket, gs: GameState): boolean {
+  return roomAdminSocketIds.get(gs.gameId)?.has(socket.id) === true || gs.adminSocketId === socket.id;
+}
+
+function addRoomAdmin(roomId: string, socketId: string): void {
+  const admins = roomAdminSocketIds.get(roomId) ?? new Set<string>();
+  admins.add(socketId);
+  roomAdminSocketIds.set(roomId, admins);
+  const gs = rooms.get(roomId);
+  if (gs && !gs.adminSocketId) gs.adminSocketId = socketId;
+}
+
+function removeRoomAdmin(roomId: string, socketId: string): void {
+  const admins = roomAdminSocketIds.get(roomId);
+  admins?.delete(socketId);
+  const gs = rooms.get(roomId);
+  if (!admins || admins.size === 0) {
+    roomAdminSocketIds.delete(roomId);
+    if (gs) gs.adminSocketId = undefined;
+    return;
+  }
+  if (gs?.adminSocketId === socketId) gs.adminSocketId = admins.values().next().value;
+}
 
 function cancelEmptyRoomCleanup(roomId: string): void {
   const timer = emptyRoomCleanupTimers.get(roomId);
@@ -205,14 +234,15 @@ function cancelEmptyRoomCleanup(roomId: string): void {
 function scheduleEmptyRoomCleanup(roomId: string): void {
   if (emptyRoomCleanupTimers.has(roomId)) return;
   const gs = rooms.get(roomId);
-  if (!gs || gs.adminSocketId || gs.players.size > 0) return;
+  if (!gs || hasRoomAdmin(gs) || gs.players.size > 0) return;
 
   const timer = setTimeout(() => {
     emptyRoomCleanupTimers.delete(roomId);
     const current = rooms.get(roomId);
-    if (!current || current.adminSocketId || current.players.size > 0) return;
+    if (!current || hasRoomAdmin(current) || current.players.size > 0) return;
     rooms.delete(roomId);
     roomAdminCredentials.delete(roomId);
+    roomAdminSocketIds.delete(roomId);
     console.log(`[autoCleanup] 空房間 ${roomId} 已在 30 分鐘後自動清除`);
   }, EMPTY_ROOM_CLEANUP_MS);
   timer.unref?.();
@@ -319,8 +349,10 @@ function calcNetWorth(p: Player): number {
 const ADAPTIVE_EVENT_COOLDOWN_PAYDAYS = 2;
 
 function emitAdaptiveDirectorStatus(gs: GameState): void {
-  if (!gs.adminSocketId) return;
-  io.to(gs.adminSocketId).emit('adaptiveDirectorStatus', {
+  const adminIds = [...(roomAdminSocketIds.get(gs.gameId) ?? [])];
+  if (adminIds.length === 0 && gs.adminSocketId) adminIds.push(gs.adminSocketId);
+  if (adminIds.length === 0) return;
+  io.to(adminIds).emit('adaptiveDirectorStatus', {
     ...gs.adaptiveDirector,
     globalPaydayNumber: gs.globalPaydayNumber,
   });
@@ -1007,7 +1039,7 @@ function serializeGameState(gs: GameState): object {
     turnNumber: gs.turnNumber,
     marketEvents: gs.marketEvents,
     createdAt: gs.createdAt,
-    hasAdmin: gs.adminSocketId !== undefined,
+    hasAdmin: hasRoomAdmin(gs),
     gameStartTime: gs.gameStartTime,
     gameDurationMs: gs.gameDurationMs,
     remainingTimeMs: getRemainingActivityTimeMs(gs),
@@ -1529,6 +1561,7 @@ io.on('connection', (socket: Socket) => {
     gs.adminSocketId = socket.id;
     roomAdminCredentials.set(roomCode, createRoomAdminCredential(DEFAULT_ADMIN_PASSWORD));
     rooms.set(roomCode, gs);
+    addRoomAdmin(roomCode, socket.id);
     cancelEmptyRoomCleanup(roomCode);
 
     // 主持人也加入 Socket.io 房間（可接收廣播）
@@ -1561,7 +1594,7 @@ io.on('connection', (socket: Socket) => {
       socket.emit('error', { message: '尚未加入任何房間。' });
       return;
     }
-    if (socket.id !== gs.adminSocketId) {
+    if (!isRoomAdmin(socket, gs)) {
       socket.emit('error', { message: '只有建立此房間的主持人才能刪除它。' });
       return;
     }
@@ -1577,6 +1610,7 @@ io.on('connection', (socket: Socket) => {
     cancelEmptyRoomCleanup(roomId);
     rooms.delete(roomId);
     roomAdminCredentials.delete(roomId);
+    roomAdminSocketIds.delete(roomId);
 
     // 踢出所有在此房間的 socket
     io.in(roomId).socketsLeave(roomId);
@@ -1624,14 +1658,14 @@ io.on('connection', (socket: Socket) => {
     const previousRoomId = socketRoomMap.get(socket.id);
     if (previousRoomId && previousRoomId !== targetRoomId) {
       const previousRoom = rooms.get(previousRoomId);
-      if (previousRoom?.adminSocketId === socket.id) {
-        previousRoom.adminSocketId = undefined;
+      if (previousRoom && isRoomAdmin(socket, previousRoom)) {
+        removeRoomAdmin(previousRoomId, socket.id);
         scheduleEmptyRoomCleanup(previousRoomId);
       }
       socket.leave(previousRoomId);
     }
 
-    gs.adminSocketId = socket.id;
+    addRoomAdmin(targetRoomId, socket.id);
     cancelEmptyRoomCleanup(targetRoomId);
     socket.join(targetRoomId);
     socketRoomMap.set(socket.id, targetRoomId);
@@ -1640,6 +1674,18 @@ io.on('connection', (socket: Socket) => {
     socket.emit('adminLoginSuccess', { adminSocketId: socket.id, roomId: targetRoomId });
     // 登入後立即推送當前遊戲狀態，讓後台能正確顯示開始按鈕
     socket.emit('gameStateUpdate', serializeGameState(gs));
+  });
+
+  // 手機控場切換房間時主動釋放管理員身份，避免空房被誤判仍有人控制。
+  socket.on('adminLeaveRoom', () => {
+    const roomId = socketRoomMap.get(socket.id);
+    const gs = roomId ? rooms.get(roomId) : undefined;
+    if (!roomId || !gs || !isRoomAdmin(socket, gs)) return;
+    removeRoomAdmin(roomId, socket.id);
+    socketRoomMap.delete(socket.id);
+    socket.leave(roomId);
+    scheduleEmptyRoomCleanup(roomId);
+    socket.emit('adminLeftRoom', { roomId });
   });
 
   // ----------------------------------------------------------
@@ -1677,7 +1723,7 @@ io.on('connection', (socket: Socket) => {
       roomId,
       playerCount: gs.players.size,
       gamePhase: gs.gamePhase,
-      hasAdmin: gs.adminSocketId !== undefined,
+      hasAdmin: hasRoomAdmin(gs),
     }));
     socket.emit('roomList', list);
   });
@@ -2260,7 +2306,7 @@ io.on('connection', (socket: Socket) => {
   socket.on('continueDecisionPhase', (payload?: { phaseId?: string }) => {
     const gs = getRoomState(socket);
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
-    if (socket.id !== gs.adminSocketId) {
+    if (!isRoomAdmin(socket, gs)) {
       socket.emit('error', { message: '只有主持人可以結束決策階段。' });
       return;
     }
@@ -2282,7 +2328,7 @@ io.on('connection', (socket: Socket) => {
   socket.on('setDecisionReminder', (payload?: { phaseId?: string; seconds?: number; addSeconds?: number }) => {
     const gs = getRoomState(socket);
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
-    if (socket.id !== gs.adminSocketId) {
+    if (!isRoomAdmin(socket, gs)) {
       socket.emit('error', { message: '只有主持人可以調整決策倒數。' });
       return;
     }
@@ -2585,14 +2631,14 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   socket.on('getAdaptiveDirectorStatus', (payload?: { roomId?: string }) => {
     const gs = (payload?.roomId ? rooms.get(payload.roomId) : null) ?? getRoomState(socket);
-    if (!gs || socket.id !== gs.adminSocketId) return;
+    if (!gs || !isRoomAdmin(socket, gs)) return;
     emitAdaptiveDirectorStatus(gs);
   });
 
   socket.on('setAdaptiveDirectorEnabled', (payload: { enabled: boolean; roomId?: string }) => {
     const gs = (payload?.roomId ? rooms.get(payload.roomId) : null) ?? getRoomState(socket);
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
-    if (socket.id !== gs.adminSocketId) {
+    if (!isRoomAdmin(socket, gs)) {
       socket.emit('error', { message: '只有主持人可以調整自動難度。' });
       return;
     }
@@ -2605,7 +2651,7 @@ io.on('connection', (socket: Socket) => {
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
-    if (socket.id !== gs.adminSocketId) {
+    if (!isRoomAdmin(socket, gs)) {
       socket.emit('error', { message: '權限不足：僅管理員可觸發全局事件。' });
       return;
     }
@@ -2634,7 +2680,7 @@ io.on('connection', (socket: Socket) => {
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
-    if (socket.id !== gs.adminSocketId) {
+    if (!isRoomAdmin(socket, gs)) {
       socket.emit('error', { message: '權限不足：僅管理員可觸發特殊拍賣。' });
       return;
     }
@@ -3410,7 +3456,7 @@ io.on('connection', (socket: Socket) => {
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
-    if (socket.id !== gs.adminSocketId) {
+    if (!isRoomAdmin(socket, gs)) {
       socket.emit('error', { message: '只有管理員可以踢出玩家。' });
       return;
     }
@@ -3437,7 +3483,7 @@ io.on('connection', (socket: Socket) => {
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
-    if (socket.id !== gs.adminSocketId) {
+    if (!isRoomAdmin(socket, gs)) {
       socket.emit('error', { message: '只有管理員可以啟動遊戲。' });
       return;
     }
@@ -3515,7 +3561,7 @@ io.on('connection', (socket: Socket) => {
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
-    if (socket.id !== gs.adminSocketId) {
+    if (!isRoomAdmin(socket, gs)) {
       socket.emit('error', { message: '只有管理員可以暫停遊戲。' });
       return;
     }
@@ -3540,7 +3586,7 @@ io.on('connection', (socket: Socket) => {
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
-    if (socket.id !== gs.adminSocketId) {
+    if (!isRoomAdmin(socket, gs)) {
       socket.emit('error', { message: '只有管理員可以恢復遊戲。' });
       return;
     }
@@ -3577,7 +3623,7 @@ io.on('connection', (socket: Socket) => {
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
-    if (socket.id !== gs.adminSocketId) {
+    if (!isRoomAdmin(socket, gs)) {
       socket.emit('error', { message: '只有管理員可以重啟遊戲。' });
       return;
     }
@@ -3650,7 +3696,7 @@ io.on('connection', (socket: Socket) => {
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
-    if (socket.id !== gs.adminSocketId) {
+    if (!isRoomAdmin(socket, gs)) {
       socket.emit('error', { message: '只有管理員可以觸發邂逅事件。' });
       return;
     }
@@ -3702,7 +3748,7 @@ io.on('connection', (socket: Socket) => {
     const gs = getRoomState(socket);
     if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
 
-    if (socket.id !== gs.adminSocketId) {
+    if (!isRoomAdmin(socket, gs)) {
       socket.emit('error', { message: '只有管理員可以調整玩家能力值。' });
       return;
     }
@@ -3871,7 +3917,7 @@ io.on('connection', (socket: Socket) => {
     const target = gs.players.get(targetId);
 
     // 主持人可查詢任意玩家；玩家只能查自己
-    if (targetId !== socket.id && socket.id !== gs.adminSocketId) {
+    if (targetId !== socket.id && !isRoomAdmin(socket, gs)) {
       socket.emit('error', { message: '只能查看自己的分析資料，或由管理員查詢。' });
       return;
     }
@@ -4045,8 +4091,8 @@ io.on('connection', (socket: Socket) => {
     if (!gs) return;
 
     // 若斷線的是管理員，清除管理員狀態（玩家資料保留，等待重新登入）
-    if (socket.id === gs.adminSocketId) {
-      gs.adminSocketId = undefined;
+    if (isRoomAdmin(socket, gs)) {
+      removeRoomAdmin(roomId, socket.id);
       console.log(`[斷線] 房間 ${roomId} 管理員離線，等待重新登入`);
       scheduleEmptyRoomCleanup(roomId);
     }

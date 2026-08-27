@@ -5,12 +5,14 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 const PlayerPage = lazy(() => import('./pages/PlayerPage'));
 const DisplayScreen = lazy(() => import('./pages/DisplayScreen'));
 const AdminPage = lazy(() => import('./pages/AdminPage'));
+const HostControlPage = lazy(() => import('./pages/HostControlPage'));
 
 /**
  * 路由：根據 URL 參數決定顯示哪個介面
  *   /           → 玩家手機頁
  *   /?display   → 大螢幕展示
  *   /?admin     → 主持人後台
+ *   /?host      → 主持人手機控場
  *   /?board     → 棋盤預覽（開發用）
  */
 export default function App() {
@@ -18,12 +20,14 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     if (params.has('display')) return 'display';
     if (params.has('admin')) return 'admin';
+    if (params.has('host')) return 'host';
     if (params.has('board')) return 'board';
     return 'player';
   }, []);
 
   if (mode === 'display') return <RouteShell><DisplayScreen /></RouteShell>;
   if (mode === 'admin') return <RouteShell><AdminPage /></RouteShell>;
+  if (mode === 'host') return <RouteShell><HostControlPage /></RouteShell>;
   if (mode === 'board') return <ErrorBoundary><BoardPreview /></ErrorBoundary>;
   return <RouteShell><PlayerPage /></RouteShell>;
 }

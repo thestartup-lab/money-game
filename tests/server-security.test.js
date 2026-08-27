@@ -31,7 +31,7 @@ function connect(origin = 'http://127.0.0.1:5173') {
   return waitForEvent(socket, 'connect').then(() => socket);
 }
 
-test('主持人通用密碼、零玩家防呆、來源限制與權限不能被繞過', async (t) => {
+test('主持人通用密碼、多裝置控場、零玩家防呆、來源限制與權限不能被繞過', async (t) => {
   const server = spawn(process.execPath, ['dist/socketServer.js'], {
     cwd: process.cwd(),
     env: { ...process.env, PORT: String(PORT), NODE_ENV: 'test' },
@@ -86,6 +86,16 @@ test('主持人通用密碼、零玩家防呆、來源限制與權限不能被�
   const loginSuccessPromise = waitForEvent(attacker, 'adminLoginSuccess');
   attacker.emit('adminLogin', { roomId: 'SAFE01', password: '123' });
   assert.equal((await loginSuccessPromise).roomId, 'SAFE01');
+
+  const originalAdminAnnouncement = waitForEvent(admin, 'globalEventAnnouncement');
+  const secondControllerAnnouncement = waitForEvent(attacker, 'globalEventAnnouncement');
+  admin.emit('triggerGlobalEvent', { roomId: 'SAFE01', eventId: 'stock_boom' });
+  const [originalAdminEvent, secondControllerEvent] = await Promise.all([
+    originalAdminAnnouncement,
+    secondControllerAnnouncement,
+  ]);
+  assert.equal(originalAdminEvent.event.id, 'stock_boom');
+  assert.equal(secondControllerEvent.event.id, 'stock_boom');
 
   const announcementPromise = waitForEvent(attacker, 'globalEventAnnouncement');
   attacker.emit('triggerGlobalEvent', { roomId: 'SAFE01', eventId: 'inflation' });
