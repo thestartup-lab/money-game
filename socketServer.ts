@@ -2253,13 +2253,14 @@ io.on('connection', (socket: Socket) => {
     }
 
     const roomId = gs.gameId;
-
-    emitToRoom(roomId, 'roomDeleted', { roomId, reason: '主持人已關閉房間。' });
-
     cancelEmptyRoomCleanup(roomId);
     rooms.delete(roomId);
     roomAdminCredentials.delete(roomId);
     roomAdminSocketIds.delete(roomId);
+
+    // 先移除房間再通知前端，避免前端收到 roomDeleted 後立刻刷新清單時
+    // 又讀到尚未刪除的舊房間。
+    emitToRoom(roomId, 'roomDeleted', { roomId, reason: '主持人已關閉房間。' });
 
     // 踢出所有在此房間的 socket
     io.in(roomId).socketsLeave(roomId);

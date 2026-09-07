@@ -187,4 +187,13 @@ test('主持人通用密碼、多裝置控場、零玩家防呆、來源限制�
   admin.emit('triggerRelationship', { targetPlayerId: playerId });
   const relationshipState = await relationshipStatePromise;
   assert.equal(relationshipState.players.find((candidate) => candidate.id === playerId).relationshipActive, true);
+
+  const deletedPromise = waitForEvent(admin, 'deleteRoomResult');
+  admin.emit('deleteRoom');
+  assert.equal((await deletedPromise).success, true);
+
+  const refreshedRoomsPromise = waitForEvent(attacker, 'roomList');
+  attacker.emit('listRooms');
+  const refreshedRooms = await refreshedRoomsPromise;
+  assert.equal(refreshedRooms.some((room) => room.roomId === 'SAFE01'), false);
 });
