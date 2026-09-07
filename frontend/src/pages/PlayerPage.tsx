@@ -1142,6 +1142,14 @@ export default function PlayerPage() {
             </div>
           )}
 
+          {!isGameOver && gameState.facilitatorScene && (
+            <div className="mx-4 mb-3 rounded-2xl border-2 border-yellow-500 bg-gradient-to-br from-indigo-950 to-gray-900 px-5 py-6 text-center shadow-xl">
+              <div className="text-5xl" aria-hidden="true">📺</div>
+              <p className="mt-3 text-2xl font-black text-white">請抬頭看大螢幕</p>
+              <p className="mt-2 text-base font-bold leading-relaxed text-yellow-200">主持人正在帶領全場互動，所有內容與結果都會在大螢幕揭曉。</p>
+            </div>
+          )}
+
           {/* 事件卡（有事件時取代格子顯示，或加在下面） */}
           {activeEvent && (
             <div className="mx-4 mb-3">
@@ -1156,7 +1164,7 @@ export default function PlayerPage() {
           )}
 
           {/* 擲骰區 */}
-          {!isGameOver && !gameState.decisionPhase && (
+          {!isGameOver && !gameState.decisionPhase && !gameState.facilitatorScene && (
             <div className="mx-4 mb-3">
               <DiceRoller
                 isMyTurn={isMyTurn}
@@ -1261,7 +1269,7 @@ export default function PlayerPage() {
               <FinancialStatement player={myPlayer} />
             </CollapsePanel>
 
-            {!gameState.decisionPhase && <CollapsePanel title="行動" defaultOpen={false}>
+            {!gameState.decisionPhase && !gameState.facilitatorScene && <CollapsePanel title="行動" defaultOpen={false}>
               <ActionPanel
                 player={myPlayer}
                 currentAge={personalAge}

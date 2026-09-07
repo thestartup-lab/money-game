@@ -9,6 +9,7 @@ const EVENT_ICONS: Record<string, string> = {
   marriage: '💑', child: '👶', crisis: '⚠️',
   career_change: '🔄', education: '🎓', rat_race_escaped: '🚀',
   loan_taken: '🏦', franchise: '🏪', relationship: '🤝',
+  community_choice: '🗳️', decision_echo: '🔁', cooperation: '🤝', legacy: '🌟',
 };
 
 const EVENT_COLORS: Record<string, string> = {
@@ -24,6 +25,10 @@ const EVENT_COLORS: Record<string, string> = {
   loan_taken: 'border-orange-700 bg-orange-950',
   franchise: 'border-amber-700 bg-amber-950',
   relationship: 'border-teal-700 bg-teal-950',
+  community_choice: 'border-cyan-700 bg-cyan-950',
+  decision_echo: 'border-violet-700 bg-violet-950',
+  cooperation: 'border-sky-700 bg-sky-950',
+  legacy: 'border-amber-600 bg-amber-950',
 };
 
 const DOT_COLORS = [

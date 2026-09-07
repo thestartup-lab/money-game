@@ -7,7 +7,8 @@ export type PlayerEventType =
   | 'game_start' | 'payday' | 'asset_buy' | 'asset_sell'
   | 'travel' | 'marriage' | 'child' | 'crisis'
   | 'career_change' | 'education' | 'rat_race_escaped'
-  | 'loan_taken' | 'loan_repaid' | 'bedridden' | 'relationship' | 'death';
+  | 'loan_taken' | 'loan_repaid' | 'bedridden' | 'relationship' | 'death'
+  | 'community_choice' | 'decision_echo' | 'cooperation' | 'legacy';
 
 export interface PlayerEvent {
   age: number;
@@ -132,6 +133,7 @@ export interface Player {
   monthlyCashflow: number;
   nextFQUpgradeCost: number | null;
   eventLog: PlayerEvent[];
+  legacyActionUsed?: boolean;
   /** A1：累積慈善捐款金額（含內外圈所有捐款） */
   charityTotal?: number;
   /** 外圈稅務規劃對下一次年度稅的減免比例。 */
@@ -189,6 +191,21 @@ export interface GameState {
     startedAt: number;
     reminderEndsAt: number;
   } | null;
+  facilitatorScene?: FacilitatorScene | null;
+}
+
+export interface FacilitatorScene {
+  id: string;
+  kind: 'community' | 'echo' | 'cooperation' | 'legacy';
+  stage: 'prompt' | 'result';
+  kicker: string;
+  title: string;
+  description: string;
+  participantNames: string[];
+  options?: { id: string; label: string; description: string }[];
+  resultTitle?: string;
+  resultDescription?: string;
+  resumeOnClose: boolean;
 }
 
 export interface LifeScoreBreakdown {
@@ -314,6 +331,17 @@ export interface RoomAnalysis {
   roomId: string;
   currentAge: number;
   players: RoomPlayerSummary[];
+  awards?: RoomAward[];
+}
+
+export interface RoomAward {
+  id: string;
+  emoji: string;
+  title: string;
+  playerId: string;
+  playerName: string;
+  reason: string;
+  reflectionQuestion: string;
 }
 
 // ── 外圈新格子事件型別 ─────────────────────────────────────

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import DecisionCountdown from '../components/game/DecisionCountdown';
+import FacilitatorControlPanel from '../components/game/FacilitatorControlPanel';
 import {
   DEFAULT_ADMIN_PASSWORD,
   readRememberedAdminRoom,
@@ -422,6 +423,19 @@ export default function HostControlPage() {
             )
           ) : null}
         </section>
+
+        {gameState && (isRunning || gameState.facilitatorScene) ? (
+          <section className="host-card">
+            <div className="host-section-heading">
+              <div><p className="host-eyebrow">BIG SCREEN DIRECTOR</p><h2>主持人導演模式</h2></div>
+              <span>大螢幕互動</span>
+            </div>
+            <p className="host-help">啟動後正常回合會暫停；由你負責揭曉並繼續。</p>
+            <div className="mt-4">
+              <FacilitatorControlPanel gameState={gameState} emit={emit} />
+            </div>
+          </section>
+        ) : null}
 
         <section className="host-card">
           <div className="host-section-heading">

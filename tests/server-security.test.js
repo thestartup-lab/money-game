@@ -83,6 +83,10 @@ test('主持人通用密碼、多裝置控場、零玩家防呆、來源限制�
   attacker.emit('setReviewView', { view: 'history' });
   assert.match((await unauthorizedReviewPromise).message, /權限不足/);
 
+  const unauthorizedScenePromise = waitForEvent(attacker, 'error');
+  attacker.emit('startFacilitatorScene', { kind: 'community', cardId: 'healthcare' });
+  assert.match((await unauthorizedScenePromise).message, /權限不足/);
+
   const wrongLoginPromise = waitForEvent(attacker, 'adminLoginFail');
   attacker.emit('adminLogin', { roomId: 'SAFE01', password: 'wrong-password' });
   assert.match((await wrongLoginPromise).message, /密碼錯誤/);
@@ -108,4 +112,49 @@ test('主持人通用密碼、多裝置控場、零玩家防呆、來源限制�
   const announcementPromise = waitForEvent(attacker, 'globalEventAnnouncement');
   attacker.emit('triggerGlobalEvent', { roomId: 'SAFE01', eventId: 'inflation' });
   assert.equal((await announcementPromise).event.id, 'inflation');
+
+  const player = await connect();
+  t.after(() => player.disconnect());
+  const joinedStatePromise = waitForEvent(player, 'gameStateUpdate', (state) => state.players?.length === 1);
+  player.emit('playerJoin', { roomCode: 'SAFE01', playerName: '測試玩家' });
+  await joinedStatePromise;
+
+  const display = await connect();
+  t.after(() => display.disconnect());
+  const displayJoinedPromise = waitForEvent(display, 'joinDisplaySuccess');
+  display.emit('joinDisplay', { roomId: 'SAFE01' });
+  await displayJoinedPromise;
+
+  const startedPromise = waitForEvent(display, 'gameStateUpdate', (state) => state.gamePhase === 'RatRace');
+  admin.emit('startGame', { force: true, durationMinutes: 30 });
+  await startedPromise;
+
+  const scenePromptPromise = waitForEvent(display, 'gameStateUpdate', (state) =>
+    state.facilitatorScene?.kind === 'community' && state.facilitatorScene.stage === 'prompt'
+  );
+  admin.emit('startFacilitatorScene', { kind: 'community', cardId: 'healthcare' });
+  const scenePrompt = await scenePromptPromise;
+  assert.equal(scenePrompt.isPaused, true);
+  assert.match(scenePrompt.facilitatorScene.title, /醫療/);
+
+  const blockedGlobalEventPromise = waitForEvent(admin, 'error');
+  admin.emit('triggerGlobalEvent', { roomId: 'SAFE01', eventId: 'stock_boom' });
+  assert.match((await blockedGlobalEventPromise).message, /舞台事件/);
+
+  const sceneResultPromise = waitForEvent(display, 'gameStateUpdate', (state) =>
+    state.facilitatorScene?.stage === 'result'
+  );
+  admin.emit('resolveFacilitatorScene', {
+    sceneId: scenePrompt.facilitatorScene.id,
+    choiceId: 'safety_net',
+  });
+  const sceneResult = await sceneResultPromise;
+  assert.match(sceneResult.facilitatorScene.resultTitle, /全場選擇/);
+  assert.equal(sceneResult.players[0].eventLog.some((event) => event.type === 'community_choice'), true);
+
+  const resumedPromise = waitForEvent(display, 'gameStateUpdate', (state) =>
+    state.facilitatorScene === null && state.isPaused === false
+  );
+  admin.emit('closeFacilitatorScene', { sceneId: scenePrompt.facilitatorScene.id });
+  await resumedPromise;
 });

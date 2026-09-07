@@ -194,6 +194,22 @@ export interface DecisionPhaseState {
   reminderEndsAt: number;
 }
 
+export type FacilitatorSceneKind = 'community' | 'echo' | 'cooperation' | 'legacy';
+
+export interface FacilitatorSceneState {
+  id: string;
+  kind: FacilitatorSceneKind;
+  stage: 'prompt' | 'result';
+  kicker: string;
+  title: string;
+  description: string;
+  participantNames: string[];
+  options?: { id: string; label: string; description: string }[];
+  resultTitle?: string;
+  resultDescription?: string;
+  resumeOnClose: boolean;
+}
+
 export type AdaptiveDifficultyMode = 'support' | 'balanced' | 'challenge';
 
 /**
@@ -303,7 +319,11 @@ export type PlayerEventType =
   | 'death'
   | 'bucket_goal_achieved'
   | 'life_milestone'
-  | 'lucky_card';
+  | 'lucky_card'
+  | 'community_choice'
+  | 'decision_echo'
+  | 'cooperation'
+  | 'legacy';
 
 /**
  * 記錄玩家人生中每個關鍵決策與事件的快照。
@@ -477,6 +497,9 @@ export class Player {
    */
   eventLog: PlayerEvent[];
 
+  /** 已故玩家每場僅能透過主持人進行一次傳承儀式。 */
+  legacyActionUsed: boolean;
+
   /**
    * 累積慈善捐款金額（含內圈/外圈 Charity 格、人際關係捐款等所有管道）。
    * 用於慈善排行榜與最終評分加成（每 $100K +5 傳承點）。
@@ -556,6 +579,7 @@ export class Player {
     this.isDisconnected = false;
     this.hasPassedSecondLife = false;
     this.eventLog = [];
+    this.legacyActionUsed = false;
     this.charityTotal = 0;
     this.bucketList = [];
     this.milestonesPassed = { age40: false, age60: false, age80: false };
@@ -685,6 +709,13 @@ export class GameState {
   /** 主持人控制的目前決策階段；null 表示正在正常推進棋盤。 */
   decisionPhase: DecisionPhaseState | null;
 
+  /** 主持人導演的大螢幕舞台事件；存在時正常回合暫停。 */
+  facilitatorScene: FacilitatorSceneState | null;
+  /** 舞台事件尚未公開的伺服器端資料，不會傳到前端。 */
+  facilitatorSceneContext: Record<string, unknown> | null;
+  /** 已使用的決策回聲索引，避免同一選擇重複出現。 */
+  facilitatorEchoHistory: Set<string>;
+
   /** 每季結算後依全場狀況調節隨機事件強度。 */
   adaptiveDirector: AdaptiveDirectorState;
 
@@ -724,6 +755,9 @@ export class GameState {
     this.totalPausedMs = 0;
     this.paydayPlanningConfirmed = new Set();
     this.decisionPhase = null;
+    this.facilitatorScene = null;
+    this.facilitatorSceneContext = null;
+    this.facilitatorEchoHistory = new Set();
     this.adaptiveDirector = {
       enabled: true,
       mode: 'balanced',

@@ -10,6 +10,7 @@ import DecisionHistoryView from '../components/analysis/DecisionHistoryView';
 import DiceRollOverlay, { type DiceRollData } from '../components/game/DiceRollOverlay';
 import DecisionCountdown from '../components/game/DecisionCountdown';
 import TurnIntroOverlay, { type TurnIntroData } from '../components/game/TurnIntroOverlay';
+import FacilitatorSceneOverlay from '../components/game/FacilitatorSceneOverlay';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
@@ -656,7 +657,9 @@ export default function DisplayScreen() {
       </div>
 
       {/* 主體 */}
-      {view === 'intro' && gameState.gamePhase === 'GameOver' ? (
+      {gameState.facilitatorScene ? (
+        <FacilitatorSceneOverlay scene={gameState.facilitatorScene} />
+      ) : view === 'intro' && gameState.gamePhase === 'GameOver' ? (
         <div className="flex-1 overflow-hidden">
           <IntroSheet mode="fullscreen" />
         </div>
@@ -1010,6 +1013,29 @@ function RoomAnalysisView({ analysis }: { analysis: RoomAnalysis }) {
           ))}
         </div>
       </div>
+
+      {(analysis.awards?.length ?? 0) > 0 && (
+        <div className="card border-yellow-700 bg-gradient-to-br from-yellow-950/70 via-gray-900 to-indigo-950/60">
+          <div className="mb-4 text-center">
+            <p className="text-sm font-black uppercase tracking-[0.28em] text-yellow-400">Final Reveal</p>
+            <h3 className="mt-1 text-3xl font-black text-white">🎉 終局隱藏獎項</h3>
+            <p className="mt-2 text-sm text-gray-300">這些獎項不在遊戲中提示，只在復盤時看見每條人生路線的價值。</p>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+            {analysis.awards?.map((award) => (
+              <div key={award.id} className="rounded-2xl border border-yellow-800/70 bg-black/35 p-4 text-center shadow-lg">
+                <div className="text-5xl" aria-hidden="true">{award.emoji}</div>
+                <p className="mt-2 text-lg font-black text-yellow-300">{award.title}</p>
+                <p className="mt-1 text-2xl font-black text-white">{award.playerName}</p>
+                <p className="mt-3 text-sm leading-relaxed text-gray-300">{award.reason}</p>
+                <p className="mt-3 rounded-xl bg-indigo-950/70 px-3 py-2 text-sm font-bold leading-relaxed text-indigo-200">
+                  復盤提問：{award.reflectionQuestion}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {winner && (
         <div className="card border-indigo-700 bg-indigo-950/45">

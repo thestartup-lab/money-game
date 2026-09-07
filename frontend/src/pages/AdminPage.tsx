@@ -4,6 +4,7 @@ import type { GameState, Player, RoomAnalysis } from '../types/game';
 import { QRCodeSVG } from 'qrcode.react';
 import DecisionCountdown from '../components/game/DecisionCountdown';
 import ClassicReviewLibrary from '../components/analysis/ClassicReviewLibrary';
+import FacilitatorControlPanel from '../components/game/FacilitatorControlPanel';
 import {
   DEFAULT_ADMIN_PASSWORD,
   readRememberedAdminRoom,
@@ -576,6 +577,14 @@ export default function AdminPage() {
               </button>
             )}
           </div>
+
+          {gameState && (isRunning || gameState.facilitatorScene) ? (
+            <div className="card space-y-3">
+              <SectionHeading icon="🎬" title="主持人導演模式" meta="大螢幕互動" />
+              <p className="text-xs leading-relaxed text-gray-400">啟動後會暫停正常回合；全場只看大螢幕討論，由你選擇何時揭曉與繼續。</p>
+              <FacilitatorControlPanel gameState={gameState} emit={emit} />
+            </div>
+          ) : null}
 
           {/* 自動難度導演 */}
           <div className="card space-y-3">

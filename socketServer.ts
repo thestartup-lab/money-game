@@ -1,7 +1,7 @@
 import * as http from 'http';
 import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 import { Server, Socket } from 'socket.io';
-import { GameState, Player, PaydayPlanPayload, GamePhase, PlayerEvent, PlayerEventType, DecisionPhaseState, AssetType } from './gameDataModels';
+import { GameState, Player, PaydayPlanPayload, GamePhase, PlayerEvent, PlayerEventType, DecisionPhaseState, FacilitatorSceneState, AssetType } from './gameDataModels';
 import {
   createPlayer,
   applyGlobalEvent,
@@ -283,6 +283,65 @@ const socketRoomMap = new Map<string, string>();
 
 /** 每個房間同一時間只會有一個等待主持人收束的決策階段。 */
 const decisionReleaseWaiters = new Map<string, { phaseId: string; release: () => void }>();
+
+interface CommunityChoiceCard {
+  id: string;
+  title: string;
+  description: string;
+  options: { id: string; label: string; description: string }[];
+}
+
+const COMMUNITY_CHOICE_CARDS: CommunityChoiceCard[] = [
+  {
+    id: 'healthcare',
+    title: '城市醫療改革',
+    description: '公共醫療資源不足。全場必須討論：要共同承擔，還是保留個人選擇？',
+    options: [
+      { id: 'safety_net', label: '共築安全網', description: '每人投入部分現金，換取健康與人脈保障。' },
+      { id: 'self_reliance', label: '各自承擔', description: '保留現金與自由，但全體承受較高健康風險。' },
+    ],
+  },
+  {
+    id: 'technology',
+    title: '科技轉型浪潮',
+    description: '新科技正在改變所有職業。大家要一起進修、搶先投資，還是暫時觀望？',
+    options: [
+      { id: 'learn_together', label: '全民進修', description: '投入學習成本，全體提升技能與財商。' },
+      { id: 'invest_early', label: '搶先投資', description: '承擔較高成本，建立長期科技現金流。' },
+      { id: 'wait', label: '保守觀望', description: '不花錢，獲得喘息，但錯過本輪成長。' },
+    ],
+  },
+  {
+    id: 'climate',
+    title: '氣候災害重建',
+    description: '城市遭遇極端氣候。資源有限，大家要共同重建，還是優先守住自己的家庭？',
+    options: [
+      { id: 'rebuild', label: '共同重建', description: '共同出資，換取人脈、健康與生命體驗。' },
+      { id: 'protect_self', label: '各自防守', description: '減少支出，但每個人承受一部分資產損失。' },
+    ],
+  },
+];
+
+const COOPERATION_CONTRACTS = {
+  joint_venture: {
+    title: '共同創業契約',
+    description: '兩人各投入 $10,000，共同建立每月 $1,500 的事業現金流。',
+  },
+  mutual_aid: {
+    title: '人生互助契約',
+    description: '夥伴 A 支援夥伴 B $15,000；雙方建立更深的人脈與生命體驗。',
+  },
+  learning_alliance: {
+    title: '共學成長契約',
+    description: '兩人各投入 $8,000，共同提升第二專長、財商與人脈。',
+  },
+} as const;
+
+const LEGACY_CHOICES = {
+  wisdom: { title: '智慧傳承', description: '將人生經驗交給一位仍在旅途中的玩家。' },
+  network: { title: '人脈傳承', description: '把累積的人際連結交給下一位行動者。' },
+  public_good: { title: '公益傳承', description: '把最後的資源化為所有人都能記住的公共影響。' },
+} as const;
 
 /**
  * 產生 6 字元隨機英數房間代碼，確保不重複。
@@ -786,6 +845,338 @@ function logPlayerEvent(
   player.eventLog.push(event);
 }
 
+function clampFacilitatorStat(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function spendAvailableCash(player: Player, requested: number): number {
+  const paid = Math.min(Math.max(0, player.cash), requested);
+  player.cash -= paid;
+  return paid;
+}
+
+function beginFacilitatorScene(
+  gs: GameState,
+  scene: Omit<FacilitatorSceneState, 'id' | 'stage' | 'resumeOnClose'>,
+  context: Record<string, unknown>,
+): void {
+  const resumeOnClose = gs.pausedAt === null;
+  if (resumeOnClose) pauseGameClock(gs);
+  gs.facilitatorScene = {
+    ...scene,
+    id: `scene-${Date.now()}-${randomBytes(3).toString('hex')}`,
+    stage: 'prompt',
+    resumeOnClose,
+  };
+  gs.facilitatorSceneContext = context;
+  emitToRoom(gs.gameId, 'gamePaused', {
+    reason: scene.title,
+    currentAge: Math.round(getCurrentAge(gs) * 10) / 10,
+    controlledByHost: true,
+  });
+  emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+}
+
+function revealFacilitatorResult(gs: GameState, title: string, description: string): void {
+  const scene = gs.facilitatorScene;
+  if (!scene) return;
+  gs.facilitatorScene = {
+    ...scene,
+    stage: 'result',
+    options: undefined,
+    resultTitle: title,
+    resultDescription: description,
+  };
+  emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+}
+
+function closeFacilitatorScene(gs: GameState): void {
+  const shouldResume = Boolean(gs.facilitatorScene?.resumeOnClose);
+  gs.facilitatorScene = null;
+  gs.facilitatorSceneContext = null;
+  if (shouldResume && gs.pausedAt !== null && gs.gamePhase !== GamePhase.GameOver) {
+    resumeGameClock(gs);
+    emitToRoom(gs.gameId, 'gameResumed', {
+      resumedAt: new Date(),
+      currentAge: Math.round(getCurrentAge(gs) * 10) / 10,
+      controlledByHost: true,
+    });
+  }
+  emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+}
+
+function applyCommunityChoice(gs: GameState, cardId: string, choiceId: string): string | null {
+  const card = COMMUNITY_CHOICE_CARDS.find((candidate) => candidate.id === cardId);
+  const choice = card?.options.find((candidate) => candidate.id === choiceId);
+  if (!card || !choice) return null;
+
+  const alivePlayers = [...gs.players.values()].filter((player) => player.isAlive);
+  for (const player of alivePlayers) {
+    const cashBefore = player.cash;
+    const cashflowBefore = player.monthlyCashflow;
+    const netWorthBefore = calcNetWorth(player);
+
+    if (cardId === 'healthcare' && choiceId === 'safety_net') {
+      spendAvailableCash(player, 12_000);
+      player.stats.health = clampFacilitatorStat(player.stats.health + 10, 1, 100);
+      player.stats.network = clampFacilitatorStat(player.stats.network + 1, 1, 10);
+    } else if (cardId === 'healthcare') {
+      player.cash += 5_000;
+      player.stats.health = clampFacilitatorStat(player.stats.health - 6, 1, 100);
+    } else if (cardId === 'technology' && choiceId === 'learn_together') {
+      spendAvailableCash(player, 12_000);
+      player.stats.financialIQ = clampFacilitatorStat(player.stats.financialIQ + 1, 1, 10);
+      player.stats.careerSkill = clampFacilitatorStat(player.stats.careerSkill + 8, 0, 100);
+    } else if (cardId === 'technology' && choiceId === 'invest_early') {
+      if (player.cash >= 10_000) {
+        const invested = Math.min(player.cash, 20_000);
+        player.cash -= invested;
+        player.assets.push({
+          id: `community-tech-${Date.now()}-${player.id}`,
+          name: '共同科技轉型基金',
+          type: AssetType.Business,
+          cost: invested,
+          currentValue: invested,
+          monthlyCashflow: 1_200,
+        });
+      } else {
+        player.stats.careerSkill = clampFacilitatorStat(player.stats.careerSkill + 3, 0, 100);
+      }
+    } else if (cardId === 'technology') {
+      player.stats.health = clampFacilitatorStat(player.stats.health + 3, 1, 100);
+    } else if (cardId === 'climate' && choiceId === 'rebuild') {
+      spendAvailableCash(player, 10_000);
+      player.stats.health = clampFacilitatorStat(player.stats.health + 5, 1, 100);
+      player.stats.network = clampFacilitatorStat(player.stats.network + 2, 1, 10);
+      player.lifeExperience += 6;
+    } else if (cardId === 'climate') {
+      player.stats.health = clampFacilitatorStat(player.stats.health - 4, 1, 100);
+      for (const asset of player.assets) {
+        asset.currentValue = Math.round((asset.currentValue ?? asset.cost) * 0.92);
+      }
+    }
+
+    logPlayerEvent(
+      player,
+      gs,
+      'community_choice',
+      `全場共同抉擇「${card.title}」：${choice.label}`,
+      cashBefore,
+      cashflowBefore,
+      netWorthBefore,
+      { cardId, choiceId },
+    );
+  }
+
+  const resultDescriptions: Record<string, string> = {
+    safety_net: '全場共同投入安全網：現金減少，但健康與人脈獲得保護。',
+    self_reliance: '大家保留更多現金與自主空間，同時承擔了額外健康風險。',
+    learn_together: '全場共同進修，財商與第二專長同步成長。',
+    invest_early: '有足夠資源的人建立科技現金流；資源不足者也獲得了一次學習。',
+    wait: '大家保留資源並恢復健康，但這一輪沒有獲得科技成長。',
+    rebuild: '共同重建讓現金減少，卻提高了全場的健康、人脈與生命體驗。',
+    protect_self: '大家守住了眼前現金，但健康與現有資產價值都受到衝擊。',
+  };
+  return resultDescriptions[choiceId] ?? choice.description;
+}
+
+function applyCooperationContract(
+  gs: GameState,
+  contractId: keyof typeof COOPERATION_CONTRACTS,
+  playerA: Player,
+  playerB: Player,
+): string {
+  const snapshots = [playerA, playerB].map((player) => ({
+    player,
+    cash: player.cash,
+    cashflow: player.monthlyCashflow,
+    netWorth: calcNetWorth(player),
+  }));
+
+  if (contractId === 'joint_venture') {
+    for (const player of [playerA, playerB]) {
+      player.cash -= 10_000;
+      player.assets.push({
+        id: `joint-venture-${Date.now()}-${player.id}`,
+        name: `與夥伴共同創業`,
+        type: AssetType.Business,
+        cost: 10_000,
+        currentValue: 10_000,
+        monthlyCashflow: 1_500,
+      });
+      player.stats.network = clampFacilitatorStat(player.stats.network + 1, 1, 10);
+    }
+  } else if (contractId === 'mutual_aid') {
+    playerA.cash -= 15_000;
+    playerB.cash += 15_000;
+    for (const player of [playerA, playerB]) {
+      player.stats.network = clampFacilitatorStat(player.stats.network + 2, 1, 10);
+      player.lifeExperience += 5;
+    }
+  } else {
+    for (const player of [playerA, playerB]) {
+      player.cash -= 8_000;
+      player.stats.financialIQ = clampFacilitatorStat(player.stats.financialIQ + 1, 1, 10);
+      player.stats.careerSkill = clampFacilitatorStat(player.stats.careerSkill + 6, 0, 100);
+      player.stats.network = clampFacilitatorStat(player.stats.network + 1, 1, 10);
+    }
+  }
+
+  for (const snapshot of snapshots) {
+    logPlayerEvent(
+      snapshot.player,
+      gs,
+      'cooperation',
+      `${COOPERATION_CONTRACTS[contractId].title}：${playerA.name} × ${playerB.name}`,
+      snapshot.cash,
+      snapshot.cashflow,
+      snapshot.netWorth,
+      { contractId, partnerNames: [playerA.name, playerB.name] },
+    );
+  }
+
+  if (contractId === 'joint_venture') return '雙方各投入 $10,000，並各自獲得每月 $1,500 的共同事業現金流。';
+  if (contractId === 'mutual_aid') return `${playerA.name} 支援 ${playerB.name} $15,000；兩人的人脈與生命體驗同步提升。`;
+  return '雙方各投入 $8,000，財商、第二專長與人脈同步成長。';
+}
+
+function findDecisionEcho(gs: GameState): { player: Player; event: PlayerEvent; key: string } | null {
+  const eligibleTypes = new Set<PlayerEventType>([
+    'asset_buy', 'education', 'career_change', 'relationship', 'marriage', 'crisis', 'loan_taken', 'travel',
+  ]);
+  const currentAge = getCurrentAge(gs);
+  const candidates: { player: Player; event: PlayerEvent; key: string }[] = [];
+  for (const player of gs.players.values()) {
+    if (!player.isAlive) continue;
+    player.eventLog.forEach((event, index) => {
+      const key = `${player.id}:${index}:${event.type}`;
+      if (
+        eligibleTypes.has(event.type) &&
+        event.age <= currentAge - 8 &&
+        !gs.facilitatorEchoHistory.has(key)
+      ) candidates.push({ player, event, key });
+    });
+  }
+  if (candidates.length === 0) return null;
+  return candidates[Math.floor(Math.random() * candidates.length)] ?? null;
+}
+
+function applyDecisionEcho(gs: GameState, player: Player, originalEvent: PlayerEvent): string {
+  const cashBefore = player.cash;
+  const cashflowBefore = player.monthlyCashflow;
+  const netWorthBefore = calcNetWorth(player);
+  const challenging = gs.adaptiveDirector.mode === 'challenge'
+    && ['asset_buy', 'loan_taken', 'crisis'].includes(originalEvent.type);
+  let result: string;
+
+  if (challenging && originalEvent.type === 'asset_buy') {
+    spendAvailableCash(player, 12_000);
+    player.stats.health = clampFacilitatorStat(player.stats.health - 3, 1, 100);
+    result = '早年的資產開始需要維修與管理：現金減少 $12,000，健康也承受壓力。';
+  } else if (challenging && originalEvent.type === 'loan_taken') {
+    player.expenses.otherExpenses += 500;
+    result = '早年的借款延伸成長期負擔：每月其他支出增加 $500。';
+  } else if (challenging) {
+    spendAvailableCash(player, 8_000);
+    player.stats.health = clampFacilitatorStat(player.stats.health - 5, 1, 100);
+    result = '曾經的危機留下後續影響：現金減少 $8,000、健康下降 5。';
+  } else if (originalEvent.type === 'asset_buy') {
+    player.cash += 12_000;
+    player.lifeExperience += 3;
+    result = '早年的資產開始回報：獲得 $12,000，生命體驗增加 3。';
+  } else if (['education', 'career_change'].includes(originalEvent.type)) {
+    player.salary += 1_000;
+    player.stats.careerSkill = clampFacilitatorStat(player.stats.careerSkill + 5, 0, 100);
+    result = '早年的學習與轉職產生複利：月薪增加 $1,000，第二專長增加 5。';
+  } else if (['relationship', 'marriage'].includes(originalEvent.type)) {
+    player.stats.network = clampFacilitatorStat(player.stats.network + 2, 1, 10);
+    player.lifeExperience += 6;
+    result = '曾經經營的人際關係在關鍵時刻回來支持你：人脈增加 2、生命體驗增加 6。';
+  } else if (originalEvent.type === 'travel') {
+    player.cash += 5_000;
+    player.lifeExperience += 6;
+    result = '旅途中建立的視野轉化為新機會：現金增加 $5,000、生命體驗增加 6。';
+  } else {
+    player.stats.health = clampFacilitatorStat(player.stats.health + 5, 1, 100);
+    player.legacyBonusPoints += 4;
+    result = '走過的困難成為韌性：健康增加 5、傳承增加 4。';
+  }
+
+  logPlayerEvent(
+    player,
+    gs,
+    'decision_echo',
+    `決策回聲：${originalEvent.description} → ${result}`,
+    cashBefore,
+    cashflowBefore,
+    netWorthBefore,
+    { originalAge: originalEvent.age, originalType: originalEvent.type },
+  );
+  return result;
+}
+
+function applyLegacyAction(
+  gs: GameState,
+  legacyId: keyof typeof LEGACY_CHOICES,
+  deceased: Player,
+  beneficiary: Player,
+): string {
+  const deceasedSnapshot = {
+    cash: deceased.cash,
+    cashflow: deceased.monthlyCashflow,
+    netWorth: calcNetWorth(deceased),
+  };
+  const beneficiarySnapshot = {
+    cash: beneficiary.cash,
+    cashflow: beneficiary.monthlyCashflow,
+    netWorth: calcNetWorth(beneficiary),
+  };
+
+  if (legacyId === 'wisdom') {
+    beneficiary.stats.financialIQ = clampFacilitatorStat(beneficiary.stats.financialIQ + 1, 1, 10);
+    beneficiary.stats.careerSkill = clampFacilitatorStat(beneficiary.stats.careerSkill + 6, 0, 100);
+    deceased.legacyBonusPoints += 6;
+  } else if (legacyId === 'network') {
+    beneficiary.stats.network = clampFacilitatorStat(beneficiary.stats.network + 3, 1, 10);
+    beneficiary.lifeExperience += 5;
+    deceased.legacyBonusPoints += 8;
+  } else {
+    const contribution = Math.min(15_000, Math.max(0, deceased.cash));
+    deceased.cash -= contribution;
+    deceased.charityTotal += contribution;
+    deceased.legacyBonusPoints += 10;
+    for (const player of gs.players.values()) {
+      if (player.isAlive) player.lifeExperience += 4;
+    }
+  }
+  deceased.legacyActionUsed = true;
+
+  logPlayerEvent(
+    deceased,
+    gs,
+    'legacy',
+    `${LEGACY_CHOICES[legacyId].title}：將影響力交給 ${beneficiary.name}`,
+    deceasedSnapshot.cash,
+    deceasedSnapshot.cashflow,
+    deceasedSnapshot.netWorth,
+    { legacyId, beneficiaryName: beneficiary.name },
+  );
+  logPlayerEvent(
+    beneficiary,
+    gs,
+    'legacy',
+    `承接 ${deceased.name} 的${LEGACY_CHOICES[legacyId].title}`,
+    beneficiarySnapshot.cash,
+    beneficiarySnapshot.cashflow,
+    beneficiarySnapshot.netWorth,
+    { legacyId, deceasedName: deceased.name },
+  );
+
+  if (legacyId === 'wisdom') return `${beneficiary.name} 承接智慧：財商增加 1、第二專長增加 6。`;
+  if (legacyId === 'network') return `${beneficiary.name} 承接人脈：人脈增加 3、生命體驗增加 5。`;
+  return `${deceased.name} 將最後資源化為公益影響；所有仍在旅途中的玩家增加 4 點生命體驗。`;
+}
+
 /**
  * 建立賽後使用的第二人生資格快照。
  * 已進圈者優先採用進圈當下的事件資料；未進圈者採用終局狀態，
@@ -882,6 +1273,8 @@ function finishGame(gs: GameState, reason: 'finalRoundComplete' | 'allPlayersEli
 
   gs.gamePhase = GamePhase.GameOver;
   gs.decisionPhase = null;
+  gs.facilitatorScene = null;
+  gs.facilitatorSceneContext = null;
   gs.globalPaydayPending = false;
   gs.globalPaydayInProgress = false;
   gs.finalRoundPendingPlayerIds = [];
@@ -1020,6 +1413,7 @@ function serializePlayer(p: Player, gs: GameState): object {
     monthlyCashflow: p.monthlyCashflow,
     nextFQUpgradeCost: getFQUpgradeCost(p.stats.financialIQ),
     eventLog: p.eventLog,
+    legacyActionUsed: p.legacyActionUsed,
     charityTotal: p.charityTotal ?? 0,
     bucketList: p.bucketList ?? [],
     milestonesPassed: p.milestonesPassed ?? { age40: false, age60: false, age80: false },
@@ -1056,6 +1450,7 @@ function serializeGameState(gs: GameState): object {
     finalRoundStarted: gs.finalRoundStarted,
     finalRoundPendingPlayerIds: gs.finalRoundPendingPlayerIds,
     decisionPhase: gs.decisionPhase,
+    facilitatorScene: gs.facilitatorScene,
   };
 }
 
@@ -1847,7 +2242,7 @@ io.on('connection', (socket: Socket) => {
         return;
       }
 
-      if (gs.pausedAt !== null || gs.decisionPhase || gs.globalPaydayPending || gs.globalPaydayInProgress) {
+      if (gs.pausedAt !== null || gs.decisionPhase || gs.facilitatorScene || gs.globalPaydayPending || gs.globalPaydayInProgress) {
         socket.emit('error', { message: '目前由主持人控制流程，請等待主持人繼續遊戲。' });
         return;
       }
@@ -2655,6 +3050,10 @@ io.on('connection', (socket: Socket) => {
       socket.emit('error', { message: '權限不足：僅管理員可觸發全局事件。' });
       return;
     }
+    if (gs.facilitatorScene) {
+      socket.emit('error', { message: '請先完成目前的大螢幕舞台事件。' });
+      return;
+    }
 
     const event = ADMIN_GLOBAL_EVENT_MAP.get(payload.eventId);
     if (!event) {
@@ -2682,6 +3081,10 @@ io.on('connection', (socket: Socket) => {
 
     if (!isRoomAdmin(socket, gs)) {
       socket.emit('error', { message: '權限不足：僅管理員可觸發特殊拍賣。' });
+      return;
+    }
+    if (gs.facilitatorScene) {
+      socket.emit('error', { message: '請先完成目前的大螢幕舞台事件。' });
       return;
     }
 
@@ -3537,6 +3940,9 @@ io.on('connection', (socket: Socket) => {
     gs.adaptiveDirector.lastTriggeredPayday = 0;
     gs.adaptiveDirector.lastEventId = undefined;
     gs.adaptiveDirector.lastEventTitle = undefined;
+    gs.facilitatorScene = null;
+    gs.facilitatorSceneContext = null;
+    gs.facilitatorEchoHistory = new Set();
     startGameClock(gs);
 
     console.log(`[startGame] 房間 ${roomId} 遊戲啟動；每完整回合 +${YEARS_PER_COMPLETED_ROUND} 歲，活動倒數：${minutes} 分鐘`);
@@ -3594,6 +4000,10 @@ io.on('connection', (socket: Socket) => {
       socket.emit('error', { message: '目前是主持人控制的決策階段，請使用「結束決策並繼續」。' });
       return;
     }
+    if (gs.facilitatorScene) {
+      socket.emit('error', { message: '大螢幕舞台事件尚未結束，請先揭曉並關閉舞台。' });
+      return;
+    }
     if (gs.pausedAt === null) {
       socket.emit('error', { message: '遊戲未在暫停中。' });
       return;
@@ -3612,6 +4022,226 @@ io.on('connection', (socket: Socket) => {
   });
 
   // ----------------------------------------------------------
+  // 主持人導演模式：所有內容只在大螢幕公開，並由主持人揭曉
+  // ----------------------------------------------------------
+  socket.on('startFacilitatorScene', (payload?: {
+    kind?: string;
+    cardId?: string;
+    contractId?: string;
+    playerAId?: string;
+    playerBId?: string;
+    deceasedPlayerId?: string;
+    beneficiaryId?: string;
+    legacyId?: string;
+  }) => {
+    const gs = getRoomState(socket);
+    if (!gs || !isRoomAdmin(socket, gs)) {
+      socket.emit('error', { message: '權限不足：只有主持人可以啟動大螢幕舞台事件。' });
+      return;
+    }
+    if (gs.gamePhase !== GamePhase.RatRace && gs.gamePhase !== GamePhase.FastTrack) {
+      socket.emit('error', { message: '主持人導演事件只會在遊戲進行中開放。' });
+      return;
+    }
+    if (gs.facilitatorScene) {
+      socket.emit('error', { message: '目前已有舞台事件，請先完成或關閉。' });
+      return;
+    }
+    if (gs.decisionPhase || gs.globalPaydayPending || gs.globalPaydayInProgress) {
+      socket.emit('error', { message: '請先完成目前玩家決策或季度發薪，再啟動舞台事件。' });
+      return;
+    }
+
+    if (payload?.kind === 'community') {
+      const card = COMMUNITY_CHOICE_CARDS.find((candidate) => candidate.id === payload.cardId);
+      if (!card) {
+        socket.emit('error', { message: '找不到這張共同抉擇事件。' });
+        return;
+      }
+      beginFacilitatorScene(gs, {
+        kind: 'community',
+        kicker: '全場共同抉擇',
+        title: card.title,
+        description: card.description,
+        participantNames: [...gs.players.values()].filter((player) => player.isAlive).map((player) => player.name),
+        options: card.options,
+      }, { cardId: card.id });
+      return;
+    }
+
+    if (payload?.kind === 'echo') {
+      const echo = findDecisionEcho(gs);
+      if (!echo) {
+        socket.emit('error', { message: '目前還沒有發生至少 8 年、且適合回看的關鍵選擇。' });
+        return;
+      }
+      beginFacilitatorScene(gs, {
+        kind: 'echo',
+        kicker: '選擇正在回來',
+        title: `${echo.player.name} 的決策回聲`,
+        description: `${Math.round(echo.event.age)} 歲時：${echo.event.description}`,
+        participantNames: [echo.player.name],
+        options: [{ id: 'reveal', label: '揭曉後續影響', description: '看看這個選擇如何在多年後產生回報或代價。' }],
+      }, { playerId: echo.player.id, eventKey: echo.key, event: echo.event });
+      return;
+    }
+
+    if (payload?.kind === 'cooperation') {
+      const contractId = payload.contractId as keyof typeof COOPERATION_CONTRACTS;
+      const contract = COOPERATION_CONTRACTS[contractId];
+      const playerA = gs.players.get(payload.playerAId ?? '');
+      const playerB = gs.players.get(payload.playerBId ?? '');
+      if (!contract || !playerA?.isAlive || !playerB?.isAlive || playerA.id === playerB.id) {
+        socket.emit('error', { message: '請選擇兩位不同且仍在遊戲中的玩家與有效契約。' });
+        return;
+      }
+      const requiredA = contractId === 'mutual_aid' ? 15_000 : contractId === 'joint_venture' ? 10_000 : 8_000;
+      const requiredB = contractId === 'mutual_aid' ? 0 : contractId === 'joint_venture' ? 10_000 : 8_000;
+      if (playerA.cash < requiredA || playerB.cash < requiredB) {
+        socket.emit('error', { message: '其中一位玩家的現金不足以成立這份契約。' });
+        return;
+      }
+      beginFacilitatorScene(gs, {
+        kind: 'cooperation',
+        kicker: '玩家合作契約',
+        title: contract.title,
+        description: `${playerA.name} × ${playerB.name}｜${contract.description}`,
+        participantNames: [playerA.name, playerB.name],
+        options: [
+          { id: 'accept', label: '雙方成立契約', description: '主持人確認雙方已公開同意後執行。' },
+          { id: 'decline', label: '本次不合作', description: '保留各自資源，不套用任何效果。' },
+        ],
+      }, { contractId, playerAId: playerA.id, playerBId: playerB.id });
+      return;
+    }
+
+    if (payload?.kind === 'legacy') {
+      const legacyId = payload.legacyId as keyof typeof LEGACY_CHOICES;
+      const legacy = LEGACY_CHOICES[legacyId];
+      const deceased = gs.players.get(payload.deceasedPlayerId ?? '');
+      const beneficiary = gs.players.get(payload.beneficiaryId ?? '');
+      if (!legacy || !deceased || deceased.isAlive || deceased.legacyActionUsed || !beneficiary?.isAlive) {
+        socket.emit('error', { message: '請選擇尚未傳承的已故玩家，以及一位仍在遊戲中的承接者。' });
+        return;
+      }
+      beginFacilitatorScene(gs, {
+        kind: 'legacy',
+        kicker: '出局不是離席',
+        title: `${deceased.name} 的${legacy.title}`,
+        description: `${legacy.description} 承接者：${beneficiary.name}。`,
+        participantNames: [deceased.name, beneficiary.name],
+        options: [
+          { id: 'accept', label: '完成傳承', description: '讓這段人生繼續影響桌上的故事。' },
+          { id: 'decline', label: '稍後再決定', description: '本次不套用，之後仍可重新安排。' },
+        ],
+      }, { legacyId, deceasedPlayerId: deceased.id, beneficiaryId: beneficiary.id });
+      return;
+    }
+
+    socket.emit('error', { message: '未知的主持人導演事件。' });
+  });
+
+  socket.on('resolveFacilitatorScene', (payload?: { sceneId?: string; choiceId?: string }) => {
+    const gs = getRoomState(socket);
+    if (!gs || !isRoomAdmin(socket, gs)) {
+      socket.emit('error', { message: '權限不足：只有主持人可以揭曉舞台事件。' });
+      return;
+    }
+    const scene = gs.facilitatorScene;
+    const context = gs.facilitatorSceneContext;
+    if (!scene || !context || scene.stage !== 'prompt' || (payload?.sceneId && payload.sceneId !== scene.id)) {
+      socket.emit('error', { message: '舞台事件已更新，請重新操作。' });
+      return;
+    }
+    const choiceId = payload?.choiceId ?? '';
+
+    if (scene.kind === 'community') {
+      const result = applyCommunityChoice(gs, String(context.cardId ?? ''), choiceId);
+      if (!result) {
+        socket.emit('error', { message: '請選擇有效的共同決策。' });
+        return;
+      }
+      const optionLabel = scene.options?.find((option) => option.id === choiceId)?.label ?? '共同決策';
+      revealFacilitatorResult(gs, `全場選擇：${optionLabel}`, result);
+      return;
+    }
+
+    if (scene.kind === 'echo') {
+      if (choiceId !== 'reveal') {
+        socket.emit('error', { message: '請由主持人揭曉決策回聲。' });
+        return;
+      }
+      const player = gs.players.get(String(context.playerId ?? ''));
+      const event = context.event as PlayerEvent | undefined;
+      if (!player || !event) {
+        socket.emit('error', { message: '找不到這次決策回聲的原始資料。' });
+        return;
+      }
+      gs.facilitatorEchoHistory.add(String(context.eventKey ?? ''));
+      revealFacilitatorResult(gs, '多年後，選擇產生了結果', applyDecisionEcho(gs, player, event));
+      return;
+    }
+
+    if (scene.kind === 'cooperation') {
+      if (choiceId === 'decline') {
+        revealFacilitatorResult(gs, '本次沒有成立契約', '雙方保留資源，也保留未來再次合作的可能。');
+        return;
+      }
+      if (choiceId !== 'accept') {
+        socket.emit('error', { message: '請確認是否成立合作契約。' });
+        return;
+      }
+      const contractId = context.contractId as keyof typeof COOPERATION_CONTRACTS;
+      const playerA = gs.players.get(String(context.playerAId ?? ''));
+      const playerB = gs.players.get(String(context.playerBId ?? ''));
+      if (!COOPERATION_CONTRACTS[contractId] || !playerA?.isAlive || !playerB?.isAlive) {
+        socket.emit('error', { message: '契約參與者狀態已改變，無法成立。' });
+        return;
+      }
+      const requiredA = contractId === 'mutual_aid' ? 15_000 : contractId === 'joint_venture' ? 10_000 : 8_000;
+      const requiredB = contractId === 'mutual_aid' ? 0 : contractId === 'joint_venture' ? 10_000 : 8_000;
+      if (playerA.cash < requiredA || playerB.cash < requiredB) {
+        socket.emit('error', { message: '玩家目前現金已不足，這份契約沒有成立。' });
+        return;
+      }
+      revealFacilitatorResult(gs, '合作契約正式成立', applyCooperationContract(gs, contractId, playerA, playerB));
+      return;
+    }
+
+    if (scene.kind === 'legacy') {
+      if (choiceId === 'decline') {
+        revealFacilitatorResult(gs, '本次暫不傳承', '主持人可以稍後重新安排傳承儀式。');
+        return;
+      }
+      if (choiceId !== 'accept') {
+        socket.emit('error', { message: '請確認是否完成傳承。' });
+        return;
+      }
+      const legacyId = context.legacyId as keyof typeof LEGACY_CHOICES;
+      const deceased = gs.players.get(String(context.deceasedPlayerId ?? ''));
+      const beneficiary = gs.players.get(String(context.beneficiaryId ?? ''));
+      if (!LEGACY_CHOICES[legacyId] || !deceased || deceased.isAlive || deceased.legacyActionUsed || !beneficiary?.isAlive) {
+        socket.emit('error', { message: '傳承參與者狀態已改變，請重新安排。' });
+        return;
+      }
+      revealFacilitatorResult(gs, '影響力被留下來了', applyLegacyAction(gs, legacyId, deceased, beneficiary));
+    }
+  });
+
+  socket.on('closeFacilitatorScene', (payload?: { sceneId?: string }) => {
+    const gs = getRoomState(socket);
+    if (!gs || !isRoomAdmin(socket, gs)) {
+      socket.emit('error', { message: '權限不足：只有主持人可以關閉舞台事件。' });
+      return;
+    }
+    if (!gs.facilitatorScene || (payload?.sceneId && payload.sceneId !== gs.facilitatorScene.id)) {
+      socket.emit('error', { message: '目前沒有可關閉的舞台事件。' });
+      return;
+    }
+    closeFacilitatorScene(gs);
+  });
+
+  // ----------------------------------------------------------
   // 重啟遊戲 (restartGame) — 主持人專用
   // ----------------------------------------------------------
   /**
@@ -3627,8 +4257,8 @@ io.on('connection', (socket: Socket) => {
       socket.emit('error', { message: '只有管理員可以重啟遊戲。' });
       return;
     }
-    if (gs.decisionPhase) {
-      socket.emit('error', { message: '請先結束目前的決策階段，再重新開始遊戲。' });
+    if (gs.decisionPhase || gs.facilitatorScene) {
+      socket.emit('error', { message: '請先結束目前的決策或大螢幕舞台事件，再重新開始遊戲。' });
       return;
     }
 
@@ -3661,6 +4291,9 @@ io.on('connection', (socket: Socket) => {
     gs.pendingLoanRequests = {};
     gs.activeAuctions = {};
     gs.decisionPhase = null;
+    gs.facilitatorScene = null;
+    gs.facilitatorSceneContext = null;
+    gs.facilitatorEchoHistory = new Set();
     gs.roundsSinceGlobalPayday = 0;
     gs.globalPaydayPending = false;
     gs.globalPaydayInProgress = false;
@@ -4079,7 +4712,7 @@ io.on('connection', (socket: Socket) => {
           .filter((e) => e.type === 'payday')
           .map((e) => ({ age: e.age, cashflow: e.cashflowAfter, netWorth: e.netWorthAfter })),
         eventLog: p.eventLog
-          .filter((e) => ['asset_buy','asset_sell','travel','marriage','child','crisis','career_change','education','rat_race_escaped','loan_taken','franchise','relationship'].includes(e.type))
+          .filter((e) => ['asset_buy','asset_sell','travel','marriage','child','crisis','career_change','education','rat_race_escaped','loan_taken','franchise','relationship','community_choice','decision_echo','cooperation','legacy'].includes(e.type))
           .map((e) => ({
             age: e.age,
             type: e.type,
@@ -4097,7 +4730,102 @@ io.on('connection', (socket: Socket) => {
     // 依總分排名
     players.sort((a, b) => b.score.total - a.score.total);
 
-    socket.emit('roomAnalysis', { roomId: gs.gameId, players, currentAge });
+    // 隱藏獎項只在終局分析時計算，遊戲中不公開評分方向。
+    const usedAwardPlayers = new Set<string>();
+    const chooseAwardPlayer = (ranked: typeof players) =>
+      ranked.find((player) => !usedAwardPlayers.has(player.playerId)) ?? ranked[0];
+    const awards: Array<{
+      id: string; emoji: string; title: string; playerId: string; playerName: string;
+      reason: string; reflectionQuestion: string;
+    }> = [];
+    const addAward = (
+      id: string,
+      emoji: string,
+      title: string,
+      ranked: typeof players,
+      reason: (player: typeof players[number]) => string,
+      reflectionQuestion: string,
+    ) => {
+      const winner = chooseAwardPlayer(ranked);
+      if (!winner) return;
+      usedAwardPlayers.add(winner.playerId);
+      awards.push({
+        id,
+        emoji,
+        title,
+        playerId: winner.playerId,
+        playerName: winner.playerName,
+        reason: reason(winner),
+        reflectionQuestion,
+      });
+    };
+
+    addAward(
+      'resilience',
+      '🛡️',
+      '最有韌性人生',
+      [...players].sort((a, b) => {
+        const aCrises = gs.players.get(a.playerId)?.eventLog.filter((event) => event.type === 'crisis').length ?? 0;
+        const bCrises = gs.players.get(b.playerId)?.eventLog.filter((event) => event.type === 'crisis').length ?? 0;
+        return bCrises - aCrises || (b.finalHP ?? 0) - (a.finalHP ?? 0);
+      }),
+      (player) => `經歷 ${gs.players.get(player.playerId)?.eventLog.filter((event) => event.type === 'crisis').length ?? 0} 次危機，仍走到了自己的終點。`,
+      '你如何判斷一個人是在堅持，還是在消耗自己？',
+    );
+    addAward(
+      'growth',
+      '🌱',
+      '最強成長曲線',
+      [...players].sort((a, b) => {
+        const aPlayer = gs.players.get(a.playerId);
+        const bPlayer = gs.players.get(b.playerId);
+        return ((bPlayer?.stats.financialIQ ?? 0) * 10 + (bPlayer?.stats.careerSkill ?? 0))
+          - ((aPlayer?.stats.financialIQ ?? 0) * 10 + (aPlayer?.stats.careerSkill ?? 0));
+      }),
+      (player) => {
+        const source = gs.players.get(player.playerId);
+        return `終局財商 ${source?.stats.financialIQ ?? 0}、第二專長 ${source?.stats.careerSkill ?? 0}。`;
+      },
+      '哪些成長投資在當下看起來最不像「划算」的選擇？',
+    );
+    addAward(
+      'relationship',
+      '🤝',
+      '最有連結的人生',
+      [...players].sort((a, b) => b.score.relationshipIndex - a.score.relationshipIndex),
+      (player) => `人際關係指數 ${Math.round(player.score.relationshipIndex)} 分。`,
+      '你的人際選擇帶來的是支持、責任，還是兩者都有？',
+    );
+    addAward(
+      'experience',
+      '🧭',
+      '最敢體驗人生',
+      [...players].sort((a, b) => b.lifeExperience - a.lifeExperience),
+      (player) => `累積 ${player.lifeExperience} 點生命體驗。`,
+      '如果不能用金錢衡量，哪一次體驗最值得？',
+    );
+    addAward(
+      'turning_point',
+      '🔀',
+      '最值得討論的轉折',
+      [...players].sort((a, b) => {
+        const largestLoss = (playerId: string) => Math.min(
+          0,
+          ...(gs.players.get(playerId)?.eventLog.map((event) => event.netWorthAfter - event.netWorthBefore) ?? [0]),
+        );
+        return largestLoss(a.playerId) - largestLoss(b.playerId);
+      }),
+      (player) => {
+        const events = gs.players.get(player.playerId)?.eventLog ?? [];
+        const turningPoint = [...events].sort((a, b) =>
+          (a.netWorthAfter - a.netWorthBefore) - (b.netWorthAfter - b.netWorthBefore)
+        )[0];
+        return turningPoint ? `${Math.round(turningPoint.age)} 歲：${turningPoint.description}` : '這場人生沒有單一答案，值得從整體路線回看。';
+      },
+      '如果回到當時，你會改變選擇，還是改變準備方式？',
+    );
+
+    socket.emit('roomAnalysis', { roomId: gs.gameId, players, currentAge, awards });
   });
 
   // ----------------------------------------------------------
