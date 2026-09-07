@@ -196,7 +196,7 @@ export interface GameState {
 
 export interface FacilitatorScene {
   id: string;
-  kind: 'community' | 'echo' | 'cooperation' | 'legacy';
+  kind: 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family';
   stage: 'prompt' | 'result';
   kicker: string;
   title: string;
@@ -205,6 +205,7 @@ export interface FacilitatorScene {
   options?: { id: string; label: string; description: string }[];
   resultTitle?: string;
   resultDescription?: string;
+  reminderEndsAt?: number;
   resumeOnClose: boolean;
 }
 

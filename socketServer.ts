@@ -46,6 +46,8 @@ import {
   LIFE_EXP, LIFE_EVENT_WINDOWS,
   MARRIAGE_GIFT, MARRIAGE_GIFT_RANDOM_BONUS,
   CHILD_GIFT_BASE, CHILD_GIFT_RANDOM_BONUS,
+  MAX_CHILDREN, MIN_CHILD_SPACING_YEARS, MIN_CHILD_AGE, MAX_CHILD_AGE,
+  MARRIAGE_BONUS_BY_TYPE, RELATIONSHIP_MARRIAGE_THRESHOLD,
   HP_ACTIVITY_THRESHOLDS,
   HOST_ACTIVATION_DRS_BONUS,
   CRISIS_FREQ_BY_STAGE,
@@ -86,6 +88,7 @@ import {
   FastTrackSquareType,
   FAST_TRACK_BOARD,
   MARRIAGE_CARDS,
+  MarriageCard,
   CRISIS_POOL_BY_STAGE,
   CRISIS_EVENTS,
   RELATIONSHIP_EVENTS,
@@ -890,6 +893,245 @@ function revealFacilitatorResult(gs: GameState, title: string, description: stri
   emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
 }
 
+type MarriageSceneRoute = 'window' | 'love' | 'matchmaker' | 'arranged';
+
+function getPlayerAge(gs: GameState, player: Player): number {
+  return Math.max(player.startAge ?? 20, getCurrentAge(gs));
+}
+
+function pickMarriageCard(currentAge: number): MarriageCard {
+  const ageAppropriateCards = currentAge >= 50
+    ? MARRIAGE_CARDS
+    : MARRIAGE_CARDS.filter((candidate) => candidate.id !== 'marry-003');
+  return ageAppropriateCards[Math.floor(Math.random() * ageAppropriateCards.length)];
+}
+
+function buildMarriageScene(
+  player: Player,
+  route: MarriageSceneRoute,
+  card?: MarriageCard,
+  currentAge = 20,
+): Omit<FacilitatorSceneState, 'id' | 'stage' | 'resumeOnClose'> {
+  if (route === 'arranged') {
+    const cost = getArrangedMarriageCost(currentAge);
+    return {
+      kind: 'marriage',
+      kicker: '婚姻與人生選擇',
+      title: `${player.name} 的付費婚配機會`,
+      description: `需要 $${cost.toLocaleString()}，結婚後每月收入 +$${MARRIAGE_BONUS_BY_TYPE.arranged.toLocaleString()}、生命體驗 +${LIFE_EXP.MARRIAGE_ARRANGED}。`,
+      participantNames: [player.name],
+      reminderEndsAt: Date.now() + 60_000,
+      options: [
+        { id: 'accept', label: '接受婚配', description: '承擔較高的一次性費用，換取較穩定但有限的婚姻支持。' },
+        { id: 'decline', label: '保留單身', description: '保留現金，繼續等待其他關係機會。' },
+      ],
+    };
+  }
+
+  if (route === 'love' || route === 'matchmaker') {
+    const isMatchmaker = route === 'matchmaker';
+    const bonus = MARRIAGE_BONUS_BY_TYPE[route];
+    const lifeExp = isMatchmaker ? LIFE_EXP.MARRIAGE_MATCHMAKER : LIFE_EXP.MARRIAGE_LOVE;
+    return {
+      kind: 'marriage',
+      kicker: isMatchmaker ? '主持人媒合・關係達標' : '深度關係達標',
+      title: `${player.name}，要一起走下去嗎？`,
+      description: `關係經營值已達 ${player.relationshipPoints}/${RELATIONSHIP_MARRIAGE_THRESHOLD}。${isMatchmaker ? '由主持人促成這段緣分，' : ''}結婚後每月收入 +$${bonus.toLocaleString()}、生命體驗 +${lifeExp}。`,
+      participantNames: [player.name],
+      reminderEndsAt: Date.now() + 60_000,
+      options: [
+        { id: 'accept', label: '決定結婚', description: '讓長期經營的關係成為人生共同體。' },
+        { id: 'decline', label: '暫不結婚', description: '保留關係累積，未來仍可再次提出。' },
+      ],
+    };
+  }
+
+  const selectedCard = card ?? pickMarriageCard(currentAge);
+  return {
+    kind: 'marriage',
+    kicker: '緣分來到人生路口',
+    title: `${player.name}｜${selectedCard.title}`,
+    description: `${selectedCard.description} 生命體驗 +${selectedCard.lifeExpGain}。`,
+    participantNames: [player.name],
+    reminderEndsAt: Date.now() + 60_000,
+    options: [
+      { id: 'accept', label: '答應，一起走下去', description: '接受這段關係帶來的支持、責任與未知。' },
+      { id: 'decline', label: '婉拒，走自己的路', description: '不套用效果，保留現在的人生方向。' },
+    ],
+  };
+}
+
+function startMarriageScene(
+  gs: GameState,
+  player: Player,
+  route: MarriageSceneRoute,
+  card?: MarriageCard,
+): void {
+  const selectedCard = route === 'window'
+    ? (card ?? pickMarriageCard(getPlayerAge(gs, player)))
+    : undefined;
+  beginFacilitatorScene(
+    gs,
+    buildMarriageScene(player, route, selectedCard, getPlayerAge(gs, player)),
+    { playerId: player.id, marriageRoute: route, marriageCard: selectedCard },
+  );
+}
+
+function transitionFamilySceneToMarriage(gs: GameState, player: Player): void {
+  const current = gs.facilitatorScene;
+  if (!current) return;
+  const card = pickMarriageCard(getPlayerAge(gs, player));
+  gs.facilitatorScene = {
+    ...buildMarriageScene(player, 'window', card, getPlayerAge(gs, player)),
+    id: current.id,
+    stage: 'prompt',
+    resumeOnClose: current.resumeOnClose,
+  };
+  gs.facilitatorSceneContext = { playerId: player.id, marriageRoute: 'window', marriageCard: card };
+  emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+}
+
+function startFamilyScene(gs: GameState, player: Player, source: 'inner' | 'outer'): void {
+  beginFacilitatorScene(gs, {
+    kind: 'family',
+    kicker: source === 'outer' ? '第二人生家庭篇章' : '家庭事件',
+    title: `${player.name} 的家庭迎來轉折`,
+    description: player.isMarried
+      ? '共同生活正在進入下一個階段。主持人準備好後，揭曉這次家庭事件。'
+      : '人生可能出現一段新的關係。主持人準備好後，揭曉這次家庭事件。',
+    participantNames: [player.name],
+    options: [{ id: 'reveal', label: '揭曉家庭事件', description: '結果會依年齡、健康、婚姻狀態與過往家庭歷程判定。' }],
+  }, { playerId: player.id, familySource: source });
+}
+
+function applyMarriageScene(gs: GameState, player: Player, context: Record<string, unknown>): string | null {
+  const route = context.marriageRoute as MarriageSceneRoute;
+  const card = context.marriageCard as MarriageCard | undefined;
+  const cashBefore = player.cash;
+  const cashflowBefore = player.monthlyCashflow;
+  const netWorthBefore = calcNetWorth(player);
+  let marriageBonus = 0;
+  let lifeExpGained = 0;
+  let marriageGift = 0;
+  let healthGained = 0;
+  let description: string;
+
+  if (route === 'window') {
+    if (!card || player.isMarried) return null;
+    player.isMarried = true;
+    player.marriageType = 'love';
+    player.marriageBonus = card.monthlyBonus;
+    marriageBonus = card.monthlyBonus;
+    lifeExpGained = card.lifeExpGain;
+    addLifeExperience(player, lifeExpGained);
+    marriageGift = MARRIAGE_GIFT.window + Math.round(Math.random() * MARRIAGE_GIFT_RANDOM_BONUS);
+    player.cash += marriageGift;
+    if (card.id === 'marry-003') {
+      const previousHealth = player.stats.health;
+      player.stats.health = clampFacilitatorStat(player.stats.health + 10, 1, 100);
+      healthGained = player.stats.health - previousHealth;
+    }
+    description = `${player.name} 接受「${card.title}」：每月收入 +$${marriageBonus.toLocaleString()}、生命體驗 +${lifeExpGained}、禮金 +$${marriageGift.toLocaleString()}${healthGained > 0 ? `、健康 +${healthGained}` : ''}。`;
+  } else if (route === 'love' || route === 'matchmaker') {
+    const result = confirmMarriage(player, route);
+    if (!result.success) return null;
+    marriageBonus = result.marriageBonus ?? 0;
+    lifeExpGained = result.lifeExpGained ?? 0;
+    marriageGift = MARRIAGE_GIFT[route] + Math.round(Math.random() * MARRIAGE_GIFT_RANDOM_BONUS);
+    player.cash += marriageGift;
+    description = `${player.name} 把${route === 'matchmaker' ? '主持人促成的緣分' : '長期經營的關係'}帶進婚姻：每月收入 +$${marriageBonus.toLocaleString()}、生命體驗 +${lifeExpGained}、禮金 +$${marriageGift.toLocaleString()}。`;
+  } else {
+    const currentAge = getPlayerAge(gs, player);
+    const cost = getArrangedMarriageCost(currentAge);
+    const result = buyArrangedMarriage(player, currentAge);
+    if (!result.success) return null;
+    marriageBonus = result.marriageBonus ?? 0;
+    lifeExpGained = result.lifeExpGained ?? 0;
+    description = `${player.name} 完成付費婚配：支出 $${cost.toLocaleString()}，每月收入 +$${marriageBonus.toLocaleString()}、生命體驗 +${lifeExpGained}。`;
+  }
+
+  logPlayerEvent(player, gs, 'marriage', description, cashBefore, cashflowBefore, netWorthBefore, {
+    marriageRoute: route,
+    cardId: card?.id,
+    marriageBonus,
+    lifeExpGained,
+    marriageGift,
+    healthGained,
+  });
+  emitToRoom(gs.gameId, 'marriageAnnouncement', {
+    playerId: player.id,
+    playerName: player.name,
+    marriageType: player.marriageType,
+    marriageBonus,
+    lifeExpGained,
+    marriageGift,
+    healthGained,
+    canCongratulate: true,
+  });
+  return description;
+}
+
+function resolveFamilyScene(gs: GameState, player: Player): void {
+  const currentAge = getPlayerAge(gs, player);
+  if (!player.isMarried) {
+    const marriageWindow = LIFE_EVENT_WINDOWS.marriage;
+    const inPeak = currentAge >= marriageWindow.peakStart && currentAge <= marriageWindow.peakEnd;
+    const probability = inPeak ? marriageWindow.peakProbability : marriageWindow.baseProbability;
+    if (Math.random() < probability) {
+      transitionFamilySceneToMarriage(gs, player);
+    } else {
+      revealFacilitatorResult(gs, '這次沒有進入婚姻', `${player.name} 保持現在的生活方向；關係仍可能在往後的人生出現。`);
+    }
+    return;
+  }
+
+  if (player.numberOfChildren >= MAX_CHILDREN) {
+    revealFacilitatorResult(gs, '家庭進入穩定階段', `${player.name} 已有 ${player.numberOfChildren} 名子女，本局不再新增子女，但家庭關係仍會影響復盤。`);
+    return;
+  }
+  if (player.stats.health < HP_ACTIVITY_THRESHOLDS.baby) {
+    revealFacilitatorResult(gs, '這次先照顧好自己', `${player.name} 的健康低於 ${HP_ACTIVITY_THRESHOLDS.baby}，這次不新增家庭成員。`);
+    return;
+  }
+  if (currentAge < MIN_CHILD_AGE || currentAge > MAX_CHILD_AGE) {
+    revealFacilitatorResult(gs, '家庭以另一種方式前進', `${player.name} 目前不在 ${MIN_CHILD_AGE}～${MAX_CHILD_AGE} 歲的添丁階段，這次沒有新增子女。`);
+    return;
+  }
+  const lastChildEvent = [...player.eventLog].reverse().find((event) => event.type === 'child');
+  if (lastChildEvent && currentAge - lastChildEvent.age < MIN_CHILD_SPACING_YEARS) {
+    const remainingYears = Math.ceil(MIN_CHILD_SPACING_YEARS - (currentAge - lastChildEvent.age));
+    revealFacilitatorResult(gs, '家庭仍在適應上一個階段', `${player.name} 距離上次添丁還需約 ${remainingYears} 年，這次不新增家庭成員。`);
+    return;
+  }
+
+  const childWindow = LIFE_EVENT_WINDOWS.children;
+  const inPeak = currentAge >= childWindow.peakStart && currentAge <= childWindow.peakEnd;
+  const probability = inPeak ? childWindow.peakProbability : childWindow.baseProbability;
+  if (Math.random() >= probability) {
+    revealFacilitatorResult(gs, '這次沒有新成員', `${player.name} 的家庭維持現在的樣子，把資源留給目前的人生安排。`);
+    return;
+  }
+
+  const cashBefore = player.cash;
+  const cashflowBefore = player.monthlyCashflow;
+  const netWorthBefore = calcNetWorth(player);
+  applyBabyCard(player);
+  addLifeExperience(player, LIFE_EXP.HAVE_CHILD);
+  const childGift = CHILD_GIFT_BASE + Math.round(Math.random() * CHILD_GIFT_RANDOM_BONUS);
+  player.cash += childGift;
+  const description = `${player.name} 迎來第 ${player.numberOfChildren} 名子女：生命體驗 +${LIFE_EXP.HAVE_CHILD}、紅包 +$${childGift.toLocaleString()}，每月家庭支出 +$${PER_CHILD_EXPENSE.toLocaleString()}。`;
+  logPlayerEvent(player, gs, 'child', description, cashBefore, cashflowBefore, netWorthBefore, {
+    childCount: player.numberOfChildren,
+    childGift,
+    monthlyExpense: PER_CHILD_EXPENSE,
+  });
+  emitToRoom(gs.gameId, 'cardApplied', {
+    playerId: player.id,
+    effect: { type: 'baby', numberOfChildren: player.numberOfChildren, lifeExpGained: LIFE_EXP.HAVE_CHILD, childGift },
+  });
+  revealFacilitatorResult(gs, '家庭迎來新成員 👶', description);
+}
+
 function closeFacilitatorScene(gs: GameState): void {
   const shouldResume = Boolean(gs.facilitatorScene?.resumeOnClose);
   gs.facilitatorScene = null;
@@ -902,6 +1144,7 @@ function closeFacilitatorScene(gs: GameState): void {
       controlledByHost: true,
     });
   }
+  continueAfterTurnAdvance(gs);
   emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
 }
 
@@ -1505,6 +1748,13 @@ function executeSocialAction(socket: Socket, gs: GameState, player: Player): voi
       threshold,
     });
   }
+  emitToRoom(gs.gameId, 'cellEventBroadcast', {
+    playerId: player.id,
+    playerName: player.name,
+    cellName: '關係經營',
+    message: `💑 ${player.name} 投入一場深度交流，關係經營值 +${result.drsGained ?? 0}，目前 ${result.newRelationshipPoints ?? player.relationshipPoints}/${threshold}${(result.newRelationshipPoints ?? 0) >= threshold ? '，已達婚姻門檻！' : ''}`,
+    ts: Date.now(),
+  });
   emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
 }
 
@@ -1580,11 +1830,8 @@ function skipCurrentEducationTurns(gs: GameState): void {
  * 推進回合的唯一入口。完成第三個完整桌次輪後，立即鎖住擲骰並啟動
  * 全體季度發薪；實際規劃仍由主持人逐位收束。
  */
-function advanceTurn(gs: GameState): void {
-  if (gs.gamePhase === GamePhase.GameOver) return;
-  gs.advanceToNextTurn();
-  skipCurrentEducationTurns(gs);
-
+function continueAfterTurnAdvance(gs: GameState): void {
+  if (gs.gamePhase === GamePhase.GameOver || gs.facilitatorScene) return;
   if (gs.finalRoundStarted && gs.finalRoundPendingPlayerIds.length === 0) {
     finishGame(gs, 'finalRoundComplete');
     return;
@@ -1611,6 +1858,13 @@ function advanceTurn(gs: GameState): void {
       emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
     });
   }
+}
+
+function advanceTurn(gs: GameState): void {
+  if (gs.gamePhase === GamePhase.GameOver) return;
+  gs.advanceToNextTurn();
+  skipCurrentEducationTurns(gs);
+  continueAfterTurnAdvance(gs);
 }
 
 function getQuarterTravelDestinations(player: Player): Array<{
@@ -2741,6 +2995,29 @@ io.on('connection', (socket: Socket) => {
       phase.reminderEndsAt = Date.now() + seconds * 1000;
     }
     emitToRoom(gs.gameId, 'decisionPhaseUpdated', phase);
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
+  // 舞台決策倒數同樣只作提醒，主持人仍保有完整決定權。
+  socket.on('setFacilitatorReminder', (payload?: { sceneId?: string; seconds?: number; addSeconds?: number }) => {
+    const gs = getRoomState(socket);
+    if (!gs || !isRoomAdmin(socket, gs)) {
+      socket.emit('error', { message: '只有主持人可以調整舞台倒數。' });
+      return;
+    }
+    const scene = gs.facilitatorScene;
+    if (!scene || scene.stage !== 'prompt' || (payload?.sceneId && payload.sceneId !== scene.id)) {
+      socket.emit('error', { message: '目前的舞台事件已更新。' });
+      return;
+    }
+
+    if (typeof payload?.addSeconds === 'number') {
+      const base = Math.max(Date.now(), scene.reminderEndsAt ?? Date.now());
+      scene.reminderEndsAt = base + Math.max(0, Math.min(300, payload.addSeconds)) * 1000;
+    } else {
+      const seconds = Math.max(10, Math.min(300, payload?.seconds ?? 60));
+      scene.reminderEndsAt = Date.now() + seconds * 1000;
+    }
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 
@@ -4033,6 +4310,8 @@ io.on('connection', (socket: Socket) => {
     deceasedPlayerId?: string;
     beneficiaryId?: string;
     legacyId?: string;
+    playerId?: string;
+    marriageRoute?: string;
   }) => {
     const gs = getRoomState(socket);
     if (!gs || !isRoomAdmin(socket, gs)) {
@@ -4138,6 +4417,42 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
+    if (payload?.kind === 'marriage') {
+      const player = gs.players.get(payload.playerId ?? '');
+      const route: MarriageSceneRoute = payload.marriageRoute === 'arranged'
+        ? 'arranged'
+        : payload.marriageRoute === 'matchmaker'
+          ? 'matchmaker'
+          : 'love';
+      if (!player?.isAlive || player.isMarried) {
+        socket.emit('error', { message: '請選擇一位仍在遊戲中的未婚玩家。' });
+        return;
+      }
+      if ((route === 'love' || route === 'matchmaker') && (!player.relationshipActive || player.relationshipPoints < RELATIONSHIP_MARRIAGE_THRESHOLD)) {
+        socket.emit('error', { message: `關係經營值需達 ${RELATIONSHIP_MARRIAGE_THRESHOLD} 才能提出婚姻。` });
+        return;
+      }
+      if (route === 'arranged') {
+        const cost = getArrangedMarriageCost(getPlayerAge(gs, player));
+        if (player.isBedridden || player.stats.health < HP_ACTIVITY_THRESHOLDS.arrangedMarriage || player.cash < cost) {
+          socket.emit('error', { message: `付費婚配需要健康 ${HP_ACTIVITY_THRESHOLDS.arrangedMarriage} 以上與現金 $${cost.toLocaleString()}。` });
+          return;
+        }
+      }
+      startMarriageScene(gs, player, route);
+      return;
+    }
+
+    if (payload?.kind === 'family') {
+      const player = gs.players.get(payload.playerId ?? '');
+      if (!player?.isAlive) {
+        socket.emit('error', { message: '請選擇一位仍在遊戲中的玩家。' });
+        return;
+      }
+      startFamilyScene(gs, player, player.isInFastTrack ? 'outer' : 'inner');
+      return;
+    }
+
     socket.emit('error', { message: '未知的主持人導演事件。' });
   });
 
@@ -4225,6 +4540,44 @@ io.on('connection', (socket: Socket) => {
         return;
       }
       revealFacilitatorResult(gs, '影響力被留下來了', applyLegacyAction(gs, legacyId, deceased, beneficiary));
+      return;
+    }
+
+    if (scene.kind === 'family') {
+      if (choiceId !== 'reveal') {
+        socket.emit('error', { message: '請由主持人揭曉家庭事件。' });
+        return;
+      }
+      const player = gs.players.get(String(context.playerId ?? ''));
+      if (!player?.isAlive) {
+        socket.emit('error', { message: '這位玩家目前無法進行家庭事件。' });
+        return;
+      }
+      resolveFamilyScene(gs, player);
+      return;
+    }
+
+    if (scene.kind === 'marriage') {
+      const player = gs.players.get(String(context.playerId ?? ''));
+      if (!player?.isAlive || player.isMarried) {
+        socket.emit('error', { message: '這次婚姻事件已失效。' });
+        return;
+      }
+      if (choiceId === 'decline') {
+        revealFacilitatorResult(gs, '這次選擇不結婚', `${player.name} 保留目前的人生方向；深度關係累積不會被清除。`);
+        emitToRoom(gs.gameId, 'marriageDeclined', { playerId: player.id, playerName: player.name });
+        return;
+      }
+      if (choiceId !== 'accept') {
+        socket.emit('error', { message: '請確認是否接受這次婚姻選擇。' });
+        return;
+      }
+      const result = applyMarriageScene(gs, player, context);
+      if (!result) {
+        socket.emit('error', { message: '目前條件已改變，婚姻無法成立。' });
+        return;
+      }
+      revealFacilitatorResult(gs, '兩段人生決定同行 💍', result);
     }
   });
 
@@ -4333,6 +4686,10 @@ io.on('connection', (socket: Socket) => {
       socket.emit('error', { message: '只有管理員可以觸發邂逅事件。' });
       return;
     }
+    if (gs.decisionPhase || gs.facilitatorScene || gs.globalPaydayPending || gs.globalPaydayInProgress) {
+      socket.emit('error', { message: '請先完成目前的全場決策或舞台事件。' });
+      return;
+    }
 
     const target = gs.players.get(payload?.targetPlayerId);
     if (!target || !target.isAlive) {
@@ -4367,6 +4724,13 @@ io.on('connection', (socket: Socket) => {
         }
       }
 
+      emitToRoom(roomId, 'cellEventBroadcast', {
+        playerId: target.id,
+        playerName: target.name,
+        cellName: '邂逅機緣',
+        message: `💞 ${target.name} 的關係路徑啟動，DRS +${HOST_ACTIVATION_DRS_BONUS}，目前 ${target.relationshipPoints}/${RELATIONSHIP_MARRIAGE_THRESHOLD}。`,
+        ts: Date.now(),
+      });
       emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
     }
   });
@@ -4430,7 +4794,7 @@ io.on('connection', (socket: Socket) => {
       socket.emit('error', { message: '玩家不存在或已出局。' });
       return;
     }
-    if (gs.decisionPhase) {
+    if (gs.decisionPhase || gs.facilitatorScene || gs.pausedAt !== null) {
       socket.emit('error', { message: '決策階段中請先完成目前選擇，主持人揭曉後再行動。' });
       return;
     }
@@ -4450,7 +4814,7 @@ io.on('connection', (socket: Socket) => {
       socket.emit('error', { message: '玩家不存在或已出局。' });
       return;
     }
-    if (gs.decisionPhase) {
+    if (gs.decisionPhase || gs.facilitatorScene || gs.pausedAt !== null) {
       socket.emit('error', { message: '決策階段中請先完成目前選擇，主持人揭曉後再行動。' });
       return;
     }
@@ -4471,29 +4835,8 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
-    const type = payload?.type ?? 'love';
-    const _mCB = player.cash; const _mFB = player.monthlyCashflow; const _mNWB = calcNetWorth(player);
-    const result = confirmMarriage(player, type);
-    socket.emit('marriageResult', result);
-
-    if (result.success) {
-      // 結婚禮金（一次性現金入帳）
-      const giftBase = MARRIAGE_GIFT[type] ?? 0;
-      const giftRandom = giftBase > 0 ? Math.round(Math.random() * MARRIAGE_GIFT_RANDOM_BONUS) : 0;
-      const marriageGift = giftBase + giftRandom;
-      if (marriageGift > 0) player.cash += marriageGift;
-      logPlayerEvent(player, gs, 'marriage', `結婚（${type === 'love' ? '愛情' : '媒人'}），月收入加成 +$${result.marriageBonus}，禮金 +$${marriageGift.toLocaleString()}`, _mCB, _mFB, _mNWB, { marriageType: type, marriageBonus: result.marriageBonus, lifeExpGained: result.lifeExpGained, marriageGift });
-      emitToRoom(gs.gameId, 'marriageAnnouncement', {
-        playerId: player.id,
-        playerName: player.name,
-        marriageType: type,
-        marriageBonus: result.marriageBonus,
-        lifeExpGained: result.lifeExpGained,
-        marriageGift,
-        canCongratulate: true,
-      });
-      emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
-    }
+    void payload;
+    socket.emit('error', { message: '婚姻必須在大螢幕共同觀看，請由主持人開啟婚姻舞台。' });
   });
 
   // ----------------------------------------------------------
@@ -4509,25 +4852,7 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
-    const currentAge = getCurrentAge(gs);
-    const cost = getArrangedMarriageCost(currentAge);
-    const _amCB = player.cash; const _amFB = player.monthlyCashflow; const _amNWB = calcNetWorth(player);
-    const result = buyArrangedMarriage(player, currentAge);
-
-    socket.emit('arrangedMarriageResult', { ...result, cost });
-
-    if (result.success) {
-      logPlayerEvent(player, gs, 'marriage', `買賣婚姻（${Math.round(currentAge)} 歲），費用 $${cost.toLocaleString()}，月加成 +$${result.marriageBonus}`, _amCB, _amFB, _amNWB, { marriageType: 'arranged', cost, marriageBonus: result.marriageBonus });
-      emitToRoom(gs.gameId, 'marriageAnnouncement', {
-        playerId: player.id,
-        playerName: player.name,
-        marriageType: 'arranged',
-        marriageBonus: result.marriageBonus,
-        lifeExpGained: result.lifeExpGained,
-        cost,
-      });
-      emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
-    }
+    socket.emit('error', { message: '付費婚配必須由主持人在大螢幕開啟並確認。' });
   });
 
   // ----------------------------------------------------------
@@ -5362,9 +5687,17 @@ async function handleLandingSquare(
         break;
       }
       case FastTrackSquareType.Relationship: {
+        if (player.isMarried) {
+          startFamilyScene(gs, player, 'outer');
+          break;
+        }
         const relEvents = require('./gameCards').RELATIONSHIP_EVENTS;
         const rel = relEvents[Math.floor(Math.random() * relEvents.length)];
         if (rel) {
+          if (rel.effect?.triggerMarriageWindow) {
+            startMarriageScene(gs, player, 'window');
+            break;
+          }
           const { applyRelationshipCard } = require('./cardSystem');
           applyRelationshipCard(player, rel);
           emitCellEvent(socket, roomId, player.name, 'FT 人際關係', `🤝 外圈人際事件：${rel.title}`);
@@ -5447,48 +5780,7 @@ async function handleLandingSquare(
       break;
 
     case SquareType.Baby: {
-      const babyAge = getCurrentAge(gs);
-      const babyWindow = LIFE_EVENT_WINDOWS.children;
-
-      if (player.stats.health < HP_ACTIVITY_THRESHOLDS.baby) {
-        emitCellEvent(socket, roomId, player.name, '添丁', '👶 健康值不足，這次無法迎接新成員。');
-        emitToRoom(roomId, 'cardApplied', {
-          playerId: player.id,
-          effect: { type: 'babySkipped', ageAtEvent: Math.round(babyAge), reason: 'lowHP' },
-        });
-        break;
-      }
-
-      const inPeak = babyAge >= babyWindow.peakStart && babyAge <= babyWindow.peakEnd;
-      const babyProbability = inPeak ? babyWindow.peakProbability : babyWindow.baseProbability;
-
-      if (Math.random() < babyProbability) {
-        const _byCB = player.cash; const _byFB = player.monthlyCashflow; const _byNWB = calcNetWorth(player);
-        applyBabyCard(player);
-        addLifeExperience(player, LIFE_EXP.HAVE_CHILD);
-        // 添丁紅包（長輩賀禮，一次性現金入帳）
-        const childGift = CHILD_GIFT_BASE + Math.round(Math.random() * CHILD_GIFT_RANDOM_BONUS);
-        player.cash += childGift;
-        logPlayerEvent(player, gs, 'child', `添丁！第 ${player.numberOfChildren} 個孩子，長輩紅包 +$${childGift.toLocaleString()}`, _byCB, _byFB, _byNWB, { childCount: player.numberOfChildren, childGift });
-        emitCellEvent(socket, roomId, player.name, '添丁', `👶 恭喜！迎來第 ${player.numberOfChildren} 個孩子，長輩紅包 +$${childGift.toLocaleString()}！`);
-        emitToRoom(roomId, 'cardApplied', {
-          playerId: player.id,
-          squareType,
-          effect: { type: 'baby', numberOfChildren: player.numberOfChildren, lifeExpGained: LIFE_EXP.HAVE_CHILD, childGift },
-        });
-      } else {
-        if (!player.isMarried && Math.random() < LIFE_EVENT_WINDOWS.marriage.baseProbability) {
-          emitCellEvent(socket, roomId, player.name, '添丁', '💍 緣分到了！婚姻機會出現。');
-          await triggerMarriageWindow(socket, player, gs);
-        } else {
-          emitCellEvent(socket, roomId, player.name, '添丁', '👼 這次沒有新成員，繼續努力！');
-          emitToRoom(roomId, 'cardApplied', {
-            playerId: player.id,
-            squareType,
-            effect: { type: 'babySkipped', ageAtEvent: Math.round(babyAge) },
-          });
-        }
-      }
+      startFamilyScene(gs, player, 'inner');
       break;
     }
 
@@ -5863,6 +6155,20 @@ async function handleLandingSquare(
       const relCard = RELATIONSHIP_EVENTS[Math.floor(Math.random() * RELATIONSHIP_EVENTS.length)];
       emitCellEvent(socket, roomId, player.name, '人際關係', `🤝 人際關係格子：${relCard.title}`);
 
+      if (relCard.effect.triggerMarriageWindow && !player.isMarried) {
+        const cashBefore = player.cash;
+        const cashflowBefore = player.monthlyCashflow;
+        const netWorthBefore = calcNetWorth(player);
+        applyRelationshipCard(player, relCard);
+        logPlayerEvent(player, gs, 'relationship', `人際關係：${relCard.title}`, cashBefore, cashflowBefore, netWorthBefore, {
+          cardId: relCard.id,
+          cardTitle: relCard.title,
+          category: relCard.eventCategory,
+        });
+        startMarriageScene(gs, player, 'window');
+        break;
+      }
+
       // ── 機遇型事件：由主持人控制決策階段 ──
       if (relCard.eventCategory === 'opportunity') {
         socket.emit('relationshipCardDrawn', { card: relCard, timeoutMs: 0, controlledByHost: true });
@@ -5893,11 +6199,6 @@ async function handleLandingSquare(
           }
         }
 
-        // 婚姻視窗觸發（rel-009 相親）
-        if (relResult.triggerMarriageWindow && relDecision?.accept !== false) {
-          await triggerMarriageWindow(socket, player, gs);
-        }
-
         // SmallDeal 額外抽牌（rel-002 同學會重聚）
         if (relResult.triggerSmallDeal && relDecision?.accept !== false) {
           const bonusDeal = SMALL_DEALS[Math.floor(Math.random() * SMALL_DEALS.length)];
@@ -5926,61 +6227,6 @@ async function handleLandingSquare(
   }
 }
 // ============================================================
-
-async function triggerMarriageWindow(
-  socket: Socket,
-  player: Player,
-  gs: GameState
-): Promise<void> {
-  if (player.isMarried) return;
-
-  const roomId = gs.gameId;
-  const currentAge = getCurrentAge(gs);
-  const marriageWindow = LIFE_EVENT_WINDOWS.marriage;
-
-  const inPeak = currentAge >= marriageWindow.peakStart && currentAge <= marriageWindow.peakEnd;
-  const probability = inPeak ? marriageWindow.peakProbability : marriageWindow.baseProbability;
-
-  if (Math.random() >= probability) return;
-
-  const card = MARRIAGE_CARDS[Math.floor(Math.random() * MARRIAGE_CARDS.length)];
-
-  socket.emit('marriageWindowOpened', {
-    card,
-    currentAge: Math.round(currentAge * 10) / 10,
-    inPeakWindow: inPeak,
-    timeoutMs: 0,
-    controlledByHost: true,
-  });
-
-  const decision = await waitForCardDecision(socket, gs, player, 'marriage', '婚姻決策');
-  const acceptMarriage = decision?.acceptMarriage === true;
-
-  if (acceptMarriage) {
-    const _wmCB = player.cash; const _wmFB = player.monthlyCashflow; const _wmNWB = calcNetWorth(player);
-    player.isMarried = true;
-    player.marriageBonus = card.monthlyBonus;
-    addLifeExperience(player, card.lifeExpGain);
-    // 緣分窗口結婚的禮金（最盛大）
-    const wmGift = MARRIAGE_GIFT.window + Math.round(Math.random() * MARRIAGE_GIFT_RANDOM_BONUS);
-    player.cash += wmGift;
-    logPlayerEvent(player, gs, 'marriage', `結婚（緣分），月收入加成 +$${card.monthlyBonus}，禮金 +$${wmGift.toLocaleString()}`, _wmCB, _wmFB, _wmNWB, { marriageType: 'window', card: card.title, monthlyBonus: card.monthlyBonus, marriageGift: wmGift });
-
-    emitToRoom(roomId, 'playerMarried', {
-      playerId: player.id,
-      playerName: player.name,
-      card,
-      newMonthlyBonus: card.monthlyBonus,
-      lifeExpGained: card.lifeExpGain,
-      marriageGift: wmGift,
-    });
-  } else {
-    emitToRoom(roomId, 'marriageDeclined', {
-      playerId: player.id,
-      playerName: player.name,
-    });
-  }
-}
 
 // ============================================================
 // 發薪日規劃選項計算輔助

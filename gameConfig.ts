@@ -927,6 +927,13 @@ export const MARRIAGE_GIFT_RANDOM_BONUS = 5_000;
 export const CHILD_GIFT_BASE = 3_000;
 /** 添丁紅包的隨機浮動上限 */
 export const CHILD_GIFT_RANDOM_BONUS = 3_000;
+/** 每位玩家最多三名子女，避免家庭事件無限堆高固定支出。 */
+export const MAX_CHILDREN = 3;
+/** 兩次添丁至少相隔兩個人生回合（每回合四歲）。 */
+export const MIN_CHILD_SPACING_YEARS = 8;
+/** 家庭事件的生育年齡範圍；範圍外仍可發展婚姻，但不再新增子女。 */
+export const MIN_CHILD_AGE = 24;
+export const MAX_CHILD_AGE = 55;
 
 // ============================================================
 // 百歲人生：生命體驗值各事件加分常量

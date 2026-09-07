@@ -194,7 +194,7 @@ export interface DecisionPhaseState {
   reminderEndsAt: number;
 }
 
-export type FacilitatorSceneKind = 'community' | 'echo' | 'cooperation' | 'legacy';
+export type FacilitatorSceneKind = 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family';
 
 export interface FacilitatorSceneState {
   id: string;
@@ -207,6 +207,8 @@ export interface FacilitatorSceneState {
   options?: { id: string; label: string; description: string }[];
   resultTitle?: string;
   resultDescription?: string;
+  /** 主持人可調整的節奏提醒；歸零不會自動替玩家選擇。 */
+  reminderEndsAt?: number;
   resumeOnClose: boolean;
 }
 

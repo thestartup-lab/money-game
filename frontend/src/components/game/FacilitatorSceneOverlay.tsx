@@ -1,4 +1,5 @@
 import type { FacilitatorScene } from '../../types/game';
+import DecisionCountdown from './DecisionCountdown';
 
 interface Props {
   scene: FacilitatorScene;
@@ -9,6 +10,8 @@ const KIND_THEME: Record<FacilitatorScene['kind'], { icon: string; border: strin
   echo: { icon: '🔁', border: 'border-violet-400', glow: 'from-violet-950/90' },
   cooperation: { icon: '🤝', border: 'border-blue-400', glow: 'from-blue-950/90' },
   legacy: { icon: '🌟', border: 'border-amber-400', glow: 'from-amber-950/90' },
+  marriage: { icon: '💍', border: 'border-pink-400', glow: 'from-pink-950/90' },
+  family: { icon: '👨‍👩‍👧', border: 'border-rose-400', glow: 'from-rose-950/90' },
 };
 
 export default function FacilitatorSceneOverlay({ scene }: Props) {
@@ -28,6 +31,13 @@ export default function FacilitatorSceneOverlay({ scene }: Props) {
         <p className="mx-auto mt-4 max-w-5xl text-2xl font-bold leading-relaxed text-gray-200">
           {isResult ? scene.resultDescription ?? scene.description : scene.description}
         </p>
+
+        {!isResult && scene.reminderEndsAt ? (
+          <div className="mx-auto mt-5 w-fit rounded-2xl border-2 border-yellow-400 bg-black/60 px-8 py-3">
+            <p className="text-base font-black uppercase tracking-widest text-yellow-200">討論時間</p>
+            <DecisionCountdown reminderEndsAt={scene.reminderEndsAt} className="font-mono text-5xl font-black text-yellow-300" />
+          </div>
+        ) : null}
 
         {!isResult && scene.options && scene.options.length > 0 ? (
           <div className={`mx-auto mt-6 grid max-w-5xl gap-4 ${scene.options.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>

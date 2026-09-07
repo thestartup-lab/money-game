@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { GameState } from '../../types/game';
+import DecisionCountdown from './DecisionCountdown';
 
 interface Props {
   gameState: GameState;
@@ -33,11 +34,15 @@ export default function FacilitatorControlPanel({ gameState, emit }: Props) {
   const [legacyId, setLegacyId] = useState('wisdom');
   const [deceasedPlayerId, setDeceasedPlayerId] = useState('');
   const [beneficiaryId, setBeneficiaryId] = useState('');
+  const [familyPlayerId, setFamilyPlayerId] = useState('');
   const scene = gameState.facilitatorScene;
   const alivePlayers = gameState.players.filter((player) => player.isAlive);
   const deceasedPlayers = gameState.players.filter((player) => !player.isAlive && !player.legacyActionUsed);
   const isRunning = gameState.gamePhase === 'RatRace' || gameState.gamePhase === 'FastTrack';
   const busy = !isRunning || Boolean(gameState.decisionPhase || gameState.globalPaydayPending || gameState.globalPaydayInProgress);
+  const familyPlayer = alivePlayers.find((player) => player.id === familyPlayerId);
+  const familyPlayerAge = familyPlayer?.personalAge ?? gameState.currentAge;
+  const arrangedMarriageCost = Math.min(450_000, 75_000 + Math.max(0, familyPlayerAge - 20) * 3_000);
 
   if (scene) {
     return (
@@ -45,6 +50,33 @@ export default function FacilitatorControlPanel({ gameState, emit }: Props) {
         <p className="text-xs font-black uppercase tracking-widest text-violet-200">大螢幕正在顯示</p>
         <h3 className="mt-1 text-xl font-black text-white">{scene.title}</h3>
         <p className="mt-2 text-sm leading-relaxed text-violet-100">{scene.stage === 'result' ? scene.resultDescription : scene.description}</p>
+
+        {scene.stage === 'prompt' && scene.reminderEndsAt ? (
+          <div className="mt-4 rounded-xl border border-pink-400/50 bg-gray-950/70 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-black text-pink-100">主持人決策倒數</span>
+              <DecisionCountdown reminderEndsAt={scene.reminderEndsAt} className="font-mono text-2xl font-black text-yellow-300" />
+            </div>
+            <div className="mt-3 grid grid-cols-4 gap-2">
+              {[30, 60, 90].map((seconds) => (
+                <button
+                  key={seconds}
+                  className="min-h-11 rounded-lg bg-gray-800 px-2 text-sm font-black text-white"
+                  onClick={() => emit('setFacilitatorReminder', { sceneId: scene.id, seconds })}
+                >
+                  {seconds} 秒
+                </button>
+              ))}
+              <button
+                className="min-h-11 rounded-lg bg-pink-800 px-2 text-sm font-black text-white"
+                onClick={() => emit('setFacilitatorReminder', { sceneId: scene.id, addSeconds: 30 })}
+              >
+                +30 秒
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-pink-200/80">時間到只提醒，不會自動答應或婉拒。</p>
+          </div>
+        ) : null}
 
         {scene.stage === 'prompt' ? (
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -103,6 +135,70 @@ export default function FacilitatorControlPanel({ gameState, emit }: Props) {
         🔁 抽出一段決策回聲
       </button>
       <p className="-mt-2 text-xs text-gray-400">系統只會回看至少 8 年前的關鍵選擇，結果到揭曉前不會出現。</p>
+
+      <details className="rounded-xl border border-pink-800 bg-pink-950/40 p-3">
+        <summary className="cursor-pointer font-black text-pink-100">💍 婚姻與家庭舞台</summary>
+        <select
+          className={`${inputClass} mt-3`}
+          value={familyPlayerId}
+          onChange={(event) => setFamilyPlayerId(event.target.value)}
+          aria-label="婚姻與家庭玩家"
+        >
+          <option value="">選擇玩家</option>
+          {alivePlayers.map((player) => (
+            <option key={player.id} value={player.id}>
+              {player.name}｜{player.isMarried ? `已婚・${player.numberOfChildren} 名子女` : `未婚・DRS ${player.relationshipPoints}/100`}
+            </option>
+          ))}
+        </select>
+
+        {familyPlayer ? (
+          <div className="mt-3 rounded-xl bg-gray-950/55 p-3 text-sm leading-relaxed text-pink-100">
+            <p className="font-black">{familyPlayer.name}｜{Math.round(familyPlayer.personalAge ?? gameState.currentAge)} 歲</p>
+            <p>健康 {familyPlayer.stats.health}・現金 ${Math.round(familyPlayer.cash).toLocaleString()}・DRS {familyPlayer.relationshipPoints}/100</p>
+            <p>{familyPlayer.isMarried ? `已婚，目前 ${familyPlayer.numberOfChildren} 名子女` : familyPlayer.relationshipActive ? '關係路徑進行中' : '尚未啟動關係路徑'}</p>
+          </div>
+        ) : null}
+
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <button
+            disabled={busy || !familyPlayer || familyPlayer.isMarried || familyPlayer.relationshipActive}
+            className="min-h-12 rounded-xl bg-fuchsia-800 px-3 py-2 font-black text-white disabled:cursor-not-allowed disabled:opacity-45"
+            onClick={() => emit('triggerRelationship', { targetPlayerId: familyPlayerId })}
+          >
+            觸發邂逅・DRS +40
+          </button>
+          <button
+            disabled={busy || !familyPlayer || familyPlayer.isMarried || !familyPlayer.relationshipActive || familyPlayer.relationshipPoints < 100}
+            className="min-h-12 rounded-xl bg-pink-700 px-3 py-2 font-black text-white disabled:cursor-not-allowed disabled:opacity-45"
+            onClick={() => emit('startFacilitatorScene', { kind: 'marriage', marriageRoute: 'love', playerId: familyPlayerId })}
+          >
+            自然戀愛成婚
+          </button>
+          <button
+            disabled={busy || !familyPlayer || familyPlayer.isMarried || !familyPlayer.relationshipActive || familyPlayer.relationshipPoints < 100}
+            className="min-h-12 rounded-xl bg-violet-800 px-3 py-2 font-black text-white disabled:cursor-not-allowed disabled:opacity-45"
+            onClick={() => emit('startFacilitatorScene', { kind: 'marriage', marriageRoute: 'matchmaker', playerId: familyPlayerId })}
+          >
+            主持人媒合成婚
+          </button>
+          <button
+            disabled={busy || !familyPlayer || familyPlayer.isMarried || familyPlayer.isBedridden || familyPlayer.stats.health < 20 || familyPlayer.cash < arrangedMarriageCost}
+            className="min-h-12 rounded-xl bg-rose-800 px-3 py-2 font-black text-white disabled:cursor-not-allowed disabled:opacity-45"
+            onClick={() => emit('startFacilitatorScene', { kind: 'marriage', marriageRoute: 'arranged', playerId: familyPlayerId })}
+          >
+            付費婚配・${Math.round(arrangedMarriageCost).toLocaleString()}
+          </button>
+          <button
+            disabled={busy || !familyPlayer}
+            className="min-h-12 rounded-xl bg-orange-800 px-3 py-2 font-black text-white disabled:cursor-not-allowed disabled:opacity-45"
+            onClick={() => emit('startFacilitatorScene', { kind: 'family', playerId: familyPlayerId })}
+          >
+            安排家庭事件
+          </button>
+        </div>
+        <p className="mt-3 text-xs leading-relaxed text-pink-200/80">家庭事件平常會由家庭格或外圈關係格自動登上大螢幕；必須先結婚，最多 3 名子女，且兩次添丁至少相隔 8 年。主持人也可在這裡安排舞台。</p>
+      </details>
 
       <details className="rounded-xl border border-blue-800 bg-blue-950/40 p-3">
         <summary className="cursor-pointer font-black text-blue-100">🤝 安排玩家合作契約</summary>

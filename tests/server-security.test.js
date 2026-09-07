@@ -117,7 +117,8 @@ test('主持人通用密碼、多裝置控場、零玩家防呆、來源限制�
   t.after(() => player.disconnect());
   const joinedStatePromise = waitForEvent(player, 'gameStateUpdate', (state) => state.players?.length === 1);
   player.emit('playerJoin', { roomCode: 'SAFE01', playerName: '測試玩家' });
-  await joinedStatePromise;
+  const joinedState = await joinedStatePromise;
+  const playerId = joinedState.players[0].id;
 
   const display = await connect();
   t.after(() => display.disconnect());
@@ -157,4 +158,33 @@ test('主持人通用密碼、多裝置控場、零玩家防呆、來源限制�
   );
   admin.emit('closeFacilitatorScene', { sceneId: scenePrompt.facilitatorScene.id });
   await resumedPromise;
+
+  const familyPromptPromise = waitForEvent(display, 'gameStateUpdate', (state) =>
+    state.facilitatorScene?.kind === 'family' && state.facilitatorScene.stage === 'prompt'
+  );
+  admin.emit('startFacilitatorScene', { kind: 'family', playerId });
+  const familyPrompt = await familyPromptPromise;
+  assert.equal(familyPrompt.facilitatorScene.participantNames[0], '測試玩家');
+  assert.equal(familyPrompt.facilitatorScene.reminderEndsAt, undefined);
+
+  const directMarriageBlockedPromise = waitForEvent(player, 'error');
+  player.emit('proposeMarriage', { type: 'love' });
+  assert.match((await directMarriageBlockedPromise).message, /大螢幕|主持人/);
+
+  const familyClosedPromise = waitForEvent(display, 'gameStateUpdate', (state) =>
+    state.facilitatorScene === null && state.isPaused === false
+  );
+  admin.emit('closeFacilitatorScene', { sceneId: familyPrompt.facilitatorScene.id });
+  await familyClosedPromise;
+
+  const lowDrsPromise = waitForEvent(admin, 'error');
+  admin.emit('startFacilitatorScene', { kind: 'marriage', marriageRoute: 'love', playerId });
+  assert.match((await lowDrsPromise).message, /關係經營值/);
+
+  const relationshipStatePromise = waitForEvent(display, 'gameStateUpdate', (state) =>
+    state.players?.find((candidate) => candidate.id === playerId)?.relationshipPoints === 40
+  );
+  admin.emit('triggerRelationship', { targetPlayerId: playerId });
+  const relationshipState = await relationshipStatePromise;
+  assert.equal(relationshipState.players.find((candidate) => candidate.id === playerId).relationshipActive, true);
 });
