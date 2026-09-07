@@ -278,13 +278,63 @@
 
 .host-turn-card,
 .host-card,
-.host-decision-card {
+.host-decision-card,
+.host-review-card {
   border: 2px solid #344861;
   border-radius: 22px;
   background: rgba(15, 31, 51, 0.97);
   padding: 18px;
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.2);
 }
+
+.host-review-card {
+  border-color: #a78bfa;
+  background: linear-gradient(145deg, rgba(76, 29, 149, 0.64), rgba(15, 31, 51, 0.98));
+}
+
+.host-review-card h1 { margin: 5px 0 7px; font-size: 1.55rem; }
+.host-review-card > .host-muted { margin: 0; font-size: 0.82rem; }
+
+.host-review-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 9px;
+  margin-top: 16px;
+}
+
+.host-review-grid button {
+  min-height: 56px;
+  border: 1px solid #a5b4fc;
+  border-radius: 14px;
+  background: #3730a3;
+  color: #fff;
+  padding: 9px;
+  font-size: 0.85rem;
+  font-weight: 900;
+}
+
+.host-save-review {
+  display: grid;
+  gap: 5px;
+  margin-top: 15px;
+  border: 1px solid #d97706;
+  border-radius: 15px;
+  background: rgba(69, 26, 3, 0.64);
+  padding: 13px;
+}
+
+.host-save-review strong { color: #fef3c7; font-size: 0.88rem; }
+.host-save-review span { color: #fde68a; font-size: 0.74rem; }
+.host-save-review button {
+  min-height: 52px;
+  margin-top: 7px;
+  border: 2px solid #fde047;
+  border-radius: 14px;
+  background: #ca8a04;
+  color: #111827;
+  font-weight: 950;
+}
+.host-save-review button:disabled { opacity: 0.65; }
 
 .host-turn-card {
   border-color: #2563eb;

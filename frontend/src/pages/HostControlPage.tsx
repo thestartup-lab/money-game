@@ -7,7 +7,8 @@ import {
   rememberAdminRoom,
   SERVER_URL,
 } from '../lib/adminSession';
-import type { GameState, Player } from '../types/game';
+import { saveClassicReview } from '../lib/classicReviews';
+import type { GameState, Player, RoomAnalysis } from '../types/game';
 import './HostControl.css';
 
 interface RoomSummary {
@@ -63,6 +64,7 @@ function getNextPlayer(gameState: GameState, currentPlayerId: string): Player | 
 export default function HostControlPage() {
   const socketRef = useRef<Socket | null>(null);
   const rememberedRoomRef = useRef(INITIAL_ROOM_ID);
+  const analysisRequestedRoomRef = useRef('');
   const [connected, setConnected] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
   const [roomId, setRoomId] = useState('');
@@ -71,6 +73,8 @@ export default function HostControlPage() {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [message, setMessage] = useState('');
   const [adaptiveDirector, setAdaptiveDirector] = useState<AdaptiveDirectorStatus | null>(null);
+  const [roomAnalysis, setRoomAnalysis] = useState<RoomAnalysis | null>(null);
+  const [currentReviewSaved, setCurrentReviewSaved] = useState(false);
 
   useEffect(() => {
     const socket = io(SERVER_URL, {
@@ -99,11 +103,14 @@ export default function HostControlPage() {
       socket.emit('adminLogin', { roomId: payload.roomId, password: DEFAULT_ADMIN_PASSWORD });
     });
     socket.on('adminLoginSuccess', (payload: { roomId: string }) => {
+      analysisRequestedRoomRef.current = '';
       rememberedRoomRef.current = payload.roomId;
       rememberAdminRoom(payload.roomId);
       setRoomId(payload.roomId);
       setRoomInput(payload.roomId);
       setLoggedIn(true);
+      setRoomAnalysis(null);
+      setCurrentReviewSaved(false);
       setMessage('');
       socket.emit('getAdaptiveDirectorStatus', { roomId: payload.roomId });
     });
@@ -114,7 +121,19 @@ export default function HostControlPage() {
       setRoomInput('');
       setMessage(payload.message ?? '無法進入房間，請再試一次。');
     });
-    socket.on('gameStateUpdate', (nextGameState: GameState) => setGameState(nextGameState));
+    socket.on('gameStateUpdate', (nextGameState: GameState) => {
+      setGameState(nextGameState);
+      if (nextGameState.gamePhase === 'GameOver' && analysisRequestedRoomRef.current !== nextGameState.roomId) {
+        analysisRequestedRoomRef.current = nextGameState.roomId;
+        setMessage('遊戲結束，準備帶領全場復盤。');
+        socket.emit('requestRoomAnalysis');
+      } else if (nextGameState.gamePhase !== 'GameOver') {
+        analysisRequestedRoomRef.current = '';
+        setRoomAnalysis(null);
+        setCurrentReviewSaved(false);
+      }
+    });
+    socket.on('roomAnalysis', (analysis: RoomAnalysis) => setRoomAnalysis(analysis));
     socket.on('adaptiveDirectorStatus', (status: AdaptiveDirectorStatus) => setAdaptiveDirector(status));
     socket.on('gameStarted', () => setMessage('遊戲已開始。'));
     socket.on('gamePaused', () => setMessage('遊戲已暫停。'));
@@ -144,11 +163,22 @@ export default function HostControlPage() {
     if (payload === undefined) socketRef.current?.emit(eventName);
     else socketRef.current?.emit(eventName, payload);
   };
+  const saveCurrentReview = () => {
+    if (!roomAnalysis) {
+      emit('requestRoomAnalysis');
+      setMessage('正在整理本場復盤資料，請稍後再按一次保存。');
+      return;
+    }
+    saveClassicReview(roomAnalysis);
+    setCurrentReviewSaved(true);
+    setMessage('已保存為經典場次；資料只留在這台裝置。');
+  };
 
   const players = gameState?.players ?? [];
   const phase = gameState?.gamePhase ?? 'WaitingForPlayers';
   const isStartable = phase === 'WaitingForPlayers' || phase === 'Pre20';
   const isRunning = phase === 'RatRace' || phase === 'FastTrack';
+  const hasStarted = isRunning || phase === 'GameOver';
   const notReadyPlayers = players.filter((player) => !player.pre20Done && !player.isDisconnected);
   const decisionPhase = gameState?.decisionPhase ?? null;
   const activePlayerId = decisionPhase?.playerId ?? gameState?.currentPlayerTurnId ?? '';
@@ -255,15 +285,41 @@ export default function HostControlPage() {
       <main className="host-main">
         <section className="host-status-grid" aria-label="遊戲狀態">
           <div><span>階段</span><strong>{PHASE_LABELS[phase] ?? phase}</strong></div>
-          <div><span>年齡</span><strong>{isRunning ? `${Math.round(gameState?.currentAge ?? 20)} 歲` : '尚未開始'}</strong></div>
-          <div><span>人生輪</span><strong>{isRunning ? `${roundNumber}/${gameState?.totalLifeRounds ?? 20}` : '—'}</strong></div>
+          <div><span>年齡</span><strong>{hasStarted ? `${Math.round(gameState?.currentAge ?? 20)} 歲` : '尚未開始'}</strong></div>
+          <div><span>人生輪</span><strong>{hasStarted ? `${phase === 'GameOver' ? gameState?.completedLifeRounds ?? gameState?.turnNumber ?? 0 : roundNumber}/${gameState?.totalLifeRounds ?? 20}` : '—'}</strong></div>
         </section>
 
         {message ? <p className="host-toast" role="status">{message}</p> : null}
 
+        {phase === 'GameOver' ? (
+          <section className="host-review-card" aria-label="賽後復盤控制">
+            <p className="host-eyebrow">POST-GAME REVIEW</p>
+            <h1>帶領全場復盤</h1>
+            <p className="host-muted">點一下就切換大螢幕。建議依序進行，不在過程中給玩家答案。</p>
+            <div className="host-review-grid">
+              <button onClick={() => emit('setReviewView', { view: 'intro' })}>1. 復盤原則</button>
+              <button onClick={() => emit('setReviewView', { view: 'analysis' })}>2. 全場分析</button>
+              <button onClick={() => emit('setReviewView', { view: 'history' })}>3. 決策歷程</button>
+              <button onClick={() => emit('setReviewView', { view: 'game' })}>最終棋盤</button>
+            </div>
+            <div className="host-save-review">
+              <strong>本場不會自動保存</strong>
+              <span>覺得經典時再手動保留，而且只存在這台裝置。</span>
+              <button disabled={currentReviewSaved} onClick={saveCurrentReview}>
+                {currentReviewSaved ? '✓ 已保存經典場次' : roomAnalysis ? '⭐ 保存為經典場次' : '正在整理資料…'}
+              </button>
+            </div>
+          </section>
+        ) : null}
+
         <section className="host-turn-card">
           <p className="host-eyebrow">NOW PLAYING</p>
-          {currentPlayer ? (
+          {phase === 'GameOver' ? (
+            <>
+              <h1>人生旅程已結束</h1>
+              <p className="host-turn-detail">請使用上方復盤控制，帶大家從結果回看選擇與轉折。</p>
+            </>
+          ) : currentPlayer ? (
             <>
               <p className="host-turn-label">現在輪到</p>
               <h1>{currentPlayer.name}</h1>
@@ -328,7 +384,7 @@ export default function HostControlPage() {
         <section className="host-card">
           <div className="host-section-heading">
             <div><p className="host-eyebrow">GAME FLOW</p><h2>遊戲控制</h2></div>
-            <span>{gameState?.isPaused ? '已暫停' : isRunning ? '進行中' : '準備中'}</span>
+            <span>{phase === 'GameOver' ? '復盤中' : gameState?.isPaused ? '已暫停' : isRunning ? '進行中' : '準備中'}</span>
           </div>
 
           {isStartable ? (

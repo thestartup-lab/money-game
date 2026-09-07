@@ -79,6 +79,10 @@ test('主持人通用密碼、多裝置控場、零玩家防呆、來源限制�
   attacker.emit('triggerGlobalEvent', { roomId: 'SAFE01', eventId: 'inflation' });
   assert.match((await unauthorizedPromise).message, /權限不足/);
 
+  const unauthorizedReviewPromise = waitForEvent(attacker, 'error');
+  attacker.emit('setReviewView', { view: 'history' });
+  assert.match((await unauthorizedReviewPromise).message, /權限不足/);
+
   const wrongLoginPromise = waitForEvent(attacker, 'adminLoginFail');
   attacker.emit('adminLogin', { roomId: 'SAFE01', password: 'wrong-password' });
   assert.match((await wrongLoginPromise).message, /密碼錯誤/);
@@ -86,6 +90,10 @@ test('主持人通用密碼、多裝置控場、零玩家防呆、來源限制�
   const loginSuccessPromise = waitForEvent(attacker, 'adminLoginSuccess');
   attacker.emit('adminLogin', { roomId: 'SAFE01', password: '123' });
   assert.equal((await loginSuccessPromise).roomId, 'SAFE01');
+
+  const earlyReviewPromise = waitForEvent(attacker, 'error');
+  attacker.emit('setReviewView', { view: 'history' });
+  assert.match((await earlyReviewPromise).message, /遊戲結束後/);
 
   const originalAdminAnnouncement = waitForEvent(admin, 'globalEventAnnouncement');
   const secondControllerAnnouncement = waitForEvent(attacker, 'globalEventAnnouncement');

@@ -679,10 +679,12 @@ export default function ActionPanel({
         </div>
       )}
 
-      {/* ── 決策分析 ──────────────────── */}
-      <button className="btn-primary w-full" onClick={onRequestAnalysis}>
-        📊 {isGameOver ? '查看人生分析報告' : '查看目前決策歷程'}
-      </button>
+      {/* 決策歷程只在賽後復盤開放，避免遊戲中形成提示。 */}
+      {isGameOver ? (
+        <button className="btn-primary w-full" onClick={onRequestAnalysis}>
+          📊 查看人生分析報告
+        </button>
+      ) : null}
     </div>
   );
 }

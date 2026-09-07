@@ -2,7 +2,7 @@ import { useCallback, useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import ReactECharts from 'echarts-for-react';
 import { QRCodeSVG } from 'qrcode.react';
-import type { GameState, RoomPlayerSummary, LifeScoreBreakdown } from '../types/game';
+import type { GameState, RoomAnalysis, LifeScoreBreakdown } from '../types/game';
 import { GameBoard } from '../components/game/GameBoard';
 import type { BoardPlayer } from '../components/game/GameBoard';
 import IntroSheet from '../components/game/IntroSheet';
@@ -41,7 +41,8 @@ export default function DisplayScreen() {
   const joinedRoomRef = useRef<string>(''); // 記錄已成功加入的房間代碼，供重連使用
   const [connected, setConnected] = useState(false);
   const [gameState, setGameState] = useState<GameState | null>(null);
-  const [roomAnalysis, setRoomAnalysis] = useState<{ roomId: string; players: RoomPlayerSummary[]; currentAge: number } | null>(null);
+  const [roomAnalysis, setRoomAnalysis] = useState<RoomAnalysis | null>(null);
+  const requestedReviewViewRef = useRef<'analysis' | 'history'>('analysis');
   const [roomCode, setRoomCode] = useState(() => {
     // 支援從 URL ?display&room=ROOMID 直接帶入
     const params = new URLSearchParams(window.location.search);
@@ -204,7 +205,20 @@ export default function DisplayScreen() {
     s.on('gameClock', (p: { currentAge: number; remainingTimeMs?: number }) => {
       setGameState((gs) => gs ? { ...gs, currentAge: p.currentAge, remainingTimeMs: p.remainingTimeMs ?? gs.remainingTimeMs } : gs);
     });
-    s.on('roomAnalysis', (data: typeof roomAnalysis) => { setRoomAnalysis(data); setView('analysis'); });
+    s.on('roomAnalysis', (data: RoomAnalysis) => {
+      setRoomAnalysis(data);
+      setView(requestedReviewViewRef.current);
+    });
+    s.on('reviewViewChanged', (payload: { view?: 'game' | 'intro' | 'analysis' | 'history' }) => {
+      const nextView = payload?.view;
+      if (!nextView) return;
+      if (nextView === 'analysis' || nextView === 'history') {
+        requestedReviewViewRef.current = nextView;
+        s.emit('requestRoomAnalysis');
+        return;
+      }
+      setView(nextView);
+    });
     s.on('ratRaceEscaped', (p: { playerId: string; playerName: string; routeLabel?: string }) => {
       addTicker(`🚀 ${p.playerName} 完成「${p.routeLabel ?? '第二人生'}」，正式進入外圈！`);
       setBoardFocusPlayerId(p.playerId);
@@ -562,7 +576,9 @@ export default function DisplayScreen() {
             {phaseLabel}
           </span>
           <span className="whitespace-nowrap rounded-full bg-gray-800 px-2 py-0.5 text-xs font-bold text-yellow-200">
-            {currentTurnPlayer ? `${Math.floor(currentTurnPlayer.personalAge ?? gameState.currentAge)} 歲 · ` : ''}人生輪 {Math.min(gameState.totalLifeRounds ?? 20, (gameState.completedLifeRounds ?? gameState.turnNumber) + 1)}/{gameState.totalLifeRounds ?? 20}
+            {gameState.gamePhase === 'GameOver'
+              ? `${Math.round(gameState.currentAge)} 歲 · 完成 ${gameState.completedLifeRounds ?? gameState.turnNumber}/${gameState.totalLifeRounds ?? 20} 輪`
+              : `${currentTurnPlayer ? `${Math.floor(currentTurnPlayer.personalAge ?? gameState.currentAge)} 歲 · ` : ''}人生輪 ${Math.min(gameState.totalLifeRounds ?? 20, (gameState.completedLifeRounds ?? gameState.turnNumber) + 1)}/${gameState.totalLifeRounds ?? 20}`}
           </span>
         </div>
 
@@ -571,14 +587,18 @@ export default function DisplayScreen() {
           <div className={`max-w-[34vw] truncate text-4xl font-black leading-none tracking-tight ${
             gameState.isPaused ? 'text-orange-300' : gameState.finalRoundStarted ? 'text-purple-300' : 'text-yellow-200'
           }`}>
-            {gameState.isPaused
+            {gameState.gamePhase === 'GameOver'
+              ? '人生旅程完成'
+              : gameState.isPaused
               ? '遊戲暫停'
               : gameState.finalRoundStarted
                 ? '最後一輪'
                 : currentTurnPlayer?.name ?? '準備開始'}
           </div>
           <div className="text-base text-gray-300 mt-0.5 tracking-wide">
-            {gameState.isPaused
+            {gameState.gamePhase === 'GameOver'
+              ? '從結果回看選擇與轉折'
+              : gameState.isPaused
               ? '由主持人決定何時繼續'
               : gameState.finalRoundStarted
                 ? `現在輪到 ${currentTurnPlayer?.name ?? '—'} 完成最後行動`
@@ -600,13 +620,24 @@ export default function DisplayScreen() {
             <>
               <button
                 className="text-sm px-3 py-1.5 rounded-lg bg-purple-800 hover:bg-purple-700 transition-colors whitespace-nowrap"
-                onClick={() => { emit('requestRoomAnalysis'); }}
+                onClick={() => {
+                  requestedReviewViewRef.current = 'analysis';
+                  emit('requestRoomAnalysis');
+                }}
               >
                 顯示分析
               </button>
               <button
                 className={`text-sm px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${view === 'history' ? 'bg-blue-700 text-white' : 'bg-blue-900 hover:bg-blue-800 text-blue-200'}`}
-                onClick={() => setView(view === 'history' ? 'game' : 'history')}
+                onClick={() => {
+                  if (view === 'history') {
+                    setView('game');
+                    return;
+                  }
+                  requestedReviewViewRef.current = 'history';
+                  if (roomAnalysis) setView('history');
+                  else emit('requestRoomAnalysis');
+                }}
               >
                 決策歷程
               </button>
@@ -908,7 +939,7 @@ export default function DisplayScreen() {
 }
 
 // ── 遊戲結束：全組分析視圖 ──
-function RoomAnalysisView({ analysis }: { analysis: { roomId: string; players: RoomPlayerSummary[]; currentAge: number } }) {
+function RoomAnalysisView({ analysis }: { analysis: RoomAnalysis }) {
   const [selected, setSelected] = useState<string | null>(null);
   const players = analysis.players;
   const winner = players[0];

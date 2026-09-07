@@ -1,14 +1,20 @@
 import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import type { GameState, Player } from '../types/game';
+import type { GameState, Player, RoomAnalysis } from '../types/game';
 import { QRCodeSVG } from 'qrcode.react';
 import DecisionCountdown from '../components/game/DecisionCountdown';
+import ClassicReviewLibrary from '../components/analysis/ClassicReviewLibrary';
 import {
   DEFAULT_ADMIN_PASSWORD,
   readRememberedAdminRoom,
   rememberAdminRoom,
   SERVER_URL,
 } from '../lib/adminSession';
+import {
+  deleteClassicReview,
+  readClassicReviews,
+  saveClassicReview,
+} from '../lib/classicReviews';
 import './AdminClarity.css';
 
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
@@ -52,12 +58,16 @@ interface AdaptiveDirectorStatus {
 export default function AdminPage() {
   const socketRef = useRef<Socket | null>(null);
   const autoReloginRoomIdRef = useRef<string>(INITIAL_REMEMBERED_ADMIN_ROOM);
+  const analysisRequestedRoomRef = useRef('');
   const [connected, setConnected] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
   const [roomId, setRoomId] = useState('');
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [roomList, setRoomList] = useState<AdminRoom[]>([]);
   const [log, setLog] = useState<string[]>([]);
+  const [roomAnalysis, setRoomAnalysis] = useState<RoomAnalysis | null>(null);
+  const [savedReviews, setSavedReviews] = useState(readClassicReviews);
+  const [currentReviewSaved, setCurrentReviewSaved] = useState(false);
 
   // Login form
   const [loginRoomId, setLoginRoomId] = useState(INITIAL_REMEMBERED_ADMIN_ROOM);
@@ -92,8 +102,11 @@ export default function AdminPage() {
     s.on('disconnect', () => { setConnected(false); });
 
     s.on('adminLoginSuccess', (p: { roomId: string; message: string }) => {
+      analysisRequestedRoomRef.current = '';
       setLoggedIn(true);
       setRoomId(p.roomId);
+      setRoomAnalysis(null);
+      setCurrentReviewSaved(false);
       addLog(`登入成功：房間 ${p.roomId}`);
       setLoginError('');
       // 儲存登入資訊供斷線重連使用
@@ -123,6 +136,7 @@ export default function AdminPage() {
       rememberAdminRoom('');
       setLoggedIn(false);
       setGameState(null);
+      setRoomAnalysis(null);
       setRoomId('');
       setLoginRoomId('');
       s.emit('listRooms');
@@ -134,10 +148,19 @@ export default function AdminPage() {
 
     s.on('gameStateUpdate', (gs: GameState) => {
       setGameState(gs);
+      if (gs.gamePhase === 'GameOver' && analysisRequestedRoomRef.current !== gs.roomId) {
+        analysisRequestedRoomRef.current = gs.roomId;
+        s.emit('requestRoomAnalysis');
+      } else if (gs.gamePhase !== 'GameOver') {
+        analysisRequestedRoomRef.current = '';
+        setRoomAnalysis(null);
+        setCurrentReviewSaved(false);
+      }
       setRoomList((rooms) => rooms.map((room) => room.roomId === gs.roomId
         ? { ...room, phase: gs.gamePhase, playerCount: gs.players.length }
         : room));
     });
+    s.on('roomAnalysis', (analysis: RoomAnalysis) => setRoomAnalysis(analysis));
     s.on('gameClock', (p: { currentAge: number; remainingTimeMs?: number }) => {
       setGameState((gs) => gs ? { ...gs, currentAge: p.currentAge, remainingTimeMs: p.remainingTimeMs ?? gs.remainingTimeMs } : gs);
     });
@@ -161,6 +184,15 @@ export default function AdminPage() {
   }, []);
 
   const emit = (event: string, ...args: unknown[]) => socketRef.current?.emit(event, ...args);
+  const saveCurrentReview = () => {
+    if (!roomAnalysis) {
+      emit('requestRoomAnalysis');
+      return;
+    }
+    setSavedReviews(saveClassicReview(roomAnalysis));
+    setCurrentReviewSaved(true);
+    addLog(`已將房間 ${roomAnalysis.roomId} 保存為經典場次（僅此裝置）`);
+  };
 
   // ── LOGIN VIEW ──
   if (!loggedIn) {
@@ -259,6 +291,11 @@ export default function AdminPage() {
               ))}
             </div>
           )}
+
+          <ClassicReviewLibrary
+            reviews={savedReviews}
+            onDelete={(reviewId) => setSavedReviews(deleteClassicReview(reviewId))}
+          />
         </div>
       </div>
     );
@@ -430,7 +467,7 @@ export default function AdminPage() {
 
           {/* 遊戲控制 */}
           <div className="card space-y-3">
-            <SectionHeading icon="🎮" title="遊戲控制" meta={isPaused ? '已暫停' : isRunning ? '進行中' : '準備中'} />
+            <SectionHeading icon="🎮" title="遊戲控制" meta={phase === 'GameOver' ? '復盤中' : isPaused ? '已暫停' : isRunning ? '進行中' : '準備中'} />
             {isStartable && notReadyPlayers.length > 0 && (
               <div className="bg-yellow-950 border border-yellow-700 rounded-xl p-2 text-xs text-yellow-200">
                 ⏳ 等待 {notReadyPlayers.length} 位玩家完成職業選擇：
@@ -664,6 +701,38 @@ export default function AdminPage() {
         {/* ── 右欄：玩家管理 + 多房間儀表板 ── */}
         <section className="admin-main">
 
+          {phase === 'GameOver' && (
+            <div className="card space-y-4 border-indigo-600">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="admin-kicker">POST-GAME REVIEW</p>
+                  <h2 className="text-xl font-black text-white">主持大螢幕復盤</h2>
+                  <p className="mt-1 text-sm text-gray-400">依序帶大家回顧原則、比較全場，再討論每個人的關鍵選擇。</p>
+                </div>
+                <span className={`rounded-full px-3 py-1 text-xs font-bold ${currentReviewSaved ? 'bg-emerald-950 text-emerald-200' : 'bg-indigo-950 text-indigo-200'}`}>
+                  {currentReviewSaved ? '已保存於這台裝置' : '遊戲紀錄尚未保存'}
+                </span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                <button className="rounded-xl bg-emerald-800 px-4 py-3 font-black text-white hover:bg-emerald-700" onClick={() => emit('setReviewView', { view: 'intro' })}>1. 復盤原則</button>
+                <button className="rounded-xl bg-purple-800 px-4 py-3 font-black text-white hover:bg-purple-700" onClick={() => emit('setReviewView', { view: 'analysis' })}>2. 全場分析</button>
+                <button className="rounded-xl bg-blue-800 px-4 py-3 font-black text-white hover:bg-blue-700" onClick={() => emit('setReviewView', { view: 'history' })}>3. 決策歷程</button>
+                <button className="rounded-xl bg-slate-700 px-4 py-3 font-black text-white hover:bg-slate-600" onClick={() => emit('setReviewView', { view: 'game' })}>返回最終棋盤</button>
+              </div>
+              <div className="rounded-xl border border-amber-700 bg-amber-950/50 p-4">
+                <p className="text-sm font-bold text-amber-100">本場結束後不會自動保存</p>
+                <p className="mt-1 text-xs leading-relaxed text-amber-200/80">如果這場值得留下，再按下方按鈕。資料只會存在目前這台裝置的瀏覽器，清除網站資料時也會消失。</p>
+                <button
+                  className="mt-3 w-full rounded-xl border border-yellow-400 bg-yellow-600 px-4 py-3 font-black text-gray-950 hover:bg-yellow-500 disabled:opacity-60"
+                  disabled={currentReviewSaved}
+                  onClick={saveCurrentReview}
+                >
+                  {currentReviewSaved ? '✓ 已保存為經典場次' : roomAnalysis ? '⭐ 保存為經典場次' : '正在整理本場資料…'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* 玩家詳細管理 */}
           <div className="card space-y-2">
             <SectionHeading icon="🧭" title="玩家管理" meta={`${alivePlayers.length} 位進行中`} />
@@ -695,6 +764,11 @@ export default function AdminPage() {
               />
             ))}
           </div>
+
+          <ClassicReviewLibrary
+            reviews={savedReviews}
+            onDelete={(reviewId) => setSavedReviews(deleteClassicReview(reviewId))}
+          />
 
           {/* 多房間儀表板 */}
           {roomList.length > 0 && (

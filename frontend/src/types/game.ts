@@ -310,6 +310,12 @@ export interface RoomPlayerSummary {
   }[];
 }
 
+export interface RoomAnalysis {
+  roomId: string;
+  currentAge: number;
+  players: RoomPlayerSummary[];
+}
+
 // ── 外圈新格子事件型別 ─────────────────────────────────────
 
 /** 科技新創投資機會（後端 emit 給落格玩家）*/

@@ -4006,6 +4006,30 @@ io.on('connection', (socket: Socket) => {
   });
 
   // ----------------------------------------------------------
+  // 主持人控制大螢幕復盤頁面 (setReviewView)
+  // ----------------------------------------------------------
+  socket.on('setReviewView', (payload?: { view?: string }) => {
+    const gs = getRoomState(socket);
+    if (!gs || !isRoomAdmin(socket, gs)) {
+      socket.emit('error', { message: '權限不足：只有主持人可以控制大螢幕復盤。' });
+      return;
+    }
+    if (gs.gamePhase !== GamePhase.GameOver) {
+      socket.emit('error', { message: '大螢幕復盤會在遊戲結束後開放。' });
+      return;
+    }
+
+    const allowedViews = new Set(['game', 'intro', 'analysis', 'history']);
+    const view = payload?.view;
+    if (!view || !allowedViews.has(view)) {
+      socket.emit('error', { message: '無效的復盤畫面。' });
+      return;
+    }
+
+    emitToRoom(gs.gameId, 'reviewViewChanged', { view });
+  });
+
+  // ----------------------------------------------------------
   // 房間所有玩家的彙整分析（大螢幕用）(requestRoomAnalysis)
   // ----------------------------------------------------------
   /**
