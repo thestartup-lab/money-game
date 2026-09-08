@@ -19,6 +19,7 @@ import {
   FAST_TRACK_INCOME_MULTIPLIER,
 } from './gameConstants';
 import { Deck, DealCard, DoodadCard, CrisisCard, MarketCard, SMALL_DEALS, BIG_DEALS, DOODADS, CRISIS_EVENTS, MARKET_CARDS } from './gameCards';
+import type { AdminGlobalEvent, GlobalEventEffect } from './adminEvents';
 
 // ============================================================
 // ENUMS — 定義於 gameConstants.ts，此處透過 re-export 保留向後相容性
@@ -194,7 +195,7 @@ export interface DecisionPhaseState {
   reminderEndsAt: number;
 }
 
-export type FacilitatorSceneKind = 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family';
+export type FacilitatorSceneKind = 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family' | 'global_event';
 
 export interface FacilitatorSceneState {
   id: string;
@@ -209,6 +210,7 @@ export interface FacilitatorSceneState {
   resultDescription?: string;
   /** 主持人可調整的節奏提醒；歸零不會自動替玩家選擇。 */
   reminderEndsAt?: number;
+  impacts?: { playerName: string; cashflowDelta: number; netWorthDelta: number; healthDelta: number }[];
   resumeOnClose: boolean;
 }
 
@@ -302,6 +304,7 @@ const DEFAULT_EXPENSES: Expenses = {
 // ============================================================
 
 export type PlayerEventType =
+  | 'global_event'
   | 'game_start'
   | 'payday'
   | 'asset_buy'
@@ -361,6 +364,7 @@ export interface PlayerEvent {
  * 皆為 getter，從原始數據動態計算，確保永遠一致。
  */
 export class Player {
+  worldEffects: { eventId: string; title: string; expiresAfterPayday: number; effect: GlobalEventEffect }[] = [];
   id: string;
   name: string;
   profession: Profession;
@@ -589,7 +593,19 @@ export class Player {
 
   /** 所有資產的每月現金流總和 */
   get totalPassiveIncome(): number {
-    return this.assets.reduce((sum, asset) => sum + asset.monthlyCashflow, 0);
+    return this.assets.reduce((sum, asset) => {
+      const multiplier = this.worldEffects.reduce((factor, entry) =>
+        entry.effect.type === 'CashflowChange' && entry.effect.targetAssetType === asset.type
+          ? factor * (entry.effect.multiplier ?? 1) : factor, 1);
+      // 負現金流是既有成本，景氣下滑不應反而減輕它。
+      return sum + (asset.monthlyCashflow > 0 ? Math.round(asset.monthlyCashflow * multiplier) : asset.monthlyCashflow);
+    }, 0);
+  }
+
+  get worldExpenseAdjustment(): number {
+    const change = this.worldEffects.reduce((sum, entry) =>
+      sum + (entry.effect.type === 'ExpenseChange' ? entry.effect.flatAmount ?? 0 : 0), 0);
+    return Math.max(-this.expenses.otherExpenses, change);
   }
 
   /** 工資 + 被動收入（被動收入依財商值 FQ 套用乘數）+ 婚姻收入加成
@@ -637,6 +653,7 @@ export class Player {
       e.carLoanPayment +
       e.creditCardPayment +
       e.otherExpenses +
+      this.worldExpenseAdjustment +
       insurancePremiums +
       childExpenses +
       unsecuredLoanPayments
@@ -657,6 +674,9 @@ export class Player {
  * 全局遊戲狀態，由伺服器管理一個完整房間的所有狀態。
  */
 export class GameState {
+  pendingWorldEvent: { id: string; event: AdminGlobalEvent; source: 'manual' | 'automatic'; deferred: boolean } | null = null;
+  worldEventHistory: { eventId: string; title: string; payday: number; round: number; source: string; major: boolean }[] = [];
+  turnInProgress = false;
   gameId: string;
   /** 以玩家 ID 為 key 的快速查詢表 */
   players: Map<string, Player>;

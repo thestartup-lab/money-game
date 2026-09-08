@@ -191,7 +191,7 @@ export function applyMarketCard(gameState: GameState, card: MarketCard): MarketR
  * 建立 Asset（含 linkedLiabilityId）與對應 Liability，從 cash 扣除 downPayment。
  * 若 downPayment 為 0（全額付清），則不建立 Liability。
  */
-export function acceptDealCard(player: Player, card: DealCard): void {
+export function acceptDealCard(player: Player, card: DealCard, purchasePrice?: number): void {
   const { asset: cardAsset } = card;
 
   const assetId = `asset-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -222,7 +222,8 @@ export function acceptDealCard(player: Player, card: DealCard): void {
 
   player.assets.push(asset);
 
-  const payment = cardAsset.downPayment ?? cardAsset.cost;
+  // 拍賣以得標價取代原始頭期款，不能再扣第二次。
+  const payment = purchasePrice ?? cardAsset.downPayment ?? cardAsset.cost;
   player.cash -= payment;
   addLifeExperience(player, LIFE_EXP.INVEST_DEAL);
 }

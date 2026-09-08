@@ -99,19 +99,9 @@ test('主持人通用密碼、多裝置控場、零玩家防呆、來源限制�
   attacker.emit('setReviewView', { view: 'history' });
   assert.match((await earlyReviewPromise).message, /遊戲結束後/);
 
-  const originalAdminAnnouncement = waitForEvent(admin, 'globalEventAnnouncement');
-  const secondControllerAnnouncement = waitForEvent(attacker, 'globalEventAnnouncement');
+  const setupEventBlocked = waitForEvent(admin, 'error');
   admin.emit('triggerGlobalEvent', { roomId: 'SAFE01', eventId: 'stock_boom' });
-  const [originalAdminEvent, secondControllerEvent] = await Promise.all([
-    originalAdminAnnouncement,
-    secondControllerAnnouncement,
-  ]);
-  assert.equal(originalAdminEvent.event.id, 'stock_boom');
-  assert.equal(secondControllerEvent.event.id, 'stock_boom');
-
-  const announcementPromise = waitForEvent(attacker, 'globalEventAnnouncement');
-  attacker.emit('triggerGlobalEvent', { roomId: 'SAFE01', eventId: 'inflation' });
-  assert.equal((await announcementPromise).event.id, 'inflation');
+  assert.match((await setupEventBlocked).message, /遊戲開始後/);
 
   const player = await connect();
   t.after(() => player.disconnect());
@@ -138,9 +128,13 @@ test('主持人通用密碼、多裝置控場、零玩家防呆、來源限制�
   assert.equal(scenePrompt.isPaused, true);
   assert.match(scenePrompt.facilitatorScene.title, /醫療/);
 
-  const blockedGlobalEventPromise = waitForEvent(admin, 'error');
+  const queuedEventPromise = waitForEvent(admin, 'adaptiveDirectorStatus', (status) => status.pendingEvent);
   admin.emit('triggerGlobalEvent', { roomId: 'SAFE01', eventId: 'stock_boom' });
-  assert.match((await blockedGlobalEventPromise).message, /舞台事件/);
+  const queued = await queuedEventPromise;
+  assert.match(queued.pendingEvent.title, /股市/);
+  const cancelled = waitForEvent(admin, 'adaptiveDirectorStatus', (status) => !status.pendingEvent);
+  admin.emit('manageWorldEvent', { id: queued.pendingEvent.id, action: 'cancel' });
+  await cancelled;
 
   const sceneResultPromise = waitForEvent(display, 'gameStateUpdate', (state) =>
     state.facilitatorScene?.stage === 'result'
@@ -187,6 +181,54 @@ test('主持人通用密碼、多裝置控場、零玩家防呆、來源限制�
   admin.emit('triggerRelationship', { targetPlayerId: playerId });
   const relationshipState = await relationshipStatePromise;
   assert.equal(relationshipState.players.find((candidate) => candidate.id === playerId).relationshipActive, true);
+
+  // 世界事件在拍賣結束後才登場；登場、延後都不套用效果。
+  const auctionReady = waitForEvent(display, 'gameStateUpdate', (state) => state.decisionPhase?.kind === 'auction');
+  admin.emit('triggerSpecialAuction', {});
+  const auction = await auctionReady;
+  const invalidBid = waitForEvent(player, 'error');
+  player.emit('bidDeal', { auctionId: 'invalid', bidAmount: '100000' });
+  assert.match((await invalidBid).message, /正整數/);
+  const overlapBlocked = waitForEvent(admin, 'error');
+  admin.emit('triggerSpecialAuction', {});
+  assert.match((await overlapBlocked).message, /完成目前決策/);
+  const queuedInflation = waitForEvent(admin, 'adaptiveDirectorStatus', (status) => status.pendingEvent?.title === '通貨膨脹');
+  admin.emit('triggerGlobalEvent', { eventId: 'inflation' });
+  await queuedInflation;
+  const worldPrompt = waitForEvent(display, 'gameStateUpdate', (state) => state.facilitatorScene?.kind === 'global_event');
+  attacker.emit('continueDecisionPhase', { phaseId: auction.decisionPhase.id });
+  const world = await worldPrompt;
+  const expenseBefore = world.players[0].totalExpenses;
+  assert.equal(world.facilitatorScene.stage, 'prompt');
+  assert.equal(world.players[0].eventLog.some((event) => event.type === 'global_event'), false);
+  const reminderReady = waitForEvent(display, 'gameStateUpdate', (state) =>
+    state.facilitatorScene?.reminderEndsAt > Date.now() + 80_000);
+  attacker.emit('setFacilitatorReminder', { sceneId: world.facilitatorScene.id, seconds: 90 });
+  await reminderReady;
+  const deferred = waitForEvent(admin, 'adaptiveDirectorStatus', (status) => status.pendingEvent?.deferred);
+  admin.emit('resolveFacilitatorScene', { sceneId: world.facilitatorScene.id, choiceId: 'defer' });
+  const deferredStatus = await deferred;
+  const reopened = waitForEvent(display, 'gameStateUpdate', (state) => state.facilitatorScene?.kind === 'global_event');
+  admin.emit('manageWorldEvent', { id: deferredStatus.pendingEvent.id, action: 'open' });
+  const ready = await reopened;
+  const unauthorisedApply = waitForEvent(player, 'error');
+  player.emit('resolveFacilitatorScene', { sceneId: ready.facilitatorScene.id, choiceId: 'apply' });
+  assert.match((await unauthorisedApply).message, /權限不足/);
+  const applied = waitForEvent(display, 'gameStateUpdate', (state) => state.facilitatorScene?.stage === 'result');
+  attacker.emit('resolveFacilitatorScene', { sceneId: ready.facilitatorScene.id, choiceId: 'apply' });
+  const result = await applied;
+  assert.equal(result.players[0].totalExpenses, expenseBefore + 4500);
+  assert.equal(result.facilitatorScene.impacts[0].cashflowDelta, -4500);
+  assert.equal(result.players[0].eventLog.filter((event) => event.type === 'global_event').length, 1);
+  const duplicate = waitForEvent(admin, 'error');
+  admin.emit('resolveFacilitatorScene', { sceneId: ready.facilitatorScene.id, choiceId: 'apply' });
+  assert.match((await duplicate).message, /已更新/);
+  const closedWorld = waitForEvent(display, 'gameStateUpdate', (state) => !state.facilitatorScene);
+  admin.emit('closeFacilitatorScene', { sceneId: ready.facilitatorScene.id });
+  await closedWorld;
+  const limited = waitForEvent(admin, 'error');
+  admin.emit('triggerGlobalEvent', { eventId: 'pandemic' });
+  assert.match((await limited).message, /本季已發生/);
 
   const deletedPromise = waitForEvent(admin, 'deleteRoomResult');
   admin.emit('deleteRoom');

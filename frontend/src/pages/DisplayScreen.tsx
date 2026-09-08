@@ -386,11 +386,12 @@ export default function DisplayScreen() {
       const saving = (p.taxCreditAmount ?? 0) > 0 ? `（規劃省下 $${fmt(p.taxCreditAmount ?? 0)}）` : '';
       addTicker(`🧾 ${p.playerName} 繳稅 $${fmt(p.taxAmount)}${saving}`);
     });
-    s.on('dealAuctionStarted', (p: { auctionId: string; triggeredByName: string; endsAt: number; controlledByHost?: boolean; card?: { name: string; minBid: number; monthlyCashflow?: number } }) => {
+    s.on('dealAuctionStarted', (p: { auctionId: string; triggeredByName: string; endsAt: number; controlledByHost?: boolean; isSpecialAuction?: boolean; card?: { name: string; minBid: number; monthlyCashflow?: number } }) => {
       const cardName = p.card?.name ?? '交易';
       const minBid = p.card?.minBid ?? 0;
-      showCenterEvent({ playerName: p.triggeredByName, cellName: '🔔 開放競標！', message: `${p.triggeredByName} 放棄交易，${cardName} 開放競標！起標 $${minBid.toLocaleString()}` });
-      addTicker(`🔔 ${p.triggeredByName} 放棄「${cardName}」，開放競標（起標 $${minBid.toLocaleString()}）`);
+      const auctionIntro = p.isSpecialAuction ? '主持人開啟特殊拍賣' : `${p.triggeredByName} 放棄交易`;
+      showCenterEvent({ playerName: p.triggeredByName, cellName: '🔔 開放競標！', message: `${auctionIntro}，${cardName} 開放競標！起標 $${minBid.toLocaleString()}` });
+      addTicker(`🔔 ${auctionIntro}：「${cardName}」（起標 $${minBid.toLocaleString()}）`);
       const secondsLeft = Math.max(0, Math.round((p.endsAt - Date.now()) / 1000));
       setAuctionPanel({ auctionId: p.auctionId, triggeredByName: p.triggeredByName, cardName, minBid, highestBid: 0, endsAt: p.endsAt, secondsLeft, controlledByHost: p.controlledByHost });
       if (auctionCountdownRef.current) clearInterval(auctionCountdownRef.current);
@@ -453,7 +454,7 @@ export default function DisplayScreen() {
 
   // 回合交棒不與上一位的結果畫面搶焦點；所有演出完成後才正式叫出下一位。
   useEffect(() => {
-    if (!pendingTurnIntro || activeTurnIntro) return;
+    if (!pendingTurnIntro || activeTurnIntro || gameState?.facilitatorScene) return;
     const visualIsBusy = Boolean(
       diceAnim ||
       centerEvent ||
@@ -469,7 +470,7 @@ export default function DisplayScreen() {
     }, 280);
 
     return () => window.clearTimeout(launchTimer);
-  }, [activeTurnIntro, centerEvent, diceAnim, pendingTurnIntro, showPaydayOverlay]);
+  }, [activeTurnIntro, centerEvent, diceAnim, pendingTurnIntro, showPaydayOverlay, gameState?.facilitatorScene]);
 
   const emit = (ev: string, ...args: unknown[]) => socketRef.current?.emit(ev, ...args);
 
@@ -657,7 +658,7 @@ export default function DisplayScreen() {
       </div>
 
       {/* 主體 */}
-      {gameState.facilitatorScene ? (
+      {gameState.facilitatorScene && !diceAnim && !activeTurnIntro ? (
         <FacilitatorSceneOverlay scene={gameState.facilitatorScene} />
       ) : view === 'intro' && gameState.gamePhase === 'GameOver' ? (
         <div className="flex-1 overflow-hidden">

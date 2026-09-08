@@ -336,7 +336,19 @@ export function applyGlobalEvent(
   gameState.players.forEach((player) => {
     if (!player.isAlive) return;
 
+    const cashBefore = player.cash;
+    const cashflowBefore = player.monthlyCashflow;
+    const healthBefore = player.stats.health;
+    const netWorth = () => player.cash + player.assets.reduce((s, a) => s + (a.currentValue ?? a.cost), 0)
+      - player.liabilities.reduce((s, l) => s + l.totalDebt, 0);
+    const netWorthBefore = netWorth();
+
     event.effects.forEach((effect) => {
+      if (effect.durationPaydays && (effect.type === 'ExpenseChange' || effect.type === 'CashflowChange')) {
+        player.worldEffects.push({ eventId: event.id, title: event.title,
+          expiresAfterPayday: gameState.globalPaydayNumber + effect.durationPaydays, effect: { ...effect } });
+        return;
+      }
       if (effect.type === 'AssetValueChange' && effect.targetAssetType !== undefined) {
         player.assets
           .filter((a) => a.type === effect.targetAssetType)
@@ -364,6 +376,14 @@ export function applyGlobalEvent(
       if (effect.type === 'HealthChange' && effect.flatAmount !== undefined) {
         player.stats.health = Math.max(0, Math.min(100, player.stats.health + effect.flatAmount));
       }
+    });
+    player.eventLog.push({
+      type: 'global_event', age: Math.max(player.startAge, getCurrentAge(gameState)),
+      description: `世界事件：${event.title}。${event.description}`,
+      cashBefore, cashAfter: player.cash, cashflowBefore, cashflowAfter: player.monthlyCashflow,
+      netWorthBefore, netWorthAfter: netWorth(),
+      meta: { eventId: event.id, healthBefore, healthAfter: player.stats.health,
+        effects: event.effects, globalPayday: gameState.globalPaydayNumber },
     });
   });
 

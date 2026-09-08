@@ -5,6 +5,7 @@ interface Props {
 }
 
 const EVENT_ICONS: Record<string, string> = {
+  global_event: '🌍',
   asset_buy: '🏠', asset_sell: '💰', travel: '✈️',
   marriage: '💑', child: '👶', crisis: '⚠️',
   career_change: '🔄', education: '🎓', rat_race_escaped: '🚀',
@@ -13,6 +14,7 @@ const EVENT_ICONS: Record<string, string> = {
 };
 
 const EVENT_COLORS: Record<string, string> = {
+  global_event: 'border-orange-600 bg-orange-950',
   asset_buy: 'border-emerald-700 bg-emerald-950',
   asset_sell: 'border-yellow-700 bg-yellow-950',
   travel: 'border-blue-700 bg-blue-950',
@@ -84,6 +86,8 @@ export default function DecisionHistoryView({ analysis }: Props) {
                   const colorClass = EVENT_COLORS[ev.type] ?? 'border-gray-700 bg-gray-900';
                   const cashChange = ev.cashAfter - ev.cashBefore;
                   const cfChange = ev.cashflowAfter - ev.cashflowBefore;
+                  const netWorthChange = ev.netWorthAfter - ev.netWorthBefore;
+                  const healthChange = Number(ev.meta?.healthAfter ?? 0) - Number(ev.meta?.healthBefore ?? 0);
                   return (
                     <div key={evIdx} className={`relative rounded-lg border ${colorClass} px-2.5 py-2`}>
                       <div className="absolute -left-[22px] top-2.5 w-4 h-4 rounded-full bg-gray-950 border-2 border-gray-600 flex items-center justify-center text-xs">
@@ -107,6 +111,9 @@ export default function DecisionHistoryView({ analysis }: Props) {
                           )}
                         </div>
                       )}
+                      {ev.type === 'global_event' ? <p className="mt-1 text-xs text-orange-100">
+                        淨資產 {netWorthChange > 0 ? '+' : ''}{fmt(netWorthChange)}・健康 {healthChange > 0 ? '+' : ''}{healthChange}
+                      </p> : null}
                     </div>
                   );
                 })}

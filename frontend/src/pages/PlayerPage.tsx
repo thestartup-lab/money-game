@@ -69,6 +69,7 @@ export default function PlayerPage() {
   type ActiveAuction = {
     auctionId: string; triggeredByName: string; endsAt: number;
     controlledByHost?: boolean;
+    isSpecialAuction?: boolean;
     card?: { id: string; name: string; description?: string; minBid: number; monthlyCashflow?: number };
     minBid: number; highestBid: number; highestBidderName?: string;
   };
@@ -368,8 +369,9 @@ export default function PlayerPage() {
       setActiveEvent(null);
       setPaydayForm(null);
     });
-    s.on('globalEventAnnouncement', (p: { event: { title: string; description: string } }) => {
+    s.on('globalEventAnnouncement', (p: { event: { title: string; description: string }; stageManaged?: boolean }) => {
       addNotification(`📢 全局事件：${p.event?.title ?? ''} — ${p.event?.description ?? ''}`);
+      if (p.stageManaged) return;
       setActiveEvent({ kind: 'global_event', title: p.event?.title ?? '全局事件', description: p.event?.description ?? '' });
     });
     s.on('squareLandingNotice', (p: { cellName: string; message: string }) => {
@@ -958,7 +960,7 @@ export default function PlayerPage() {
 
         {activeAuction && (
           <div className="card border border-blue-600 bg-blue-900 space-y-2">
-            <p className="text-blue-200 font-semibold text-sm">🔔 {activeAuction.triggeredByName} 放棄交易，開放競標！</p>
+            <p className="text-blue-200 font-semibold text-sm">🔔 {activeAuction.isSpecialAuction ? '主持人開啟特殊拍賣！' : `${activeAuction.triggeredByName} 放棄交易，開放競標！`}</p>
             {activeAuction.card && (
               <div className="bg-blue-950 rounded-lg px-3 py-2 text-xs space-y-0.5">
                 <p className="text-blue-100 font-semibold">{activeAuction.card.name}</p>
@@ -1316,7 +1318,7 @@ export default function PlayerPage() {
           )}
           {activeAuction && (
             <div className="mx-4 my-2 rounded-xl border border-blue-600 bg-blue-900 p-3 space-y-2">
-              <p className="text-blue-200 font-semibold text-sm">🔔 {activeAuction.triggeredByName} 放棄交易，開放競標！</p>
+              <p className="text-blue-200 font-semibold text-sm">🔔 {activeAuction.isSpecialAuction ? '主持人開啟特殊拍賣！' : `${activeAuction.triggeredByName} 放棄交易，開放競標！`}</p>
               {activeAuction.card && (
                 <div className="bg-blue-950 rounded-lg px-2 py-1 text-xs flex justify-between">
                   <span className="text-blue-100">{activeAuction.card.name}</span>

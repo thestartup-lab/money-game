@@ -74,7 +74,7 @@ export default function FacilitatorControlPanel({ gameState, emit }: Props) {
                 +30 秒
               </button>
             </div>
-            <p className="mt-2 text-xs text-pink-200/80">時間到只提醒，不會自動答應或婉拒。</p>
+            <p className="mt-2 text-xs text-pink-200/80">時間到只提醒，不會自動選擇或套用效果。</p>
           </div>
         ) : null}
 

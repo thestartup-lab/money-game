@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import DecisionCountdown from '../components/game/DecisionCountdown';
 import FacilitatorControlPanel from '../components/game/FacilitatorControlPanel';
+import WorldEventControlPanel, { type AdaptiveDirectorStatus } from '../components/game/WorldEventControlPanel';
 import {
   DEFAULT_ADMIN_PASSWORD,
   readRememberedAdminRoom,
@@ -19,13 +20,6 @@ interface RoomSummary {
   playerCount: number;
 }
 
-interface AdaptiveDirectorStatus {
-  enabled: boolean;
-  mode: 'support' | 'balanced' | 'challenge';
-  score: number;
-  reason: string;
-  lastEventTitle?: string;
-}
 
 const INITIAL_ROOM_ID = readRememberedAdminRoom();
 const PHASE_LABELS: Record<string, string> = {
@@ -36,16 +30,6 @@ const PHASE_LABELS: Record<string, string> = {
   GameOver: '遊戲結束',
 };
 
-const GLOBAL_EVENTS = [
-  { id: 'stock_crash', label: '股市崩盤' },
-  { id: 'stock_boom', label: '股市繁榮' },
-  { id: 'realestate_crash', label: '房市崩盤' },
-  { id: 'realestate_boom', label: '房市繁榮' },
-  { id: 'inflation', label: '通貨膨脹' },
-  { id: 'business_collapse', label: '企業倒閉' },
-  { id: 'natural_disaster', label: '天然災害' },
-  { id: 'pandemic', label: '全球疫情' },
-];
 
 function getOrderedAlivePlayers(gameState: GameState): Player[] {
   const playerById = new Map(gameState.players.map((player) => [player.id, player]));
@@ -76,6 +60,7 @@ export default function HostControlPage() {
   const [adaptiveDirector, setAdaptiveDirector] = useState<AdaptiveDirectorStatus | null>(null);
   const [roomAnalysis, setRoomAnalysis] = useState<RoomAnalysis | null>(null);
   const [currentReviewSaved, setCurrentReviewSaved] = useState(false);
+  const [worldToolsOpen, setWorldToolsOpen] = useState(false);
 
   useEffect(() => {
     const socket = io(SERVER_URL, {
@@ -457,34 +442,15 @@ export default function HostControlPage() {
           </div>
         </section>
 
-        <details className="host-card host-details">
-          <summary>難度與全局事件</summary>
-          <div className="host-director">
-            <div>
-              <strong>{adaptiveDirector?.mode === 'support' ? '降低難度' : adaptiveDirector?.mode === 'challenge' ? '提高難度' : '維持平衡'}</strong>
-              <span>全場狀態 {adaptiveDirector?.score ?? 50}/100</span>
-            </div>
-            <button
-              onClick={() => emit('setAdaptiveDirectorEnabled', {
-                roomId,
-                enabled: adaptiveDirector?.enabled === false,
-              })}
-            >{adaptiveDirector?.enabled === false ? '開啟自動調節' : '自動調節中'}</button>
-          </div>
-          <p className="host-help">{adaptiveDirector?.reason ?? '季度結算後自動評估全場狀態。'}</p>
-          <div className="host-event-grid">
-            {GLOBAL_EVENTS.map((event) => (
-              <button
-                key={event.id}
-                onClick={() => {
-                  if (window.confirm(`確定觸發「${event.label}」？`)) {
-                    emit('triggerGlobalEvent', { eventId: event.id, roomId });
-                  }
-                }}
-              >{event.label}</button>
-            ))}
-          </div>
-        </details>
+        <section className="host-card">
+          <button className="host-primary-button" aria-expanded={worldToolsOpen} aria-controls="host-world-events"
+            onClick={() => setWorldToolsOpen((open) => !open)}>
+            {worldToolsOpen ? '收合' : '展開'}世界事件控制
+          </button>
+          {worldToolsOpen && gameState ? <div id="host-world-events" className="mt-4">
+            <WorldEventControlPanel gameState={gameState} status={adaptiveDirector} emit={emit} />
+          </div> : null}
+        </section>
 
         <nav className="host-footer-links" aria-label="其他主持人工具">
           <a href={`/?display&room=${roomId}`} target="_blank" rel="noreferrer">開啟大螢幕</a>

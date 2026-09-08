@@ -4,6 +4,7 @@ export type GamePhase = 'WaitingForPlayers' | 'Pre20' | 'RatRace' | 'FastTrack' 
 export type SocialClass = 'Wealthy' | 'UpperMiddle' | 'Middle' | 'LowerClass';
 export type LifeStage = 'Youth' | 'Family' | 'Peak' | 'Senior' | 'Legacy';
 export type PlayerEventType =
+  | 'global_event'
   | 'game_start' | 'payday' | 'asset_buy' | 'asset_sell'
   | 'travel' | 'marriage' | 'child' | 'crisis'
   | 'career_change' | 'education' | 'rat_race_escaped'
@@ -196,7 +197,7 @@ export interface GameState {
 
 export interface FacilitatorScene {
   id: string;
-  kind: 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family';
+  kind: 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family' | 'global_event';
   stage: 'prompt' | 'result';
   kicker: string;
   title: string;
@@ -206,6 +207,7 @@ export interface FacilitatorScene {
   resultTitle?: string;
   resultDescription?: string;
   reminderEndsAt?: number;
+  impacts?: { playerName: string; cashflowDelta: number; netWorthDelta: number; healthDelta: number }[];
   resumeOnClose: boolean;
 }
 
@@ -321,6 +323,7 @@ export interface RoomPlayerSummary {
   score: LifeScoreBreakdown;
   cashflowHistory: { age: number; cashflow: number; netWorth: number }[];
   eventLog?: {
+    meta?: Record<string, unknown>;
     age: number; type: string; description: string;
     cashBefore: number; cashAfter: number;
     cashflowBefore: number; cashflowAfter: number;

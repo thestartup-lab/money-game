@@ -70,7 +70,8 @@ import {
   PROPERTY_INSURANCE_PREMIUM,
   PER_CHILD_EXPENSE,
 } from './gameConstants';
-import { ADMIN_GLOBAL_EVENT_MAP, type AdminGlobalEvent } from './adminEvents';
+import { ADMIN_GLOBAL_EVENTS, ADMIN_GLOBAL_EVENT_MAP, type AdminGlobalEvent } from './adminEvents';
+import { worldEventRestriction, hasFragilePlayers, describeWorldEvent, expireWorldEffects } from './worldEvents';
 import {
   applyPaydayPlan,
   executeCareerChange,
@@ -417,6 +418,14 @@ function emitAdaptiveDirectorStatus(gs: GameState): void {
   io.to(adminIds).emit('adaptiveDirectorStatus', {
     ...gs.adaptiveDirector,
     globalPaydayNumber: gs.globalPaydayNumber,
+    pendingEvent: gs.pendingWorldEvent ? { id: gs.pendingWorldEvent.id, title: gs.pendingWorldEvent.event.title,
+      description: describeWorldEvent(gs.pendingWorldEvent.event), source: gs.pendingWorldEvent.source,
+      deferred: gs.pendingWorldEvent.deferred } : null,
+    eventCatalog: ADMIN_GLOBAL_EVENTS.map((event) => ({ id: event.id, title: event.title,
+      description: describeWorldEvent(event), major: Boolean(event.major), restriction: worldEventRestriction(gs, event) })),
+    activeEffects: [...new Set([...gs.players.values()].flatMap((player) => player.worldEffects.map((entry) =>
+      `${entry.title}：剩 ${Math.max(0, entry.expiresAfterPayday - gs.globalPaydayNumber)} 次全體發薪`)))],
+    history: gs.worldEventHistory,
   });
 }
 
@@ -452,7 +461,7 @@ function assessAdaptiveDifficulty(gs: GameState): {
     - bedriddenRatio * 20
     - (1 - survivalRatio) * 24;
   const score = Math.round(Math.max(0, Math.min(100, rawScore)));
-  const mode = score <= 38 ? 'support' : score >= 68 ? 'challenge' : 'balanced';
+  const mode = score <= 38 ? 'support' : score >= 68 && !hasFragilePlayers(gs) ? 'challenge' : 'balanced';
 
   const assetTotals = new Map<AssetType, number>();
   for (const player of alive) {
@@ -463,6 +472,7 @@ function assessAdaptiveDifficulty(gs: GameState): {
   const dominantAssetType = [...assetTotals.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
 
   const reason = [
+    ...(hasFragilePlayers(gs) ? ['有玩家現金／健康吃緊，暫停自動加壓'] : []),
     `正現金流 ${Math.round(positiveCashflowRatio * 100)}%`,
     `低現金緩衝 ${Math.round(lowReserveRatio * 100)}%`,
     `平均健康 ${Math.round(averageHealth)}`,
@@ -493,7 +503,7 @@ function getAdaptiveEventPool(
       id: 'adaptive_cost_relief',
       title: '生活成本減壓',
       description: '公共服務補助上路，每位玩家每月其他支出減少 $1,500。',
-      effects: [{ type: 'ExpenseChange', flatAmount: -1_500 }],
+      effects: [{ type: 'ExpenseChange', flatAmount: -1_500, durationPaydays: 2 }],
     },
   ];
 
@@ -502,7 +512,7 @@ function getAdaptiveEventPool(
       id: 'adaptive_rate_pressure',
       title: '利率與物價升溫',
       description: '資金與生活成本同步上升，每位玩家每月其他支出增加 $2,500。',
-      effects: [{ type: 'ExpenseChange', flatAmount: 2_500 }],
+      effects: [{ type: 'ExpenseChange', flatAmount: 2_500, durationPaydays: 2 }],
     },
     {
       id: 'adaptive_work_pressure',
@@ -531,7 +541,7 @@ function getAdaptiveEventPool(
       id: 'adaptive_cost_wave',
       title: '生活成本波動',
       description: '短期物價變動，每位玩家每月其他支出增加 $1,000。',
-      effects: [{ type: 'ExpenseChange', flatAmount: 1_000 }],
+      effects: [{ type: 'ExpenseChange', flatAmount: 1_000, durationPaydays: 1 }],
     },
   ];
   if (dominantAssetType !== undefined) {
@@ -553,7 +563,7 @@ function evaluateAndMaybeTriggerAdaptiveEvent(gs: GameState): void {
   gs.adaptiveDirector.reason = assessment.reason;
   gs.adaptiveDirector.lastEvaluatedPayday = gs.globalPaydayNumber;
 
-  if (!gs.adaptiveDirector.enabled || gs.globalPaydayNumber < 2) {
+  if (!gs.adaptiveDirector.enabled || gs.globalPaydayNumber < 2 || gs.pendingWorldEvent || gs.facilitatorScene) {
     emitAdaptiveDirectorStatus(gs);
     return;
   }
@@ -569,25 +579,38 @@ function evaluateAndMaybeTriggerAdaptiveEvent(gs: GameState): void {
   }
 
   const pool = getAdaptiveEventPool(assessment.mode, assessment.dominantAssetType)
-    .filter((event) => event.id !== gs.adaptiveDirector.lastEventId);
+    .filter((event) => event.id !== gs.adaptiveDirector.lastEventId && !worldEventRestriction(gs, event))
+    .filter((event) => !hasFragilePlayers(gs) || !event.effects.some((effect) =>
+      (effect.multiplier ?? 1) < 1 || (effect.type === 'ExpenseChange' && (effect.flatAmount ?? 0) > 0)
+      || (effect.type === 'HealthChange' && (effect.flatAmount ?? 0) < 0)));
   const event = pool[Math.floor(Math.random() * pool.length)];
   if (!event) {
     emitAdaptiveDirectorStatus(gs);
     return;
   }
 
-  applyGlobalEvent(gs, event);
-  gs.adaptiveDirector.lastTriggeredPayday = gs.globalPaydayNumber;
-  gs.adaptiveDirector.lastEventId = event.id;
-  gs.adaptiveDirector.lastEventTitle = event.title;
-
-  console.log(`[adaptiveDirector] 房間 ${gs.gameId}｜${assessment.mode} ${assessment.score}｜${event.title}`);
-  emitToRoom(gs.gameId, 'globalEventAnnouncement', {
-    event,
-    timestamp: new Date(),
-    automatic: true,
-  });
+  gs.pendingWorldEvent = { id: randomBytes(8).toString('hex'), event, source: 'automatic', deferred: false };
+  tryOpenWorldEvent(gs);
   emitAdaptiveDirectorStatus(gs);
+}
+
+/** 僅在完成目前決策、擲骰及全體發薪後開啟。效果直到主持人揭曉才套用。 */
+function tryOpenWorldEvent(gs: GameState): void {
+  const pending = gs.pendingWorldEvent;
+  if (!pending || pending.deferred || gs.turnInProgress || gs.decisionPhase || gs.facilitatorScene
+    || gs.globalPaydayInProgress || gs.globalPaydayPending) return;
+  const restriction = worldEventRestriction(gs, pending.event);
+  if (restriction) {
+    gs.pendingWorldEvent = null;
+    emitAdaptiveDirectorStatus(gs);
+    return;
+  }
+  beginFacilitatorScene(gs, {
+    kind: 'global_event', kicker: '世界正在改變', title: pending.event.title,
+    description: describeWorldEvent(pending.event), participantNames: [], reminderEndsAt: Date.now() + 60_000,
+    options: [{ id: 'apply', label: '揭曉並正式生效', description: '主持人確認全場已看見事件後，公布各玩家受到的影響。' },
+      { id: 'defer', label: '稍後再發生', description: '保留事件，由主持人選擇適合的時機重新開啟。' }],
+  }, { worldEventId: pending.id });
 }
 
 /**
@@ -1133,6 +1156,8 @@ function resolveFamilyScene(gs: GameState, player: Player): void {
 }
 
 function closeFacilitatorScene(gs: GameState): void {
+  if (gs.facilitatorScene?.kind === 'global_event' && gs.facilitatorScene.stage === 'prompt'
+    && !gs.pendingWorldEvent?.deferred) gs.pendingWorldEvent = null;
   const shouldResume = Boolean(gs.facilitatorScene?.resumeOnClose);
   gs.facilitatorScene = null;
   gs.facilitatorSceneContext = null;
@@ -1145,6 +1170,8 @@ function closeFacilitatorScene(gs: GameState): void {
     });
   }
   continueAfterTurnAdvance(gs);
+  tryOpenWorldEvent(gs);
+  emitAdaptiveDirectorStatus(gs);
   emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
 }
 
@@ -1515,6 +1542,8 @@ function finishGame(gs: GameState, reason: 'finalRoundComplete' | 'allPlayersEli
   if (gs.gamePhase === GamePhase.GameOver) return;
 
   gs.gamePhase = GamePhase.GameOver;
+  gs.pendingWorldEvent = null;
+  emitAdaptiveDirectorStatus(gs);
   gs.decisionPhase = null;
   gs.facilitatorScene = null;
   gs.facilitatorSceneContext = null;
@@ -1559,6 +1588,8 @@ function startFinalRound(gs: GameState): void {
     : aliveIds;
 
   gs.finalRoundStarted = true;
+  gs.pendingWorldEvent = null;
+  emitAdaptiveDirectorStatus(gs);
   gs.finalRoundPendingPlayerIds = orderedIds;
   gs.currentPlayerTurnId = orderedIds[0];
   gs.globalPaydayPending = false;
@@ -1613,8 +1644,11 @@ function serializePlayer(p: Player, gs: GameState): object {
     isAlive: p.isAlive,
     cash: p.cash,
     salary: p.salary,
-    expenses: { ...p.expenses, insurancePremiums, childExpenses, unsecuredLoanPayments },
-    assets: p.assets,
+    expenses: { ...p.expenses, otherExpenses: p.expenses.otherExpenses + p.worldExpenseAdjustment, insurancePremiums, childExpenses, unsecuredLoanPayments },
+    assets: p.assets.map((asset) => ({ ...asset, monthlyCashflow: asset.monthlyCashflow > 0
+      ? Math.round(asset.monthlyCashflow * p.worldEffects.reduce((factor, entry) =>
+        entry.effect.type === 'CashflowChange' && entry.effect.targetAssetType === asset.type
+          ? factor * (entry.effect.multiplier ?? 1) : factor, 1)) : asset.monthlyCashflow })),
     liabilities: p.liabilities,
     insurance: p.insurance,
     numberOfChildren: p.numberOfChildren,
@@ -1865,6 +1899,7 @@ function advanceTurn(gs: GameState): void {
   gs.advanceToNextTurn();
   skipCurrentEducationTurns(gs);
   continueAfterTurnAdvance(gs);
+  tryOpenWorldEvent(gs);
 }
 
 function getQuarterTravelDestinations(player: Player): Array<{
@@ -2139,6 +2174,10 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
   gs.roundsSinceGlobalPayday = 0;
   gs.globalPaydayNumber += 1;
   gs.globalPaydayInProgress = false;
+  const expiredWorldEvents = expireWorldEffects(gs);
+  if (expiredWorldEvents.length) emitToRoom(roomId, 'globalEventAnnouncement', {
+    event: { title: '限期影響結束', description: `${expiredWorldEvents.join('、')}的收入／生活費效果已解除。` }, stageManaged: true,
+  });
 
   emitToRoom(roomId, 'globalPaydayCompleted', {
     globalPaydayNumber: gs.globalPaydayNumber,
@@ -2163,6 +2202,7 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
     });
   }
   evaluateAndMaybeTriggerAdaptiveEvent(gs);
+  tryOpenWorldEvent(gs);
   emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
 }
 
@@ -2497,7 +2537,7 @@ io.on('connection', (socket: Socket) => {
         return;
       }
 
-      if (gs.pausedAt !== null || gs.decisionPhase || gs.facilitatorScene || gs.globalPaydayPending || gs.globalPaydayInProgress) {
+      if (gs.turnInProgress || gs.pausedAt !== null || gs.decisionPhase || gs.facilitatorScene || gs.globalPaydayPending || gs.globalPaydayInProgress) {
         socket.emit('error', { message: '目前由主持人控制流程，請等待主持人繼續遊戲。' });
         return;
       }
@@ -2514,6 +2554,7 @@ io.on('connection', (socket: Socket) => {
         return;
       }
 
+      gs.turnInProgress = true;
       try {
       // --- 1b. 臥床狀態：自動跳過並判斷死亡 ---
       if (player.isBedridden) {
@@ -2946,6 +2987,9 @@ io.on('connection', (socket: Socket) => {
         const gs2 = getRoomState(socket);
         if (gs2) emitToRoom(gs2.gameId, 'gameStateUpdate', serializeGameState(gs2));
       } catch (_) { /* ignore */ }
+    } finally {
+      gs.turnInProgress = false;
+      tryOpenWorldEvent(gs);
     }
     }
   );
@@ -3328,22 +3372,32 @@ io.on('connection', (socket: Socket) => {
       socket.emit('error', { message: '權限不足：僅管理員可觸發全局事件。' });
       return;
     }
-    if (gs.facilitatorScene) {
-      socket.emit('error', { message: '請先完成目前的大螢幕舞台事件。' });
-      return;
-    }
-
     const event = ADMIN_GLOBAL_EVENT_MAP.get(payload.eventId);
     if (!event) {
       socket.emit('error', { message: `找不到事件 ID：${payload.eventId}` });
       return;
     }
 
-    console.log(`[triggerGlobalEvent] 房間 ${roomId} 觸發：${event.title}`);
-    applyGlobalEvent(gs, event);
-
-    emitToRoom(roomId, 'globalEventAnnouncement', { event, timestamp: new Date() });
+    const restriction = worldEventRestriction(gs, event);
+    if (restriction || gs.pendingWorldEvent) {
+      socket.emit('error', { message: restriction ?? '已有待登場的世界事件，請先處理或取消。' });
+      return;
+    }
+    gs.pendingWorldEvent = { id: randomBytes(8).toString('hex'), event, source: 'manual', deferred: false };
+    tryOpenWorldEvent(gs);
+    emitAdaptiveDirectorStatus(gs);
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
+  socket.on('manageWorldEvent', (payload?: { id?: string; action?: string }) => {
+    const gs = getRoomState(socket);
+    if (!gs || !isRoomAdmin(socket, gs)) { socket.emit('error', { message: '只有主持人可以安排世界事件。' }); return; }
+    if (!gs.pendingWorldEvent || gs.pendingWorldEvent.id !== payload?.id) { socket.emit('error', { message: '待登場事件已更新。' }); return; }
+    if (gs.facilitatorScene?.kind === 'global_event') { socket.emit('error', { message: '請使用目前舞台上的按鈕。' }); return; }
+    if (payload.action === 'cancel') gs.pendingWorldEvent = null;
+    else if (payload.action === 'open') { gs.pendingWorldEvent.deferred = false; tryOpenWorldEvent(gs); }
+    else return;
+    emitAdaptiveDirectorStatus(gs);
   });
 
   // ----------------------------------------------------------
@@ -3361,8 +3415,10 @@ io.on('connection', (socket: Socket) => {
       socket.emit('error', { message: '權限不足：僅管理員可觸發特殊拍賣。' });
       return;
     }
-    if (gs.facilitatorScene) {
-      socket.emit('error', { message: '請先完成目前的大螢幕舞台事件。' });
+    if (![GamePhase.RatRace, GamePhase.FastTrack].includes(gs.gamePhase) || gs.finalRoundStarted
+      || gs.turnInProgress || gs.decisionPhase || gs.facilitatorScene || gs.globalPaydayPending || gs.globalPaydayInProgress
+      || Object.keys(gs.activeAuctions ?? {}).length > 0) {
+      socket.emit('error', { message: '請在遊戲進行中，完成目前決策、舞台事件與季度發薪後再開啟拍賣。' });
       return;
     }
 
@@ -3430,9 +3486,8 @@ io.on('connection', (socket: Socket) => {
       const winner = gs.players.get(auction.highestBidderId);
       if (winner && winner.cash >= auction.highestBid) {
         const _wCB = winner.cash; const _wFB = winner.monthlyCashflow; const _wNWB = calcNetWorth(winner);
-        winner.cash -= auction.highestBid;
         // 特殊拍賣：得標金額蒸發（市場新發行），不轉給任何玩家
-        acceptDealCard(winner, auctionCard);
+        acceptDealCard(winner, auctionCard, auction.highestBid);
         logPlayerEvent(
           winner, gs, 'asset_buy',
           `特殊拍賣得標：${auctionCard.title}（月現金流 ${(auctionCard.asset.monthlyCashflow ?? 0) >= 0 ? '+' : ''}$${auctionCard.asset.monthlyCashflow ?? 0}）`,
@@ -3448,6 +3503,7 @@ io.on('connection', (socket: Socket) => {
           hadBids: true,
           isSpecialAuction: true,
         });
+        tryOpenWorldEvent(gs);
         emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
         return;
       }
@@ -3458,6 +3514,7 @@ io.on('connection', (socket: Socket) => {
       winningBid: 0, cardName: auctionCard.title, hadBids: false,
       isSpecialAuction: true,
     });
+    tryOpenWorldEvent(gs);
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
   });
 
@@ -4078,6 +4135,9 @@ io.on('connection', (socket: Socket) => {
 
     const bidder = gs.players.get(socket.id);
     if (!bidder || !bidder.isAlive) return;
+    if (!payload || typeof payload.auctionId !== 'string' || !Number.isSafeInteger(payload.bidAmount) || payload.bidAmount <= 0) {
+      socket.emit('error', { message: '請輸入有效的正整數出價。' }); return;
+    }
 
     if (!gs.activeAuctions) gs.activeAuctions = {};
     const auction = gs.activeAuctions[payload.auctionId];
@@ -4221,7 +4281,12 @@ io.on('connection', (socket: Socket) => {
     gs.facilitatorScene = null;
     gs.facilitatorSceneContext = null;
     gs.facilitatorEchoHistory = new Set();
+    gs.pendingWorldEvent = null;
+    gs.worldEventHistory = [];
+    gs.turnInProgress = false;
+    for (const player of gs.players.values()) player.worldEffects = [];
     startGameClock(gs);
+    emitAdaptiveDirectorStatus(gs);
 
     console.log(`[startGame] 房間 ${roomId} 遊戲啟動；每完整回合 +${YEARS_PER_COMPLETED_ROUND} 歲，活動倒數：${minutes} 分鐘`);
 
@@ -4327,7 +4392,7 @@ io.on('connection', (socket: Socket) => {
       socket.emit('error', { message: '目前已有舞台事件，請先完成或關閉。' });
       return;
     }
-    if (gs.decisionPhase || gs.globalPaydayPending || gs.globalPaydayInProgress) {
+    if (gs.turnInProgress || gs.decisionPhase || gs.globalPaydayPending || gs.globalPaydayInProgress) {
       socket.emit('error', { message: '請先完成目前玩家決策或季度發薪，再啟動舞台事件。' });
       return;
     }
@@ -4470,6 +4535,49 @@ io.on('connection', (socket: Socket) => {
       return;
     }
     const choiceId = payload?.choiceId ?? '';
+
+    if (scene.kind === 'global_event') {
+      const pending = gs.pendingWorldEvent;
+      if (!pending || context.worldEventId !== pending.id) {
+        socket.emit('error', { message: '世界事件已更新，請關閉舞台後重新安排。' }); return;
+      }
+      if (choiceId === 'defer') {
+        pending.deferred = true;
+        closeFacilitatorScene(gs);
+        return;
+      }
+      if (choiceId !== 'apply') { socket.emit('error', { message: '請選擇揭曉或延後。' }); return; }
+      const restriction = worldEventRestriction(gs, pending.event);
+      if (restriction) { socket.emit('error', { message: restriction }); return; }
+      if (pending.source === 'automatic' && hasFragilePlayers(gs) && pending.event.effects.some((effect) =>
+        (effect.multiplier ?? 1) < 1 || (effect.type === 'ExpenseChange' && (effect.flatAmount ?? 0) > 0)
+        || (effect.type === 'HealthChange' && (effect.flatAmount ?? 0) < 0))) {
+        gs.pendingWorldEvent = null;
+        revealFacilitatorResult(gs, '這次考驗暫緩', '有玩家現金或健康已吃緊，系統取消本次自動加壓。');
+        emitAdaptiveDirectorStatus(gs); return;
+      }
+      applyGlobalEvent(gs, pending.event);
+      gs.worldEventHistory.push({ eventId: pending.event.id, title: pending.event.title,
+        payday: gs.globalPaydayNumber, round: gs.turnNumber, source: pending.source, major: Boolean(pending.event.major) });
+      if (pending.source === 'automatic') {
+        gs.adaptiveDirector.lastTriggeredPayday = gs.globalPaydayNumber;
+        gs.adaptiveDirector.lastEventId = pending.event.id;
+        gs.adaptiveDirector.lastEventTitle = pending.event.title;
+      }
+      scene.impacts = [...gs.players.values()].filter((player) => player.isAlive).map((player) => {
+        const event = player.eventLog[player.eventLog.length - 1];
+        event.meta = { ...event.meta, source: pending.source };
+        return { playerName: player.name, cashflowDelta: event.cashflowAfter - event.cashflowBefore,
+          netWorthDelta: event.netWorthAfter - event.netWorthBefore,
+          healthDelta: Number(event.meta.healthAfter) - Number(event.meta.healthBefore) };
+      });
+      const event = pending.event;
+      gs.pendingWorldEvent = null;
+      revealFacilitatorResult(gs, `${event.title}・影響揭曉`, describeWorldEvent(event));
+      emitToRoom(gs.gameId, 'globalEventAnnouncement', { event, stageManaged: true });
+      emitAdaptiveDirectorStatus(gs);
+      return;
+    }
 
     if (scene.kind === 'community') {
       const result = applyCommunityChoice(gs, String(context.cardId ?? ''), choiceId);
@@ -4649,6 +4757,9 @@ io.on('connection', (socket: Socket) => {
     gs.facilitatorSceneContext = null;
     gs.facilitatorEchoHistory = new Set();
     gs.roundsSinceGlobalPayday = 0;
+    gs.pendingWorldEvent = null;
+    gs.worldEventHistory = [];
+    gs.turnInProgress = false;
     gs.globalPaydayPending = false;
     gs.globalPaydayInProgress = false;
     gs.globalPaydayNumber = 0;
@@ -4672,6 +4783,7 @@ io.on('connection', (socket: Socket) => {
     console.log(`[restartGame] 房間 ${roomId} 重啟，${playerInfos.length} 位玩家回到投胎`);
 
     emitToRoom(roomId, 'gameRestarted', { roomId, playerCount: playerInfos.length });
+    emitAdaptiveDirectorStatus(gs);
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
   });
 
@@ -5038,7 +5150,7 @@ io.on('connection', (socket: Socket) => {
           .filter((e) => e.type === 'payday')
           .map((e) => ({ age: e.age, cashflow: e.cashflowAfter, netWorth: e.netWorthAfter })),
         eventLog: p.eventLog
-          .filter((e) => ['asset_buy','asset_sell','travel','marriage','child','crisis','career_change','education','rat_race_escaped','loan_taken','franchise','relationship','community_choice','decision_echo','cooperation','legacy'].includes(e.type))
+          .filter((e) => ['asset_buy','asset_sell','travel','marriage','child','crisis','career_change','education','rat_race_escaped','loan_taken','franchise','relationship','community_choice','decision_echo','cooperation','legacy','global_event'].includes(e.type))
           .map((e) => ({
             age: e.age,
             type: e.type,
@@ -5049,6 +5161,7 @@ io.on('connection', (socket: Socket) => {
             cashflowAfter: e.cashflowAfter,
             netWorthBefore: e.netWorthBefore,
             netWorthAfter: e.netWorthAfter,
+            meta: e.meta,
           })),
       };
     });
@@ -6038,9 +6151,8 @@ async function handleLandingSquare(
             const winner = gs.players.get(auction.highestBidderId);
             if (winner && winner.cash >= auction.highestBid) {
               const _wCB = winner.cash; const _wFB = winner.monthlyCashflow; const _wNWB = calcNetWorth(winner);
-              winner.cash -= auction.highestBid;
               player.cash += auction.highestBid;
-              acceptDealCard(winner, auctionCard);
+              acceptDealCard(winner, auctionCard, auction.highestBid);
               logPlayerEvent(winner, gs, 'asset_buy', `競標得標：${auctionCard.title}（月現金流 ${(auctionCard.asset.monthlyCashflow ?? 0) >= 0 ? '+' : ''}$${auctionCard.asset.monthlyCashflow ?? 0}）`, _wCB, _wFB, _wNWB, { cardId: auctionCard.id, cardTitle: auctionCard.title, monthlyCashflow: auctionCard.asset.monthlyCashflow });
               emitToRoom(roomId, 'dealAuctionEnded', {
                 auctionId,

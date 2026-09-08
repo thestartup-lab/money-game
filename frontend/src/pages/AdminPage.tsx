@@ -5,6 +5,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import DecisionCountdown from '../components/game/DecisionCountdown';
 import ClassicReviewLibrary from '../components/analysis/ClassicReviewLibrary';
 import FacilitatorControlPanel from '../components/game/FacilitatorControlPanel';
+import WorldEventControlPanel, { type AdaptiveDirectorStatus } from '../components/game/WorldEventControlPanel';
 import {
   DEFAULT_ADMIN_PASSWORD,
   readRememberedAdminRoom,
@@ -22,16 +23,6 @@ const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 
 
 const INITIAL_REMEMBERED_ADMIN_ROOM = readRememberedAdminRoom();
 
-const GLOBAL_EVENTS = [
-  { id: 'stock_crash',       label: '股市崩盤',   color: 'bg-red-700 hover:bg-red-600' },
-  { id: 'stock_boom',        label: '股市繁榮',   color: 'bg-green-700 hover:bg-green-600' },
-  { id: 'realestate_crash',  label: '房市崩盤',   color: 'bg-orange-700 hover:bg-orange-600' },
-  { id: 'realestate_boom',   label: '房市繁榮',   color: 'bg-teal-700 hover:bg-teal-600' },
-  { id: 'inflation',         label: '通貨膨脹',   color: 'bg-yellow-700 hover:bg-yellow-600' },
-  { id: 'business_collapse', label: '企業倒閉',   color: 'bg-red-800 hover:bg-red-700' },
-  { id: 'natural_disaster',  label: '天然災害',   color: 'bg-gray-600 hover:bg-gray-500' },
-  { id: 'pandemic',          label: '全球疫情',   color: 'bg-purple-700 hover:bg-purple-600' },
-];
 
 interface AdminRoom {
   roomId: string;
@@ -47,14 +38,6 @@ interface StatsEdit {
   nt: number;
 }
 
-interface AdaptiveDirectorStatus {
-  enabled: boolean;
-  mode: 'support' | 'balanced' | 'challenge';
-  score: number;
-  reason: string;
-  globalPaydayNumber: number;
-  lastEventTitle?: string;
-}
 
 export default function AdminPage() {
   const socketRef = useRef<Socket | null>(null);
@@ -586,83 +569,10 @@ export default function AdminPage() {
             </div>
           ) : null}
 
-          {/* 自動難度導演 */}
-          <div className="card space-y-3">
-            <SectionHeading icon="🧭" title="自動難度導演" meta="季度後評估" />
-            <div className="flex items-center justify-between gap-3 rounded-xl bg-gray-900/70 p-3">
-              <div>
-                <p className={`text-sm font-black ${
-                  adaptiveDirector?.mode === 'support'
-                    ? 'text-emerald-300'
-                    : adaptiveDirector?.mode === 'challenge'
-                      ? 'text-orange-300'
-                      : 'text-blue-300'
-                }`}>
-                  {adaptiveDirector?.mode === 'support'
-                    ? '降低難度・支援全場'
-                    : adaptiveDirector?.mode === 'challenge'
-                      ? '提高難度・加入考驗'
-                      : '維持平衡'}
-                </p>
-                <p className="mt-1 text-xs text-gray-400">
-                  全場狀態指數 {adaptiveDirector?.score ?? 50}/100
-                </p>
-              </div>
-              <button
-                className={`rounded-xl px-3 py-2 text-xs font-black ${
-                  adaptiveDirector?.enabled !== false
-                    ? 'bg-emerald-700 text-white hover:bg-emerald-600'
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
-                onClick={() => emit('setAdaptiveDirectorEnabled', {
-                  roomId,
-                  enabled: adaptiveDirector?.enabled === false,
-                })}
-              >
-                {adaptiveDirector?.enabled !== false ? '自動調節中' : '已關閉'}
-              </button>
-            </div>
-            <p className="text-xs leading-relaxed text-gray-400">
-              {adaptiveDirector?.reason ?? '等待季度結算後評估全場現金流、現金緩衝、健康與外圈進度。'}
-            </p>
-            {adaptiveDirector?.lastEventTitle && (
-              <p className="rounded-lg bg-indigo-950/70 px-3 py-2 text-xs text-indigo-200">
-                上次自動事件：{adaptiveDirector.lastEventTitle}
-              </p>
-            )}
-            <p className="text-[11px] leading-relaxed text-gray-500">
-              最早從第 2 次季度發薪後開始，兩次自動事件至少間隔 2 季；不會在玩家思考時突然觸發。
-            </p>
-          </div>
-
-          {/* 主持人手動全局事件 */}
-          <div className="card space-y-2">
-            <SectionHeading icon="🌍" title="手動全局事件" meta="主持人保留控制權" />
-            <div className="grid grid-cols-2 gap-2">
-              {GLOBAL_EVENTS.map((ev) => (
-                <button
-                  key={ev.id}
-                  className={`${ev.color} text-white text-xs font-semibold py-2 px-2 rounded-xl transition-colors`}
-                  onClick={() => {
-                    if (window.confirm(`確定要觸發「${ev.label}」嗎？`)) {
-                      emit('triggerGlobalEvent', { eventId: ev.id, roomId });
-                      addLog(`觸發全局事件：${ev.label}`);
-                    }
-                  }}
-                >{ev.label}</button>
-              ))}
-            </div>
-            <button
-              className="w-full bg-amber-700 hover:bg-amber-600 text-white text-xs font-semibold py-2 px-2 rounded-xl transition-colors mt-2"
-              onClick={() => {
-                if (window.confirm('開放一場「特殊拍賣」給全房玩家競標？競標時間將由主持人控制。')) {
-                  emit('triggerSpecialAuction', { roomId });
-                  addLog('觸發特殊拍賣');
-                }
-              }}
-              title="從特殊拍賣牌庫隨機抽 1 張，由主持人決定何時結束競標"
-            >🔨 觸發特殊拍賣</button>
-          </div>
+          {gameState ? <div className="card space-y-3">
+            <SectionHeading icon="🌍" title="世界事件" meta="主持人揭曉後生效" />
+            <WorldEventControlPanel gameState={gameState} status={adaptiveDirector} emit={emit} />
+          </div> : null}
 
           {/* 慈善排行榜（A1） */}
           <div className="card space-y-1">

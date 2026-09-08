@@ -12,6 +12,7 @@ const KIND_THEME: Record<FacilitatorScene['kind'], { icon: string; border: strin
   legacy: { icon: '🌟', border: 'border-amber-400', glow: 'from-amber-950/90' },
   marriage: { icon: '💍', border: 'border-pink-400', glow: 'from-pink-950/90' },
   family: { icon: '👨‍👩‍👧', border: 'border-rose-400', glow: 'from-rose-950/90' },
+  global_event: { icon: '🌍', border: 'border-orange-400', glow: 'from-orange-950/90' },
 };
 
 export default function FacilitatorSceneOverlay({ scene }: Props) {
@@ -39,7 +40,7 @@ export default function FacilitatorSceneOverlay({ scene }: Props) {
           </div>
         ) : null}
 
-        {!isResult && scene.options && scene.options.length > 0 ? (
+        {!isResult && scene.kind !== 'global_event' && scene.options && scene.options.length > 0 ? (
           <div className={`mx-auto mt-6 grid max-w-5xl gap-4 ${scene.options.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
             {scene.options.map((option, index) => (
               <article key={option.id} className="rounded-3xl border-2 border-gray-600 bg-gray-900 px-6 py-5 text-left">
@@ -58,6 +59,24 @@ export default function FacilitatorSceneOverlay({ scene }: Props) {
                 {name}
               </span>
             ))}
+          </div>
+        ) : null}
+
+        {isResult && scene.impacts ? (
+          <div className="mt-5 max-h-72 overflow-auto rounded-2xl border border-orange-700">
+            <table className="w-full text-xl text-white">
+              <thead className="sticky top-0 bg-gray-800"><tr><th className="p-3">玩家</th><th>月現金流變化</th><th>淨資產變化</th><th>健康變化</th></tr></thead>
+              <tbody>{scene.impacts.map((impact, index) => (
+                <tr key={`${index}-${impact.playerName}`} className="border-t border-gray-700">
+                  <th className="p-3">{impact.playerName}</th>
+                  {[impact.cashflowDelta, impact.netWorthDelta, impact.healthDelta].map((value, column) => (
+                    <td key={column} className={value < 0 ? 'font-bold text-orange-300' : 'font-bold text-emerald-300'}>
+                      {value > 0 ? '+' : ''}{value.toLocaleString('zh-TW', { maximumFractionDigits: 0 })}
+                    </td>
+                  ))}
+                </tr>
+              ))}</tbody>
+            </table>
           </div>
         ) : null}
 

@@ -27,12 +27,15 @@ export interface GlobalEventEffect {
   multiplier?: number;
   /** 固定增減金額（ExpenseChange 用）。正值增加支出，負值減少支出 */
   flatAmount?: number;
+  /** 持續幾次完整的全體發薪；未設定則為即時或永久效果。 */
+  durationPaydays?: number;
 }
 
 export interface AdminGlobalEvent {
   id: string;
   title: string;
   description: string;
+  major?: boolean;
   /** 一個事件可同時產生多種效果（例如股災同時影響市值與現金流） */
   effects: GlobalEventEffect[];
 }
@@ -44,15 +47,17 @@ export interface AdminGlobalEvent {
 export const ADMIN_GLOBAL_EVENTS: AdminGlobalEvent[] = [
   {
     id: 'stock_crash',
+    major: true,
     title: '股市大崩盤',
-    description: '全球股市恐慌性拋售，股票資產市值腰斬，每月股息也大幅縮水。',
+    description: '全球股市恐慌性拋售，股票市值減少 50%，正股息收入減少 30%。',
     effects: [
       { type: 'AssetValueChange', targetAssetType: AssetType.Stock, multiplier: 0.5 },
-      { type: 'CashflowChange',   targetAssetType: AssetType.Stock, multiplier: 0.7 },
+      { type: 'CashflowChange',   targetAssetType: AssetType.Stock, multiplier: 0.7, durationPaydays: 2 },
     ],
   },
   {
     id: 'stock_boom',
+    major: true,
     title: '股市大漲',
     description: '科技革命帶動牛市行情，持有股票的投資者資產翻倍！',
     effects: [
@@ -61,15 +66,17 @@ export const ADMIN_GLOBAL_EVENTS: AdminGlobalEvent[] = [
   },
   {
     id: 'realestate_crash',
+    major: true,
     title: '房市崩盤',
-    description: '利率暴漲引發房市泡沫破裂，房產估值大跌，租金收入也受到影響。',
+    description: '利率暴漲引發房市泡沫破裂，房產市值減少 40%，正租金現金流減少 20%。',
     effects: [
       { type: 'AssetValueChange', targetAssetType: AssetType.RealEstate, multiplier: 0.6 },
-      { type: 'CashflowChange',   targetAssetType: AssetType.RealEstate, multiplier: 0.8 },
+      { type: 'CashflowChange',   targetAssetType: AssetType.RealEstate, multiplier: 0.8, durationPaydays: 2 },
     ],
   },
   {
     id: 'realestate_boom',
+    major: true,
     title: '房市大漲',
     description: '都市化浪潮與低利率雙重驅動，房地產估值飆升 80%！',
     effects: [
@@ -81,34 +88,37 @@ export const ADMIN_GLOBAL_EVENTS: AdminGlobalEvent[] = [
     title: '通貨膨脹',
     description: '物價全面上漲，每位玩家每月生活支出增加 $4,500。',
     effects: [
-      { type: 'ExpenseChange', flatAmount: 4_500 },
+      { type: 'ExpenseChange', flatAmount: 4_500, durationPaydays: 2 },
     ],
   },
   {
     id: 'business_collapse',
+    major: true,
     title: '企業倒閉潮',
     description: '經濟衰退引發連鎖倒閉，商業資產市值與現金流雙雙腰斬。',
     effects: [
       { type: 'AssetValueChange', targetAssetType: AssetType.Business, multiplier: 0.5 },
-      { type: 'CashflowChange',   targetAssetType: AssetType.Business, multiplier: 0.5 },
+      { type: 'CashflowChange',   targetAssetType: AssetType.Business, multiplier: 0.5, durationPaydays: 2 },
     ],
   },
   {
     id: 'natural_disaster',
+    major: true,
     title: '大型自然災害',
-    description: '強震重創城市，房產估值大跌，重建費用也讓所有人每月多支出 $7,500。',
+    description: '強震重創城市，房產市值減少 30%，重建費用也讓所有人每月多支出 $7,500。',
     effects: [
       { type: 'AssetValueChange', targetAssetType: AssetType.RealEstate, multiplier: 0.7 },
-      { type: 'ExpenseChange', flatAmount: 7_500 },
+      { type: 'ExpenseChange', flatAmount: 7_500, durationPaydays: 2 },
     ],
   },
   {
     id: 'pandemic',
+    major: true,
     title: '全球疫情爆發',
-    description: '封城措施重創實體商業，企業現金流大幅萎縮，全民醫療支出也大增。',
+    description: '封城措施重創實體商業，企業正現金流減少 60%，每位玩家每月醫療支出增加 $6,000。',
     effects: [
-      { type: 'CashflowChange', targetAssetType: AssetType.Business, multiplier: 0.4 },
-      { type: 'ExpenseChange', flatAmount: 6_000 },
+      { type: 'CashflowChange', targetAssetType: AssetType.Business, multiplier: 0.4, durationPaydays: 2 },
+      { type: 'ExpenseChange', flatAmount: 6_000, durationPaydays: 2 },
     ],
   },
 ];
