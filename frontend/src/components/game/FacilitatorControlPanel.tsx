@@ -39,7 +39,7 @@ export default function FacilitatorControlPanel({ gameState, emit }: Props) {
   const alivePlayers = gameState.players.filter((player) => player.isAlive);
   const deceasedPlayers = gameState.players.filter((player) => !player.isAlive && !player.legacyActionUsed);
   const isRunning = gameState.gamePhase === 'RatRace' || gameState.gamePhase === 'FastTrack';
-  const busy = !isRunning || Boolean(gameState.decisionPhase || gameState.globalPaydayPending || gameState.globalPaydayInProgress);
+  const busy = !isRunning || Boolean(gameState.turnInProgress || gameState.decisionPhase || gameState.globalPaydayPending || gameState.globalPaydayInProgress);
   const familyPlayer = alivePlayers.find((player) => player.id === familyPlayerId);
   const familyPlayerAge = familyPlayer?.personalAge ?? gameState.currentAge;
   const arrangedMarriageCost = Math.min(450_000, 75_000 + Math.max(0, familyPlayerAge - 20) * 3_000);
@@ -80,6 +80,7 @@ export default function FacilitatorControlPanel({ gameState, emit }: Props) {
 
         {scene.stage === 'prompt' ? (
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            {scene.kind === 'career' && !scene.careerConfirmed ? <p className="text-base font-bold text-yellow-200">等待本人在手機確認，主持人不能代為確認。</p> : null}
             {(scene.options ?? []).map((option) => (
               <button
                 key={option.id}
@@ -110,6 +111,20 @@ export default function FacilitatorControlPanel({ gameState, emit }: Props) {
 
   return (
     <section className="space-y-4" aria-label="主持人導演模式">
+      {(gameState.careerRequests?.length ?? 0) > 0 ? (
+        <section className="rounded-xl border-2 border-yellow-500 bg-yellow-950/50 p-4" aria-label="轉職申請隊列">
+          <h3 className="text-xl font-black text-yellow-100">🎯 等待轉職（{gameState.careerRequests!.length}）</h3>
+          {gameState.careerRequests!.map((request, index) => (
+            <div key={request.id} className="mt-3 rounded-xl bg-slate-950 p-3 text-base text-white">
+              <p>{index + 1}. {request.playerName} → {request.professionName}</p>
+              <button disabled={busy || index !== 0} className="mt-2 min-h-12 w-full rounded-xl bg-yellow-700 p-3 font-bold disabled:opacity-40"
+                onClick={() => emit('startCareerScene', { requestId: request.id })}>開啟轉職舞台</button>
+              <button className="mt-2 min-h-12 w-full rounded-xl border border-slate-500 p-3" onClick={() => emit('cancelCareerRequest', { requestId: request.id })}>取消申請</button>
+            </div>
+          ))}
+          <p className="mt-2 text-base text-yellow-200">依序開啟；原回合與全體發薪先完成。開啟後遊戲暫停，關閉舞台才繼續。</p>
+        </section>
+      ) : null}
       <div className="rounded-xl border border-cyan-800 bg-cyan-950/45 p-3">
         <h3 className="font-black text-cyan-100">🗳️ 全場共同抉擇</h3>
         <p className="mt-1 text-xs leading-relaxed text-cyan-200/80">公布到大螢幕，全場討論後由主持人選擇結果。</p>

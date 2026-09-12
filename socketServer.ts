@@ -4,6 +4,7 @@ import { Server, Socket } from 'socket.io';
 import { validateSocketPayload } from './socketValidation';
 import { repayRoomLoan, validatePlayerLoan } from './playerLoans';
 import { GameState, Player, PaydayPlanPayload, GamePhase, PlayerEvent, PlayerEventType, DecisionPhaseState, FacilitatorSceneState, AssetType } from './gameDataModels';
+import { previewCareerChange } from './careerStage';
 import { BASIC_INVESTMENTS, buyBasicInvestment } from './basicInvestments';
 import {
   createPlayer,
@@ -1554,6 +1555,7 @@ function finishGame(gs: GameState, reason: 'finalRoundComplete' | 'allPlayersEli
   if (gs.gamePhase === GamePhase.GameOver) return;
 
   gs.gamePhase = GamePhase.GameOver;
+  gs.careerRequests = [];
   gs.pendingWorldEvent = null;
   emitAdaptiveDirectorStatus(gs);
   gs.decisionPhase = null;
@@ -1650,6 +1652,7 @@ function serializePlayer(p: Player, gs: GameState): object {
     id: p.id,
     name: p.name,
     profession: p.profession,
+    careerOptions: p.isAlive && p.stats.careerSkill >= SKILL_CAREER_CHANGE_THRESHOLD ? buildAvailableProfessions(p) : [],
     quadrant: p.profession.quadrant,
     salaryType: p.profession.salaryType,
     currentPosition: p.currentPosition,
@@ -1741,6 +1744,11 @@ function serializeGameState(gs: GameState): object {
     finalRoundPendingPlayerIds: gs.finalRoundPendingPlayerIds,
     decisionPhase: gs.decisionPhase,
     facilitatorScene: gs.facilitatorScene,
+    turnInProgress: gs.turnInProgress,
+    careerRequests: gs.careerRequests.filter(r => gs.players.get(r.playerId)?.isAlive).map(r => ({
+      ...r, playerName: gs.players.get(r.playerId)!.name,
+      professionName: PROFESSIONS.find(p => p.id === r.professionId)?.name ?? r.professionId,
+    })),
   };
 }
 
@@ -2372,7 +2380,7 @@ function emitClient(socket: Socket, event: string, ...args: unknown[]) {
     io.to(id).emit(event, ...args);
   } else socket.emit(event, ...args);
 }
-const financialActions = new Set(['requestCareerChange', 'sellAsset', 'buyInsurance', 'cancelInsurance',
+const financialActions = new Set(['sellAsset', 'buyInsurance', 'cancelInsurance',
   'takeEmergencyLoan', 'investStockDCA', 'takeLeverageLoan', 'repayLoan', 'buyFranchise',
   'partnershipOffer', 'partnershipResponse', 'loanOffer', 'loanResponse', 'loanRequest', 'loanRequestResponse',
   'goTravel', 'attendSocialEvent']);
@@ -3211,44 +3219,63 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
-    if (player.isBedridden) {
-      emitClient(socket, 'careerChangeResult', { success: false, message: '臥床中無法轉職。' });
-      return;
+    if (![GamePhase.RatRace, GamePhase.FastTrack].includes(gs.gamePhase)) {
+      emitClient(socket, 'error', { message: '遊戲進行中才能申請轉職。' }); return;
     }
-
-    if (player.stats.health < HP_ACTIVITY_THRESHOLDS.careerChange) {
-      emitClient(socket, 'careerChangeResult', {
-        success: false,
-        message: `健康值不足，需要 ${HP_ACTIVITY_THRESHOLDS.careerChange} 才能轉職（目前：${player.stats.health}）。`,
-      });
-      return;
+    if (gs.careerRequests.some(r => r.playerId === player.id) || gs.facilitatorScene?.careerPlayerId === player.id) {
+      emitClient(socket, 'error', { message: '你已有轉職申請，請等待主持人或先撤回。' }); return;
     }
+    const preview = previewCareerChange(player, payload.newProfessionId);
+    if (preview.error) { emitClient(socket, 'error', { message: preview.error }); return; }
+    gs.careerRequests.push({ id: `career-${randomBytes(8).toString('hex')}`, playerId: player.id, professionId: payload.newProfessionId });
+    emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+  });
 
-    const { SKILL_CAREER_CHANGE_THRESHOLD: threshold } = require('./gameConfig');
-    if (player.stats.careerSkill < threshold) {
-      emitClient(socket, 'careerChangeResult', {
-        success: false,
-        message: `第二專長值不足，需達到 ${threshold} 才能轉職（目前：${player.stats.careerSkill}）。`,
-      });
-      return;
+  onSafe('cancelCareerRequest', (payload: { requestId: string }) => {
+    const gs = getRoomState(socket);
+    const request = gs?.careerRequests.find(r => r.id === payload.requestId);
+    if (!gs || !request || (request.playerId !== playerIdentity(socket) && !isRoomAdmin(socket, gs))) {
+      emitClient(socket, 'error', { message: '無法撤回此轉職申請。' }); return;
     }
+    gs.careerRequests = gs.careerRequests.filter(r => r.id !== request.id);
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
 
-    const _ccCB = player.cash; const _ccFB = player.monthlyCashflow; const _ccNWB = calcNetWorth(player);
-    const result = executeCareerChange(player, payload.newProfessionId);
-    emitClient(socket, 'careerChangeResult', result);
-
-    if (result.success) {
-      logPlayerEvent(player, gs, 'career_change', `轉職：${result.previousProfession} → ${result.newProfession}`, _ccCB, _ccFB, _ccNWB, { previousProfession: result.previousProfession, newProfession: result.newProfession, salaryChange: result.salaryChange });
-      console.log(`[careerChange] ${player.name}（${roomId}）轉職：${result.previousProfession} → ${result.newProfession}`);
-      emitToRoom(roomId, 'careerChangeAnnouncement', {
-        playerId: player.id,
-        playerName: player.name,
-        previousProfession: result.previousProfession,
-        newProfession: result.newProfession,
-        salaryChange: result.salaryChange,
-      });
-      emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+  onSafe('startCareerScene', (payload: { requestId: string }) => {
+    const gs = getRoomState(socket);
+    if (!gs || !isRoomAdmin(socket, gs)) { emitClient(socket, 'error', { message: '只有主持人可以開啟轉職舞台。' }); return; }
+    if (![GamePhase.RatRace, GamePhase.FastTrack].includes(gs.gamePhase) || gs.turnInProgress || gs.decisionPhase || gs.facilitatorScene || gs.globalPaydayPending || gs.globalPaydayInProgress) {
+      emitClient(socket, 'error', { message: '請先完成目前回合、舞台或全體發薪，再開啟轉職。' }); return;
     }
+    gs.careerRequests = gs.careerRequests.filter(r => gs.players.get(r.playerId)?.isAlive);
+    const request = gs.careerRequests[0];
+    if (!request || request.id !== payload.requestId) { emitClient(socket, 'error', { message: '請依申請順序開啟舞台。' }); return; }
+    const player = gs.players.get(request.playerId);
+    const preview = player && previewCareerChange(player, request.professionId);
+    if (!player || !preview || preview.error) {
+      gs.careerRequests.shift();
+      emitClient(socket, 'error', { message: preview?.error ?? '申請者已離開。' });
+      emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs)); return;
+    }
+    gs.careerRequests.shift();
+    beginFacilitatorScene(gs, {
+      kind: 'career', kicker: '人生職涯轉折', title: `${player.name} 的轉職選擇`,
+      description: preview.description!, participantNames: [player.name],
+      careerPlayerId: player.id, careerConfirmed: false,
+      reminderEndsAt: Date.now() + 60_000, options: [],
+    }, { playerId: player.id, professionId: request.professionId, previewDescription: preview.description });
+  });
+
+  onSafe('confirmCareerScene', (payload: { sceneId: string; accepted: boolean }) => {
+    const gs = getRoomState(socket);
+    const scene = gs?.facilitatorScene;
+    if (!gs || scene?.kind !== 'career' || scene.id !== payload.sceneId || scene.stage !== 'prompt' || scene.careerPlayerId !== playerIdentity(socket)) {
+      emitClient(socket, 'error', { message: '只有本次轉職的玩家可以確認。' }); return;
+    }
+    if (!payload.accepted) { revealFacilitatorResult(gs, '保留原本的職涯', `${scene.participantNames[0]} 取消了本次轉職，沒有扣款或重置技能。`); return; }
+    scene.careerConfirmed = true;
+    scene.options = [{ id: 'reveal', label: '本人已確認・揭曉轉職', description: '正式執行轉職，再由主持人繼續遊戲。' }];
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 
   // ----------------------------------------------------------
@@ -4439,6 +4466,7 @@ io.on('connection', (socket: Socket) => {
     gs.facilitatorScene = null;
     gs.facilitatorSceneContext = null;
     gs.facilitatorEchoHistory = new Set();
+    gs.careerRequests = [];
     gs.pendingWorldEvent = null;
     gs.worldEventHistory = [];
     gs.turnInProgress = false;
@@ -4694,6 +4722,34 @@ io.on('connection', (socket: Socket) => {
     }
     const choiceId = payload?.choiceId ?? '';
 
+    if (scene.kind === 'career') {
+      if (payload?.sceneId !== scene.id || choiceId !== 'reveal' || !scene.careerConfirmed) {
+        emitClient(socket, 'error', { message: '請先等待玩家本人確認轉職。' }); return;
+      }
+      const player = gs.players.get(String(context.playerId));
+      const preview = player && previewCareerChange(player, String(context.professionId));
+      if (!player || !preview || preview.error) {
+        revealFacilitatorResult(gs, '本次轉職未執行', preview?.error ?? '玩家已離開。'); return;
+      }
+      // Host adjustments during discussion must never change the terms after consent.
+      if (preview.description !== context.previewDescription) {
+        scene.description = preview.description!;
+        context.previewDescription = preview.description;
+        scene.careerConfirmed = false; scene.options = [];
+        emitClient(socket, 'error', { message: '條件已變更，請玩家重新確認更新後的內容。' });
+        emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs)); return;
+      }
+      const cash = player.cash, flow = player.monthlyCashflow, worth = calcNetWorth(player);
+      const result = executeCareerChange(player, String(context.professionId));
+      if (!result.success) { revealFacilitatorResult(gs, '本次轉職未執行', result.message); return; }
+      logPlayerEvent(player, gs, 'career_change', `轉職：${result.previousProfession} → ${result.newProfession}`, cash, flow, worth,
+        { previousProfession: result.previousProfession, newProfession: result.newProfession, salaryChange: result.salaryChange });
+      revealFacilitatorResult(gs, `${player.name} 的新職涯啟動了`, `${scene.description.split('\n').slice(0, -1).join('\n')}\n轉職已生效，SK 已歸零；請主持人帶領觀察後繼續。`);
+      const target = getPlayerSocket(player.id);
+      if (target) emitClient(target, 'careerChangeResult', { ...result, staged: true });
+      return;
+    }
+
     if (scene.kind === 'second_life') {
       if (choiceId === 'reveal') revealSecondLife(gs);
       return;
@@ -4918,6 +4974,7 @@ io.on('connection', (socket: Socket) => {
     gs.pendingPartnershipOffers = {};
     gs.pendingLoanOffers = {};
     gs.pendingLoanRequests = {};
+    gs.careerRequests = [];
     gs.activeAuctions = {};
     gs.decisionPhase = null;
     gs.facilitatorScene = null;

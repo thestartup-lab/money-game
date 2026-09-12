@@ -197,7 +197,7 @@ export interface DecisionPhaseState {
   reminderEndsAt: number;
 }
 
-export type FacilitatorSceneKind = 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family' | 'global_event' | 'second_life';
+export type FacilitatorSceneKind = 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family' | 'global_event' | 'second_life' | 'career';
 
 export interface FacilitatorSceneState {
   id: string;
@@ -214,6 +214,8 @@ export interface FacilitatorSceneState {
   reminderEndsAt?: number;
   impacts?: { playerName: string; cashflowDelta: number; netWorthDelta: number; healthDelta: number }[];
   resumeOnClose: boolean;
+  careerPlayerId?: string;
+  careerConfirmed?: boolean;
 }
 
 export type AdaptiveDifficultyMode = 'support' | 'balanced' | 'challenge';
@@ -741,6 +743,7 @@ export class GameState {
   facilitatorScene: FacilitatorSceneState | null;
   /** 舞台事件尚未公開的伺服器端資料，不會傳到前端。 */
   facilitatorSceneContext: Record<string, unknown> | null;
+  careerRequests: { id: string; playerId: string; professionId: string }[] = [];
   /** 已使用的決策回聲索引，避免同一選擇重複出現。 */
   facilitatorEchoHistory: Set<string>;
 

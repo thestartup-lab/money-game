@@ -6,6 +6,7 @@ interface Props {
 }
 
 const KIND_THEME: Record<FacilitatorScene['kind'], { icon: string; border: string; glow: string }> = {
+  career: { icon: '🎯', border: 'border-yellow-400', glow: 'from-yellow-950/90' },
   second_life: { icon: '🌟', border: 'border-amber-400', glow: 'from-amber-950/90' },
   community: { icon: '🗳️', border: 'border-cyan-400', glow: 'from-cyan-950/90' },
   echo: { icon: '🔁', border: 'border-violet-400', glow: 'from-violet-950/90' },
@@ -30,7 +31,7 @@ export default function FacilitatorSceneOverlay({ scene }: Props) {
         <h2 className="mt-2 text-5xl font-black leading-tight text-white">
           {isResult ? scene.resultTitle ?? scene.title : scene.title}
         </h2>
-        <p className="mx-auto mt-4 max-w-5xl text-2xl font-bold leading-relaxed text-gray-200">
+        <p className="mx-auto mt-4 max-w-5xl whitespace-pre-line text-2xl font-bold leading-relaxed text-gray-200">
           {isResult ? scene.resultDescription ?? scene.description : scene.description}
         </p>
 
@@ -41,7 +42,7 @@ export default function FacilitatorSceneOverlay({ scene }: Props) {
           </div>
         ) : null}
 
-        {!isResult && scene.kind !== 'global_event' && scene.kind !== 'second_life' && scene.options && scene.options.length > 0 ? (
+        {!isResult && scene.kind !== 'global_event' && scene.kind !== 'second_life' && scene.kind !== 'career' && scene.options && scene.options.length > 0 ? (
           <div className={`mx-auto mt-6 grid max-w-5xl gap-4 ${scene.options.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
             {scene.options.map((option, index) => (
               <article key={option.id} className="rounded-3xl border-2 border-gray-600 bg-gray-900 px-6 py-5 text-left">
@@ -82,7 +83,7 @@ export default function FacilitatorSceneOverlay({ scene }: Props) {
         ) : null}
 
         <p className="mt-5 text-xl font-black text-emerald-300">
-          {isResult ? '請一起觀察：這個結果改變了誰？' : '請抬頭看大螢幕共同討論，由主持人決定何時揭曉。'}
+          {isResult ? '請一起觀察：這個結果改變了誰？' : scene.kind === 'career' ? (scene.careerConfirmed ? '本人已確認，等待主持人揭曉。' : '等待本人在手機確認；時間到不會自動轉職。') : '請抬頭看大螢幕共同討論，由主持人決定何時揭曉。'}
         </p>
       </section>
     </main>

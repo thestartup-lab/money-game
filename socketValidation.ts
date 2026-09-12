@@ -12,6 +12,8 @@ const required: Record<string, string[]> = {
   bidDeal: ['auctionId', 'bidAmount'], congratulate: ['targetPlayerId', 'event'], kickPlayer: ['playerId'],
   triggerRelationship: ['targetPlayerId'], setPlayerStats: ['targetPlayerId', 'stats'], goTravel: ['destinationId'],
   submitCardDecision: ['phaseId'], submitPaydayPlan: ['phaseId'],
+  startCareerScene: ['requestId'], cancelCareerRequest: ['requestId'],
+  confirmCareerScene: ['sceneId', 'accepted'],
 };
 const numeric = new Set(['amount', 'monthlyRate', 'bidAmount', 'academic', 'health', 'social', 'resource',
   'seconds', 'addSeconds', 'durationMinutes', 'diceCount', 'cash', 'hp', 'mp', 'fq', 'creditScore']);

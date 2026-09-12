@@ -4,6 +4,7 @@ import type { GameState, Player, PlayerAnalysis, ActiveEvent, PaydayFormData, Pa
 import FinancialStatement from '../components/game/FinancialStatement';
 import DiceRoller from '../components/game/DiceRoller';
 import ActionPanel from '../components/game/ActionPanel';
+import CareerStagePanel from '../components/game/CareerStagePanel';
 import AnalysisPage from './AnalysisPage';
 import EventCard from '../components/game/EventCard';
 import PaydayPlanForm from '../components/game/PaydayPlanForm';
@@ -89,10 +90,6 @@ export default function PlayerPage() {
   // 格子事件 & 發薪日表單
   const [activeEvent, setActiveEvent] = useState<ActiveEvent | null>(null);
   const [paydayForm, setPaydayForm] = useState<PaydayFormData | null>(null);
-  const [careerChangeData, setCareerChangeData] = useState<{
-    message: string;
-    availableProfessions: AvailableProfession[];
-  } | null>(null);
   const [careerChangeCelebration, setCareerChangeCelebration] = useState<{
     previousProfession: string;
     newProfession: string;
@@ -536,13 +533,12 @@ export default function PlayerPage() {
       }
     });
 
-    s.on('careerChangeUnlocked', (p: { message: string; availableProfessions: AvailableProfession[] }) => {
-      setCareerChangeData(p);
-      addNotification('🎯 技能值達到頂峰！現在可以轉職了，請在行動面板中選擇新職業。');
+    s.on('careerChangeUnlocked', () => {
+      addNotification('🎯 已解鎖轉職申請！選擇新職業後等待主持人開啟舞台，再由你確認。');
     });
-    s.on('careerChangeResult', (p: { success: boolean; message: string; newProfession?: string; previousProfession?: string; salaryChange?: number }) => {
+    s.on('careerChangeResult', (p: { success: boolean; message: string; newProfession?: string; previousProfession?: string; salaryChange?: number; staged?: boolean }) => {
       if (p.success) {
-        setCareerChangeCelebration({
+        if (!p.staged) setCareerChangeCelebration({
           previousProfession: p.previousProfession ?? '',
           newProfession: p.newProfession ?? '',
           salaryChange: p.salaryChange,
@@ -550,7 +546,6 @@ export default function PlayerPage() {
       } else {
         addNotification(`❌ 轉職失敗：${p.message}`);
       }
-      setCareerChangeData(null);
     });
     s.on('careerChangeAnnouncement', (p: { playerName: string; previousProfession: string; newProfession: string }) => {
       addNotification(`🔄 ${p.playerName} 轉職：${p.previousProfession} → ${p.newProfession}！`);
@@ -1168,13 +1163,15 @@ export default function PlayerPage() {
             </div>
           )}
 
-          {!isGameOver && gameState.facilitatorScene && (
+          {!isGameOver && gameState.facilitatorScene && gameState.facilitatorScene.careerPlayerId !== myId && (
             <div className="mx-4 mb-3 rounded-2xl border-2 border-yellow-500 bg-gradient-to-br from-indigo-950 to-gray-900 px-5 py-6 text-center shadow-xl">
               <div className="text-5xl" aria-hidden="true">📺</div>
               <p className="mt-3 text-2xl font-black text-white">請抬頭看大螢幕</p>
               <p className="mt-2 text-base font-bold leading-relaxed text-yellow-200">主持人正在帶領全場互動，所有內容與結果都會在大螢幕揭曉。</p>
             </div>
           )}
+
+          {!isGameOver && myPlayer ? <CareerStagePanel gameState={gameState} player={myPlayer} emit={emit} /> : null}
 
           {/* 事件卡（有事件時取代格子顯示，或加在下面） */}
           {activeEvent && (
@@ -1311,8 +1308,6 @@ export default function PlayerPage() {
                 onSellAsset={(assetId) => emit('sellAsset', { assetId })}
                 onRequestAnalysis={() => { emit('requestPlayerAnalysis'); }}
                 isGameOver={isGameOver}
-                careerChangeData={careerChangeData}
-                onCareerChange={(professionId) => emit('requestCareerChange', { newProfessionId: professionId })}
               />
             </CollapsePanel>}
 

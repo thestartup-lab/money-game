@@ -78,6 +78,7 @@ export interface Profession {
 }
 
 export interface Player {
+  careerOptions?: { id: string; name: string; assetCost?: number; canAfford?: boolean }[];
   id: string;
   name: string;
   profession: Profession;
@@ -194,11 +195,13 @@ export interface GameState {
     reminderEndsAt: number;
   } | null;
   facilitatorScene?: FacilitatorScene | null;
+  turnInProgress?: boolean;
+  careerRequests?: { id: string; playerId: string; professionId: string; playerName: string; professionName: string }[];
 }
 
 export interface FacilitatorScene {
   id: string;
-  kind: 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family' | 'global_event' | 'second_life';
+  kind: 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family' | 'global_event' | 'second_life' | 'career';
   stage: 'prompt' | 'result';
   kicker: string;
   title: string;
@@ -210,6 +213,8 @@ export interface FacilitatorScene {
   reminderEndsAt?: number;
   impacts?: { playerName: string; cashflowDelta: number; netWorthDelta: number; healthDelta: number }[];
   resumeOnClose: boolean;
+  careerPlayerId?: string;
+  careerConfirmed?: boolean;
 }
 
 export interface LifeScoreBreakdown {
