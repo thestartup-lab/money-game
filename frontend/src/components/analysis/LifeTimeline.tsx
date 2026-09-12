@@ -1,4 +1,4 @@
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from './GameChart';
 import type { PlayerEvent } from '../../types/game';
 
 interface Props {
@@ -13,6 +13,10 @@ const EVENT_ICONS: Record<string, string> = {
   payday: '💵', loan_taken: '🏦', bedridden: '🛏', death: '⚰️',
   relationship: '🤝',
 };
+
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
+}
 
 export default function LifeTimeline({ eventLog, playerName }: Props) {
   // 過濾掉發薪日（太多），保留有意義事件
@@ -45,7 +49,7 @@ export default function LifeTimeline({ eventLog, playerName }: Props) {
         const nearest = keyEvents.filter((e) => Math.abs(e.age - age) < 2);
         let tip = `<b>${age} 歲</b><br/>`;
         p.forEach((s) => { tip += `${s.seriesName}: $${s.value[1].toLocaleString()}<br/>`; });
-        if (nearest.length) tip += `<br/>${nearest.map((e) => `${EVENT_ICONS[e.type] ?? '•'} ${e.description}`).join('<br/>')}`;
+        if (nearest.length) tip += `<br/>${nearest.map((e) => `${EVENT_ICONS[e.type] ?? '•'} ${escapeHtml(e.description)}`).join('<br/>')}`;
         return tip;
       },
     },

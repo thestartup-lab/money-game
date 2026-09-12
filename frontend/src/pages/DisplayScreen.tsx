@@ -1,6 +1,6 @@
 import { useCallback, useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../components/analysis/GameChart';
 import { QRCodeSVG } from 'qrcode.react';
 import type { GameState, RoomAnalysis, LifeScoreBreakdown } from '../types/game';
 import { GameBoard } from '../components/game/GameBoard';

@@ -1,4 +1,4 @@
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from './GameChart';
 import type { LifeScoreBreakdown } from '../../types/game';
 
 interface Props {

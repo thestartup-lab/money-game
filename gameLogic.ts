@@ -453,6 +453,7 @@ export interface SellAssetResult {
  * - 信用值不受影響
  */
 export function sellAsset(player: Player, assetId: string): SellAssetResult {
+  if (assetId.startsWith('p2p-')) return { success: false, message: '玩家借貸債權不能直接出售，須由借款人還款結清。' };
   const assetIndex = player.assets.findIndex((a) => a.id === assetId);
   if (assetIndex === -1) {
     return { success: false, message: `找不到資產 ID：${assetId}` };
@@ -567,7 +568,7 @@ export function getAvailableLoan(player: Player): number {
  * - 借款後信用值 -50
  */
 export function takeEmergencyLoan(player: Player, amount: number): LoanResult {
-  if (amount <= 0) {
+  if (!Number.isFinite(amount) || amount <= 0) {
     return { success: false, message: '借款金額必須大於 0。' };
   }
   const available = getAvailableLoan(player);
@@ -676,7 +677,7 @@ export function repayLoan(
   if (liabIndex === -1) {
     return { success: false, message: `找不到負債 ID：${liabilityId}` };
   }
-  if (amount <= 0) {
+  if (!Number.isFinite(amount) || amount <= 0) {
     return { success: false, message: '還款金額必須大於 0。' };
   }
   if (player.cash <= 0) {

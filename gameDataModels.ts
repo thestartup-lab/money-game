@@ -144,6 +144,8 @@ export interface Liability {
   name: string;
   totalDebt: number;
   monthlyPayment: number;
+  /** P2P monthly interest rate, retained through partial repayments. */
+  monthlyRate?: number;
 }
 
 /** 保險持有狀態 */

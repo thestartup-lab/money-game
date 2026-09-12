@@ -55,6 +55,8 @@ const BUCKET_GOAL_LABELS: Record<string, { emoji: string; title: string; desc: s
 
 export default function PlayerPage() {
   const socketRef = useRef<Socket | null>(null);
+  const playerIdRef = useRef('');
+  const sessionRef = useRef<{ playerName: string; roomCode: string; reconnectToken: string } | null>(null);
   const [connected, setConnected] = useState(false);
   const [myId, setMyId] = useState<string>('');
   const [view, setView] = useState<View>('join');
@@ -135,18 +137,17 @@ export default function PlayerPage() {
 
     s.on('connect', () => {
       setConnected(true);
-      setMyId(s.id ?? '');
-
-      // 嘗試從 localStorage 自動重連恢復資料
-      const saved = localStorage.getItem('baisuiGame');
-      if (saved) {
-        try {
-          const { playerName: savedName, roomCode: savedRoom } = JSON.parse(saved) as { playerName: string; roomCode: string };
-          if (savedName && savedRoom) {
-            s.emit('playerRejoin', { playerName: savedName, roomCode: savedRoom });
-          }
-        } catch { /* 忽略格式錯誤 */ }
-      }
+      try {
+        const saved = sessionRef.current ?? JSON.parse(localStorage.getItem('baisuiGame') ?? 'null');
+        if (saved?.playerName && saved?.roomCode && saved?.reconnectToken) s.emit('playerRejoin', saved);
+      } catch { /* In-memory session still permits transient network reconnection. */ }
+    });
+    s.on('playerSession', (session: { playerId: string; playerName: string; roomCode: string; reconnectToken: string }) => {
+      playerIdRef.current = session.playerId;
+      setMyId(session.playerId);
+      sessionRef.current = session;
+      try { localStorage.setItem('baisuiGame', JSON.stringify(session)); }
+      catch { addNotification('⚠️ 瀏覽器無法保存續玩身分，請勿關閉或重新整理本頁。'); }
     });
     s.on('disconnect', () => setConnected(false));
     s.on('error', (p: { message: string }) => {
@@ -155,7 +156,8 @@ export default function PlayerPage() {
       // 若伺服器端遺失了我們的房間記錄（Railway 重啟、idle 重置等），
       // 主動把使用者帶回加入頁，避免一直停留在已失效的遊戲畫面
       if (p.message?.includes('尚未加入') || p.message?.includes('房間') && p.message?.includes('不存在')) {
-        localStorage.removeItem('baisuiGame');
+        sessionRef.current = null;
+        try { localStorage.removeItem('baisuiGame'); } catch { /* storage unavailable */ }
         setGameState(null);
         setView('join');
       }
@@ -165,10 +167,30 @@ export default function PlayerPage() {
     s.on('rejoinSuccess', () => {
       addNotification('✅ 重連成功，已恢復遊戲資料！');
     });
+    s.on('decisionSubmitted', () => {
+      setActiveEvent(null);
+      setPaydayForm(null);
+    });
+    const leaveRoom = (message: string) => {
+      sessionRef.current = null;
+      playerIdRef.current = '';
+      setMyId('');
+      setGameState(null);
+      setActiveEvent(null);
+      setPaydayForm(null);
+      setView('join');
+      setError(message);
+      try { localStorage.removeItem('baisuiGame'); } catch { /* storage unavailable */ }
+    };
+    s.on('roomDeleted', () => leaveRoom('主持人已關閉此房間，請加入新的房間。'));
+    s.on('playerKicked', (payload: { playerId: string }) => {
+      if (payload.playerId === playerIdRef.current) leaveRoom('主持人已移除你的角色，請與主持人確認後重新加入。');
+    });
 
     // 重連失敗（資料已過期或房間不存在 — 通常是後端重啟導致）
     s.on('rejoinFailed', (p?: { message?: string }) => {
-      localStorage.removeItem('baisuiGame');
+      sessionRef.current = null;
+      try { localStorage.removeItem('baisuiGame'); } catch { /* storage unavailable */ }
       setGameState(null);
       setView('join');
       setError(p?.message ?? '伺服器資料已過期，請重新加入房間。');
@@ -176,12 +198,12 @@ export default function PlayerPage() {
 
     s.on('gameStateUpdate', (gs: GameState) => {
       setGameState(gs);
-      const amIInGame = gs.players.some((p) => p.id === s.id);
-      if (gs.gamePhase === 'GameOver') { setView('gameover'); localStorage.removeItem('baisuiGame'); }
+      const amIInGame = gs.players.some((p) => p.id === playerIdRef.current);
+      if (gs.gamePhase === 'GameOver' && amIInGame) setView('gameover');
       else if (amIInGame && gs.gamePhase === 'Pre20') setView((v) => v === 'join' ? 'pre20' : v);
       else if (amIInGame && ['RatRace', 'FastTrack'].includes(gs.gamePhase)) setView((v) => (v === 'pre20' || v === 'join') ? 'game' : v);
       // 輪到自己時解除擲骰鎖定（以防 rollResult 沒有正確觸發）
-      if (gs.currentPlayerTurnId === s.id) setRollingLocked(false);
+      if (gs.currentPlayerTurnId === playerIdRef.current) setRollingLocked(false);
     });
 
     s.on('socialClassRolled', (p: { socialClass: string; label: string; growthPoints: number; startingCashBonus: number }) => {
@@ -239,7 +261,7 @@ export default function PlayerPage() {
     s.on('ratRaceEscaped', (p: { playerName: string; routeLabel?: string; canCongratulate?: boolean; playerId?: string }) => {
       const route = p.routeLabel ? `，完成「${p.routeLabel}」` : '';
       addNotification(`🎉 ${p.playerName}${route}，進入第二人生！`);
-      if (p.canCongratulate && p.playerId !== s.id) {
+      if (p.canCongratulate && p.playerId !== playerIdRef.current) {
         setCongratulatableEvent({ targetId: p.playerId ?? '', targetName: p.playerName, event: '進入第二人生' });
       }
     });
@@ -255,26 +277,26 @@ export default function PlayerPage() {
       });
     });
     s.on('playerMarried', (p: { playerName: string; card: { title: string; monthlyBonus: number }; playerId?: string }) => {
-      if (p.playerId === s.id) {
+      if (p.playerId === playerIdRef.current) {
         addNotification(`💍 恭喜結婚！${p.card.title}，月收入 +$${p.card.monthlyBonus.toLocaleString()}`);
       } else {
         addNotification(`💍 ${p.playerName} 結婚了！`);
       }
     });
     s.on('marriageDeclined', (p: { playerName: string; playerId?: string }) => {
-      if (p.playerId === s.id) {
+      if (p.playerId === playerIdRef.current) {
         addNotification('💔 婉拒了這段緣分。');
       }
     });
     s.on('marriageAnnouncement', (p: { playerName: string; marriageType: string; playerId?: string; canCongratulate?: boolean }) => {
       addNotification(`💍 ${p.playerName} 結婚了！`);
-      if (p.canCongratulate && p.playerId !== s.id) {
+      if (p.canCongratulate && p.playerId !== playerIdRef.current) {
         setCongratulatableEvent({ targetId: p.playerId ?? '', targetName: p.playerName, event: '結婚' });
       }
     });
     s.on('dealAuctionStarted', (p: { auctionId: string; triggeredBy: string; triggeredByName: string; endsAt: number; controlledByHost?: boolean; isSpecialAuction?: boolean; card?: { id: string; name: string; description?: string; minBid: number; monthlyCashflow?: number }; }) => {
       // 特殊拍賣由主持人觸發，所有玩家都應該收到（包含主持人也不過濾，因主持人不是玩家）
-      if (!p.isSpecialAuction && p.triggeredBy === s.id) return;
+      if (!p.isSpecialAuction && p.triggeredBy === playerIdRef.current) return;
       const minBid = p.card?.minBid ?? 0;
       const prefix = p.isSpecialAuction
         ? '🔨 主持人開啟特殊拍賣！由主持人決定結束時間'
@@ -287,7 +309,7 @@ export default function PlayerPage() {
       if (p.hadBids && p.winnerName) {
         addNotification(`🏆 競標結束：${p.winnerName} 以 $${fmt(p.winningBid)} 得標 ${p.cardName ?? ''}`);
         // 自己得標的話額外提示
-        if (p.winnerId === s.id) {
+        if (p.winnerId === playerIdRef.current) {
           addNotification(`🎉 恭喜！你以 $${fmt(p.winningBid)} 競標到 ${p.cardName ?? '資產'}！`);
         }
       } else {
@@ -303,13 +325,13 @@ export default function PlayerPage() {
       setPartnershipChoice(p);
     });
     s.on('partnershipOfferReceived', (p: { offerId: string; offerorName: string; targetId: string }) => {
-      if (p.targetId === s.id) {
+      if (p.targetId === playerIdRef.current) {
         addNotification(`🤝 ${p.offerorName} 邀請你合夥投資！`);
         setPartnershipOffer(p);
       }
     });
     s.on('partnershipDeclined', (p: { offerorId: string; targetId: string }) => {
-      if (p.offerorId === s.id) addNotification('❌ 對方婉拒了合夥邀請。');
+      if (p.offerorId === playerIdRef.current) addNotification('❌ 對方婉拒了合夥邀請。');
     });
     s.on('partnershipAccepted', (p: { offerorName: string; targetName: string; dividend?: number; passiveSum?: number }) => {
       const dividendText = p.dividend
@@ -320,22 +342,22 @@ export default function PlayerPage() {
       setPartnershipChoice(null);
     });
     s.on('loanOfferReceived', (p: { offerId: string; lenderName: string; borrowerId: string; amount: number; monthlyRate: number }) => {
-      if (p.borrowerId === s.id) {
+      if (p.borrowerId === playerIdRef.current) {
         addNotification(`💳 ${p.lenderName} 願意借你 $${fmt(p.amount)}（月息 ${(p.monthlyRate * 100).toFixed(1)}%）`);
         setLoanOffer(p);
       }
     });
     s.on('loanRequestReceived', (p: { requestId: string; borrowerId: string; borrowerName: string; lenderId: string; lenderName: string; amount: number; monthlyRate: number }) => {
-      if (p.lenderId === s.id) {
+      if (p.lenderId === playerIdRef.current) {
         addNotification(`💸 ${p.borrowerName} 向你請求借款 $${fmt(p.amount)}（月息 ${(p.monthlyRate * 100).toFixed(1)}%）`);
         setLoanRequest({ requestId: p.requestId, borrowerName: p.borrowerName, lenderId: p.lenderId, amount: p.amount, monthlyRate: p.monthlyRate });
-      } else if (p.borrowerId === s.id) {
+      } else if (p.borrowerId === playerIdRef.current) {
         addNotification(`📨 已向 ${p.lenderName} 發出借款請求 $${fmt(p.amount)}（月息 ${(p.monthlyRate * 100).toFixed(1)}%），等待對方回應`);
       }
     });
     s.on('loanRequestDeclined', (p: { requestId: string; borrowerId: string; lenderId: string }) => {
-      if (p.borrowerId === s.id) addNotification('❌ 對方拒絕了你的借款請求');
-      if (p.lenderId === s.id) {
+      if (p.borrowerId === playerIdRef.current) addNotification('❌ 對方拒絕了你的借款請求');
+      if (p.lenderId === playerIdRef.current) {
         addNotification('🛑 你已拒絕該借款請求');
         setLoanRequest(null);
       }
@@ -361,7 +383,7 @@ export default function PlayerPage() {
       taxCreditAmount?: number;
       cashAfterTax: number;
     }) => {
-      if (p.playerId !== s.id) return;
+      if (p.playerId !== playerIdRef.current) return;
       const saving = (p.taxCreditAmount ?? 0) > 0 ? `，稅務規劃省下 $${fmt(p.taxCreditAmount ?? 0)}` : '';
       addNotification(`📊 年度稅 $${fmt(p.taxAmount)}${saving}；稅後現金 $${fmt(p.cashAfterTax)}`);
     });
@@ -382,7 +404,7 @@ export default function PlayerPage() {
       setView('analysis');
     });
     s.on('cardApplied', (p: { playerId?: string; playerName?: string; effect?: { type?: string; cashDeducted?: number; monthlyExpenseIncrease?: number; card?: { title?: string; description?: string }; wasInsured?: boolean; effectiveCost?: number; turnsLost?: number } }) => {
-      const isMe = p.playerId === s.id;
+      const isMe = p.playerId === playerIdRef.current;
       // baby 保持全員通知（公開喜事）
       if (p.effect?.type === 'baby') addNotification(`👶 ${p.playerName ?? '有玩家'} 添丁！`);
       // doodad 結果
@@ -486,7 +508,7 @@ export default function PlayerPage() {
 
     // 發薪日結果在主持人收束決策後才公開。
     s.on('paydayPlanResult', (p: { playerId: string; planResult?: { stockDCA?: { executed: boolean; amount: number; newPortfolioValue: number } } }) => {
-      if (p.playerId === s.id && p.planResult?.stockDCA?.executed) {
+      if (p.playerId === playerIdRef.current && p.planResult?.stockDCA?.executed) {
         addNotification(`📈 發薪日定投 $${fmt(p.planResult.stockDCA.amount)}，股票組合總值 $${fmt(p.planResult.stockDCA.newPortfolioValue)}`);
       }
       setPaydayForm(null);
@@ -501,7 +523,7 @@ export default function PlayerPage() {
     });
 
     s.on('marketCardApplied', (p: { card: { title: string; effect: string }; dividendsPaid?: { playerId: string; playerName: string; cashGain: number }[] }) => {
-      const myDiv = p.dividendsPaid?.find((d) => d.playerId === s.id);
+      const myDiv = p.dividendsPaid?.find((d) => d.playerId === playerIdRef.current);
       if (myDiv) {
         addNotification(`💰 市場配息「${p.card.title}」：+$${fmt(myDiv.cashGain)}`);
       } else if (p.card.effect === 'Dividend') {
@@ -540,7 +562,7 @@ export default function PlayerPage() {
       addNotification(`🎯 進入外圈！抽到夢想清單：${list}`);
     });
     s.on('bucketGoalAchieved', (p: { playerId: string; playerName: string; goalEmoji: string; goalTitle: string; legacyReward: number; lifeExpReward: number; cashReward: number }) => {
-      if (p.playerId === s.id) {
+      if (p.playerId === playerIdRef.current) {
         const cash = p.cashReward > 0 ? `、+$${fmt(p.cashReward)}` : '';
         addNotification(`🎯 達成夢想 ${p.goalEmoji} ${p.goalTitle}！+傳承 ${p.legacyReward}、+體驗 ${p.lifeExpReward}${cash}`);
       } else {
@@ -548,7 +570,7 @@ export default function PlayerPage() {
       }
     });
     s.on('bucketListAllDone', (p: { playerId: string; playerName: string; bonus: { legacy: number; lifeExp: number; cash: number } }) => {
-      if (p.playerId === s.id) {
+      if (p.playerId === playerIdRef.current) {
         addNotification(`🌟 完成所有夢想！額外獎勵：傳承 +${p.bonus.legacy}、體驗 +${p.bonus.lifeExp}、現金 +$${fmt(p.bonus.cash)}`);
       } else {
         addNotification(`🌟 ${p.playerName} 完成全部人生夢想！`);
@@ -557,7 +579,7 @@ export default function PlayerPage() {
 
     // B2：人生里程碑（40/60/80 歲）
     s.on('lifeMilestoneReached', (p: { playerId: string; playerName: string; age: number; theme: string; emoji: string; legacyGain: number; lifeExpGain: number; cashGain: number }) => {
-      if (p.playerId === s.id) {
+      if (p.playerId === playerIdRef.current) {
         addNotification(`${p.emoji} ${p.age} 歲人生回顧：${p.theme}！+傳承 ${p.legacyGain}、+體驗 ${p.lifeExpGain}、+$${fmt(p.cashGain)}`);
       } else {
         addNotification(`${p.emoji} ${p.playerName} 跨越 ${p.age} 歲：${p.theme}！`);
@@ -574,12 +596,12 @@ export default function PlayerPage() {
   const emit = (event: string, ...args: unknown[]) => socketRef.current?.emit(event, ...args);
 
   function handleCardDecision(decision: Record<string, unknown>) {
-    emit('submitCardDecision', decision);
+    emit('submitCardDecision', { ...decision, phaseId: gameState?.decisionPhase?.id });
     setActiveEvent(null);
   }
 
   function handlePaydaySubmit(plan: PaydayPlanPayload, lifeChoice: LifeChoice) {
-    emit('submitPaydayPlan', { ...plan, lifeChoice });
+    emit('submitPaydayPlan', { ...plan, lifeChoice, phaseId: gameState?.decisionPhase?.id });
     setPaydayForm(null);
   }
 
@@ -648,7 +670,6 @@ export default function PlayerPage() {
               setError('');
               emit('playerJoin', { playerName: playerName.trim(), roomCode: roomCode.toUpperCase() });
               // 儲存到 localStorage，供斷線後重連使用
-              localStorage.setItem('baisuiGame', JSON.stringify({ playerName: playerName.trim(), roomCode }));
             }}
           >
             加入遊戲

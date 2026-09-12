@@ -1,6 +1,8 @@
 import * as http from 'http';
 import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 import { Server, Socket } from 'socket.io';
+import { validateSocketPayload } from './socketValidation';
+import { repayRoomLoan, validatePlayerLoan } from './playerLoans';
 import { GameState, Player, PaydayPlanPayload, GamePhase, PlayerEvent, PlayerEventType, DecisionPhaseState, FacilitatorSceneState, AssetType } from './gameDataModels';
 import {
   createPlayer,
@@ -192,7 +194,6 @@ interface RoomAdminCredential {
 }
 
 const roomAdminCredentials = new Map<string, RoomAdminCredential>();
-const DEFAULT_ADMIN_PASSWORD = '123';
 const MAX_ACTIVE_ROOMS = 100;
 const EMPTY_ROOM_CLEANUP_MS = 30 * 60 * 1000;
 const roomCreationRate = new Map<string, { count: number; resetAt: number }>();
@@ -205,7 +206,7 @@ function hasRoomAdmin(gs: GameState): boolean {
 }
 
 function isRoomAdmin(socket: Socket, gs: GameState): boolean {
-  return roomAdminSocketIds.get(gs.gameId)?.has(socket.id) === true || gs.adminSocketId === socket.id;
+  return roomAdminSocketIds.get(gs.gameId)?.has(playerIdentity(socket)) === true || gs.adminSocketId === playerIdentity(socket);
 }
 
 function addRoomAdmin(roomId: string, socketId: string): void {
@@ -238,12 +239,19 @@ function cancelEmptyRoomCleanup(roomId: string): void {
 function scheduleEmptyRoomCleanup(roomId: string): void {
   if (emptyRoomCleanupTimers.has(roomId)) return;
   const gs = rooms.get(roomId);
-  if (!gs || hasRoomAdmin(gs) || gs.players.size > 0) return;
+  if (!gs || hasRoomAdmin(gs) || [...gs.players.values()].some(p => !p.isDisconnected)) return;
 
   const timer = setTimeout(() => {
     emptyRoomCleanupTimers.delete(roomId);
     const current = rooms.get(roomId);
-    if (!current || hasRoomAdmin(current) || current.players.size > 0) return;
+    if (!current || hasRoomAdmin(current) || [...current.players.values()].some(p => !p.isDisconnected)) return;
+    for (const id of current.players.keys()) {
+      playerSessions.delete(id);
+      privateReplay.delete(id);
+      pendingSubmissions.delete(id);
+      socketRoomMap.delete(id);
+    }
+    decisionReleaseWaiters.delete(roomId);
     rooms.delete(roomId);
     roomAdminCredentials.delete(roomId);
     roomAdminSocketIds.delete(roomId);
@@ -364,7 +372,7 @@ function generateRoomCode(): string {
  * 若 socket 未加入任何房間，回傳 null。
  */
 function getRoomState(socket: Socket): GameState | null {
-  const roomId = socketRoomMap.get(socket.id);
+  const roomId = socketRoomMap.get(playerIdentity(socket));
   return roomId ? (rooms.get(roomId) ?? null) : null;
 }
 
@@ -386,9 +394,9 @@ function emitCellEvent(
   cellName: string,
   message: string
 ): void {
-  socket.emit('squareLandingNotice', { cellName, message });
+  emitClient(socket, 'squareLandingNotice', { cellName, message });
   io.to(roomId).emit('cellEventBroadcast', {
-    playerId: socket.id, playerName, cellName, message, ts: Date.now(),
+    playerId: playerIdentity(socket), playerName, cellName, message, ts: Date.now(),
   });
 }
 
@@ -1736,7 +1744,7 @@ function executeTravelAction(socket: Socket, gs: GameState, player: Player, dest
   const cashflowBefore = player.monthlyCashflow;
   const netWorthBefore = calcNetWorth(player);
   const result = goTravel(player, destinationId);
-  socket.emit('travelResult', result);
+  emitClient(socket, 'travelResult', result);
 
   if (!result.success) return;
 
@@ -1766,7 +1774,7 @@ function executeTravelAction(socket: Socket, gs: GameState, player: Player, dest
 function executeSocialAction(socket: Socket, gs: GameState, player: Player): void {
   const currentAge = getCurrentAge(gs);
   const result = attendSocialEvent(player, currentAge);
-  socket.emit('socialEventResult', result);
+  emitClient(socket, 'socialEventResult', result);
 
   if (!result.success) return;
 
@@ -1776,7 +1784,7 @@ function executeSocialAction(socket: Socket, gs: GameState, player: Player): voi
     result.newRelationshipPoints >= threshold &&
     !player.isMarried
   ) {
-    socket.emit('marriageThresholdReached', {
+    emitClient(socket, 'marriageThresholdReached', {
       playerId: player.id,
       relationshipPoints: result.newRelationshipPoints,
       threshold,
@@ -1836,7 +1844,7 @@ function skipCurrentEducationTurns(gs: GameState): void {
     const player = gs.players.get(gs.currentPlayerTurnId);
     if (!player?.isAlive || !consumeEducationTurn(player)) return;
 
-    io.sockets.sockets.get(player.id)?.emit('turnSkipped', {
+    getPlayerSocket(player.id)?.emit('turnSkipped', {
       playerId: player.id,
       reason: 'education',
       turnsRemaining: player.educationTurnsToSkip,
@@ -1929,7 +1937,7 @@ function emitQuarterMilestones(
   planResult: ReturnType<typeof applyPaydayPlan>,
 ): void {
   if (player.stats.careerSkill >= SKILL_CAREER_CHANGE_THRESHOLD) {
-    socket.emit('careerChangeUnlocked', {
+    emitClient(socket, 'careerChangeUnlocked', {
       message: '恭喜！你的第二專長已達到頂峰，可以轉職了！',
       availableProfessions: buildAvailableProfessions(player),
     });
@@ -2069,7 +2077,7 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
     const player = gs.players.get(playerId);
     if (!player?.isAlive) continue;
 
-    const playerSocket = io.sockets.sockets.get(player.id);
+    const playerSocket = getPlayerSocket(player.id);
     const emptyPlan: PaydayPlanPayload = {
       investInFQUpgrade: false,
       investInHealthMaintenance: false,
@@ -2112,7 +2120,7 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
         controlledByHost: true,
       });
 
-      playerSocket.emit('paydayPlanningRequired', {
+      emitClient(playerSocket, 'paydayPlanningRequired', {
         paydayPosition: -1,
         paydayIndex: index + 1,
         totalPaydays: playerIds.length,
@@ -2210,62 +2218,134 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
 // Socket.io 事件處理
 // ============================================================
 
+// A character keeps its identity when the transport reconnects. Tokens never enter public game state.
+const playerSessions = new Map<string, { roomId: string; token: string; socketId: string; setupStep?: string }>();
+const pendingSubmissions = new Map<string, { phaseId: string; event: string; submit: (value: unknown) => void }>();
+const privateReplay = new Map<string, Map<string, unknown[]>>();
+const replayEvents = new Set(['paydayPlanningRequired', 'fastTrackDealCard', 'charityCardPending',
+  'techStartupOffer', 'fastTrackPartnershipOptions', 'fastTrackCrisisCard', 'fastTrackTravelOptions',
+  'diseaseCrisisCard', 'cardDrawn', 'luckyCardDrawn', 'dealCardsDrawn', 'charityCardDrawn',
+  'relationshipCardDrawn', 'bonusSmallDeal']);
+function playerIdentity(socket: Socket): string { return socket.data.playerId ?? socket.id; }
+function getPlayerSocket(id: string): Socket | undefined {
+  return io.sockets.sockets.get(playerSessions.get(id)?.socketId ?? id);
+}
+function emitClient(socket: Socket, event: string, ...args: unknown[]) {
+  const id = playerIdentity(socket);
+  if (socket.data.playerId) {
+    if (replayEvents.has(event)) {
+      if (!privateReplay.has(id)) privateReplay.set(id, new Map());
+      privateReplay.get(id)!.set(event, args);
+    }
+    io.to(id).emit(event, ...args);
+  } else socket.emit(event, ...args);
+}
+const financialActions = new Set(['requestCareerChange', 'sellAsset', 'buyInsurance', 'cancelInsurance',
+  'takeEmergencyLoan', 'investStockDCA', 'takeLeverageLoan', 'repayLoan', 'buyFranchise',
+  'partnershipOffer', 'partnershipResponse', 'loanOffer', 'loanResponse', 'loanRequest', 'loanRequestResponse',
+  'goTravel', 'attendSocialEvent']);
+const setupActions = new Set(['rollSocialClass', 'allocateGrowthStats', 'continueEducation', 'selectQuadrant']);
+
 io.on('connection', (socket: Socket) => {
-  console.log(`[連線] 新客戶端連線：${socket.id}`);
+  function onSafe<T extends unknown[]>(event: string, handler: (...args: T) => unknown) {
+    const report = (error: unknown) => {
+      console.error(`[socket:${event}] handler failed`, error instanceof Error ? error.message : 'unknown error');
+      const gs = getRoomState(socket);
+      if (gs && gs.pausedAt === null) pauseGameClock(gs);
+      emitClient(socket, 'error', { message: '操作未能完成，遊戲已暫停。請主持人確認狀態後再繼續。' });
+      if (gs) emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+    };
+    socket.on(event, (...args: T) => {
+      try { Promise.resolve(handler(...args)).catch(report); } catch (error) { report(error); }
+    });
+  }
+  socket.use(([event, payload], next) => {
+    if (socket.data.playerId && ['adminLogin', 'createRoom', 'joinDisplay'].includes(event)) {
+      emitClient(socket, 'error', { message: '玩家頁不能切換為主持人或大螢幕，請另開頁面。' }); return;
+    }
+    if (!validateSocketPayload(event, payload)) {
+      socket.emit(event === 'playerRejoin' ? 'rejoinFailed' : 'error', { message: event === 'bidDeal' ? '出價必須為有效正整數。' : '資料格式不正確，請重新整理後再試。' });
+      return;
+    }
+    const gs = getRoomState(socket);
+    const player = gs?.players.get(playerIdentity(socket));
+    if (financialActions.has(event) && (!gs || !player?.isAlive ||
+      ![GamePhase.RatRace, GamePhase.FastTrack].includes(gs.gamePhase) || gs.pausedAt !== null ||
+      gs.decisionPhase || gs.facilitatorScene || gs.turnInProgress || gs.globalPaydayPending || gs.globalPaydayInProgress)) {
+      emitClient(socket, 'error', { message: '目前不是自由操作時間，請等待主持人完成決策或恢復遊戲。' });
+      return;
+    }
+    if (setupActions.has(event) && (!gs || gs.gamePhase !== GamePhase.Pre20 || !player || player.pre20Done)) {
+      emitClient(socket, 'error', { message: '目前無法修改出生設定。' }); return;
+    }
+    next();
+  });
+  for (const event of ['submitCardDecision', 'submitPaydayPlan']) {
+    onSafe(event, (payload: { phaseId: string }) => {
+      const pending = pendingSubmissions.get(playerIdentity(socket));
+      if (!pending || pending.event !== event || pending.phaseId !== payload.phaseId) {
+        emitClient(socket, 'error', { message: '此決策已結束，請依目前畫面操作。' }); return;
+      }
+      pending.submit(payload);
+    });
+  }
+  console.log(`[連線] 新客戶端連線：${playerIdentity(socket)}`);
 
   // ----------------------------------------------------------
   // 主持人：建立房間 (createRoom)
   // ----------------------------------------------------------
   /**
-   * 新房統一使用主持人通用密碼（預設 123）。
+   * 新房自動產生專屬主持人控制碼，只回傳給建立者。
    * Client → Server: { roomId?: string }
    * Server → Caller: roomCreated { roomId, joinCode } | error
    *
    * 建立新的獨立遊戲房間，回傳給主持人的 joinCode 供玩家加入使用。
    * 同一主持人可建立多個房間（多開場次）。
    */
-  socket.on('createRoom', (payload?: { roomId?: string }) => {
-    const rateKey = socket.handshake.address || socket.id;
+  onSafe('createRoom', (payload?: { roomId?: string }) => {
+    const rateKey = socket.handshake.address || playerIdentity(socket);
     if (!consumeRateLimit(roomCreationRate, rateKey, 5, 10 * 60 * 1000)) {
-      socket.emit('error', { message: '建立房間次數過多，請稍後再試。' });
+      emitClient(socket, 'error', { message: '建立房間次數過多，請稍後再試。' });
       return;
     }
     if (rooms.size >= MAX_ACTIVE_ROOMS) {
-      socket.emit('error', { message: '目前房間已達上限，請稍後再試。' });
+      emitClient(socket, 'error', { message: '目前房間已達上限，請稍後再試。' });
       return;
     }
     const customCode = payload?.roomId?.trim().toUpperCase();
     if (customCode) {
       if (rooms.has(customCode)) {
-        socket.emit('error', { message: `房間代碼「${customCode}」已存在，請換一個。` });
+        emitClient(socket, 'error', { message: `房間代碼「${customCode}」已存在，請換一個。` });
         return;
       }
       if (!/^[A-Z0-9]{4,6}$/.test(customCode)) {
-        socket.emit('error', { message: '房間代碼只能包含英文字母與數字，長度 4–6 碼。' });
+        emitClient(socket, 'error', { message: '房間代碼只能包含英文字母與數字，長度 4–6 碼。' });
         return;
       }
     }
     const roomCode = customCode || generateRoomCode();
     const gs = new GameState(roomCode);
-    gs.adminSocketId = socket.id;
-    roomAdminCredentials.set(roomCode, createRoomAdminCredential(DEFAULT_ADMIN_PASSWORD));
+    gs.adminSocketId = playerIdentity(socket);
+    const adminCode = randomBytes(6).toString('hex').toUpperCase();
+    roomAdminCredentials.set(roomCode, createRoomAdminCredential(adminCode));
     rooms.set(roomCode, gs);
-    addRoomAdmin(roomCode, socket.id);
+    addRoomAdmin(roomCode, playerIdentity(socket));
     cancelEmptyRoomCleanup(roomCode);
 
     // 主持人也加入 Socket.io 房間（可接收廣播）
     socket.join(roomCode);
-    socketRoomMap.set(socket.id, roomCode);
+    socketRoomMap.set(playerIdentity(socket), roomCode);
 
-    console.log(`[createRoom] 主持人 ${socket.id} 建立房間：${roomCode}（目前共 ${rooms.size} 個房間）`);
+    console.log(`[createRoom] 主持人 ${playerIdentity(socket)} 建立房間：${roomCode}（目前共 ${rooms.size} 個房間）`);
 
-    socket.emit('roomCreated', {
+    emitClient(socket, 'roomCreated', {
       roomId: roomCode,
       joinCode: roomCode,
-      adminSocketId: socket.id,
+      adminCode,
+      adminSocketId: playerIdentity(socket),
     });
     // 立即推送初始遊戲狀態（WaitingForPlayers），讓後台能正確顯示開始按鈕
-    socket.emit('gameStateUpdate', serializeGameState(gs));
+    emitClient(socket, 'gameStateUpdate', serializeGameState(gs));
   });
 
   // ----------------------------------------------------------
@@ -2277,18 +2357,18 @@ io.on('connection', (socket: Socket) => {
    * Server → All in room: roomDeleted
    * Server → Caller: deleteRoomResult
    */
-  socket.on('deleteRoom', () => {
+  onSafe('deleteRoom', () => {
     const gs = getRoomState(socket);
     if (!gs) {
-      socket.emit('error', { message: '尚未加入任何房間。' });
+      emitClient(socket, 'error', { message: '尚未加入任何房間。' });
       return;
     }
     if (!isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '只有建立此房間的主持人才能刪除它。' });
+      emitClient(socket, 'error', { message: '只有建立此房間的主持人才能刪除它。' });
       return;
     }
-    if (gs.decisionPhase) {
-      socket.emit('error', { message: '請先由主持人結束目前的決策階段，再關閉房間。' });
+    if (gs.decisionPhase || gs.facilitatorScene || gs.turnInProgress || gs.globalPaydayInProgress) {
+      emitClient(socket, 'error', { message: '請先由主持人結束目前的決策階段，再關閉房間。' });
       return;
     }
 
@@ -2297,6 +2377,13 @@ io.on('connection', (socket: Socket) => {
     rooms.delete(roomId);
     roomAdminCredentials.delete(roomId);
     roomAdminSocketIds.delete(roomId);
+
+    for (const [id, session] of playerSessions) if (session.roomId === roomId) {
+      playerSessions.delete(id);
+      privateReplay.delete(id);
+      pendingSubmissions.delete(id);
+      io.in(id).socketsLeave(id);
+    }
 
     // 先移除房間再通知前端，避免前端收到 roomDeleted 後立刻刷新清單時
     // 又讀到尚未刪除的舊房間。
@@ -2311,7 +2398,7 @@ io.on('connection', (socket: Socket) => {
     }
 
     console.log(`[deleteRoom] 房間 ${roomId} 已刪除（目前剩 ${rooms.size} 個房間）`);
-    socket.emit('deleteRoomResult', { success: true, roomId });
+    emitClient(socket, 'deleteRoomResult', { success: true, roomId });
   });
 
   // ----------------------------------------------------------
@@ -2322,81 +2409,81 @@ io.on('connection', (socket: Socket) => {
    * Client → Server: { password: string, roomId: string }
    * Server → Caller: adminLoginSuccess | adminLoginFail
    */
-  socket.on('adminLogin', (payload: { password: string; roomId?: string }) => {
+  onSafe('adminLogin', (payload: { password: string; roomId?: string }) => {
     const targetRoomId = payload?.roomId?.trim().toUpperCase();
     if (!targetRoomId) {
-      socket.emit('adminLoginFail', { message: '請輸入房間代碼。' });
+      emitClient(socket, 'adminLoginFail', { message: '請輸入房間代碼。' });
       return;
     }
-    const rateKey = `${socket.handshake.address || socket.id}:${targetRoomId}`;
+    const rateKey = `${socket.handshake.address || playerIdentity(socket)}:${targetRoomId}`;
     if (!consumeRateLimit(adminLoginRate, rateKey, 10, 5 * 60 * 1000)) {
-      socket.emit('adminLoginFail', { message: '登入嘗試次數過多，請五分鐘後再試。' });
+      emitClient(socket, 'adminLoginFail', { message: '登入嘗試次數過多，請五分鐘後再試。' });
       return;
     }
 
     const gs = rooms.get(targetRoomId);
     if (!gs) {
-      socket.emit('adminLoginFail', { message: `房間 ${targetRoomId} 不存在。` });
+      emitClient(socket, 'adminLoginFail', { message: `房間 ${targetRoomId} 不存在。` });
       return;
     }
     if (!verifyRoomAdminPassword(targetRoomId, payload?.password ?? '')) {
-      socket.emit('adminLoginFail', { message: '房間代碼或主持人密碼錯誤。' });
+      emitClient(socket, 'adminLoginFail', { message: '房間代碼或主持人密碼錯誤。' });
       return;
     }
     adminLoginRate.delete(rateKey);
 
-    const previousRoomId = socketRoomMap.get(socket.id);
+    const previousRoomId = socketRoomMap.get(playerIdentity(socket));
     if (previousRoomId && previousRoomId !== targetRoomId) {
       const previousRoom = rooms.get(previousRoomId);
       if (previousRoom && isRoomAdmin(socket, previousRoom)) {
-        removeRoomAdmin(previousRoomId, socket.id);
+        removeRoomAdmin(previousRoomId, playerIdentity(socket));
         scheduleEmptyRoomCleanup(previousRoomId);
       }
       socket.leave(previousRoomId);
     }
 
-    addRoomAdmin(targetRoomId, socket.id);
+    addRoomAdmin(targetRoomId, playerIdentity(socket));
     cancelEmptyRoomCleanup(targetRoomId);
     socket.join(targetRoomId);
-    socketRoomMap.set(socket.id, targetRoomId);
+    socketRoomMap.set(playerIdentity(socket), targetRoomId);
 
-    console.log(`[adminLogin] 主持人重新登入房間 ${targetRoomId}：${socket.id}`);
-    socket.emit('adminLoginSuccess', { adminSocketId: socket.id, roomId: targetRoomId });
+    console.log(`[adminLogin] 主持人重新登入房間 ${targetRoomId}：${playerIdentity(socket)}`);
+    emitClient(socket, 'adminLoginSuccess', { adminSocketId: playerIdentity(socket), roomId: targetRoomId, adminCode: payload.password });
     // 登入後立即推送當前遊戲狀態，讓後台能正確顯示開始按鈕
-    socket.emit('gameStateUpdate', serializeGameState(gs));
+    emitClient(socket, 'gameStateUpdate', serializeGameState(gs));
   });
 
   // 手機控場切換房間時主動釋放管理員身份，避免空房被誤判仍有人控制。
-  socket.on('adminLeaveRoom', () => {
-    const roomId = socketRoomMap.get(socket.id);
+  onSafe('adminLeaveRoom', () => {
+    const roomId = socketRoomMap.get(playerIdentity(socket));
     const gs = roomId ? rooms.get(roomId) : undefined;
     if (!roomId || !gs || !isRoomAdmin(socket, gs)) return;
-    removeRoomAdmin(roomId, socket.id);
-    socketRoomMap.delete(socket.id);
+    removeRoomAdmin(roomId, playerIdentity(socket));
+    socketRoomMap.delete(playerIdentity(socket));
     socket.leave(roomId);
     scheduleEmptyRoomCleanup(roomId);
-    socket.emit('adminLeftRoom', { roomId });
+    emitClient(socket, 'adminLeftRoom', { roomId });
   });
 
   // ----------------------------------------------------------
   // 展示頁加入觀看 (joinDisplay) — 不需密碼，只讀取遊戲狀態
   // ----------------------------------------------------------
-  socket.on('joinDisplay', (payload: { roomId: string }) => {
+  onSafe('joinDisplay', (payload: { roomId: string }) => {
     const targetRoomId = payload?.roomId?.trim().toUpperCase();
     if (!targetRoomId) {
-      socket.emit('joinDisplayFail', { message: '請輸入房間代碼。' });
+      emitClient(socket, 'joinDisplayFail', { message: '請輸入房間代碼。' });
       return;
     }
     const gs = rooms.get(targetRoomId);
     if (!gs) {
-      socket.emit('joinDisplayFail', { message: `房間「${targetRoomId}」不存在，請確認代碼。` });
+      emitClient(socket, 'joinDisplayFail', { message: `房間「${targetRoomId}」不存在，請確認代碼。` });
       return;
     }
     socket.join(targetRoomId);
-    socketRoomMap.set(socket.id, targetRoomId);
-    socket.emit('joinDisplaySuccess', { roomId: targetRoomId });
-    socket.emit('gameStateUpdate', serializeGameState(gs));
-    console.log(`[joinDisplay] 展示頁加入房間 ${targetRoomId}：${socket.id}`);
+    socketRoomMap.set(playerIdentity(socket), targetRoomId);
+    emitClient(socket, 'joinDisplaySuccess', { roomId: targetRoomId });
+    emitClient(socket, 'gameStateUpdate', serializeGameState(gs));
+    console.log(`[joinDisplay] 展示頁加入房間 ${targetRoomId}：${playerIdentity(socket)}`);
   });
 
   // ----------------------------------------------------------
@@ -2408,14 +2495,14 @@ io.on('connection', (socket: Socket) => {
    *
    * 供玩家確認房間代碼存在，或主持人確認房間狀態。
    */
-  socket.on('listRooms', () => {
+  onSafe('listRooms', () => {
     const list = Array.from(rooms.entries()).map(([roomId, gs]) => ({
       roomId,
       playerCount: gs.players.size,
       gamePhase: gs.gamePhase,
       hasAdmin: hasRoomAdmin(gs),
     }));
-    socket.emit('roomList', list);
+    emitClient(socket, 'roomList', list);
   });
 
   // ----------------------------------------------------------
@@ -2426,78 +2513,51 @@ io.on('connection', (socket: Socket) => {
    *
    * 玩家透過主持人分享的 roomCode 加入對應房間。
    * roomCode 是建立房間時回傳的 6 字元代碼。
-   * 若房間內已有同名玩家且處於斷線等待狀態，自動恢復該玩家資料。
+   * 已有角色必須透過 playerRejoin 與續玩憑證恢復，不能僅靠名字接管。
    */
-  socket.on(
+  onSafe(
     'playerJoin',
     (payload: { playerName: string; roomCode: string; professionId?: string }) => {
       const { playerName, roomCode, professionId } = payload;
 
       const gs = rooms.get(roomCode);
       if (!gs) {
-        socket.emit('error', { message: `房間代碼「${roomCode}」不存在，請確認後再試。` });
+        emitClient(socket, 'error', { message: `房間代碼「${roomCode}」不存在，請確認後再試。` });
         return;
       }
       cancelEmptyRoomCleanup(roomCode);
 
       if (gs.gamePhase === GamePhase.GameOver) {
-        socket.emit('error', { message: '此房間的遊戲已結束，無法加入。' });
+        emitClient(socket, 'error', { message: '此房間的遊戲已結束，無法加入。' });
         return;
       }
 
-      // ── 同名玩家重連恢復 ──────────────────────────────────────
-      // 找房間內同名且斷線等待中的玩家
-      let existingPlayer: Player | undefined;
-      let existingSocketId: string | undefined;
-      for (const [sid, p] of gs.players.entries()) {
-        if (p.name === playerName) {
-          if (p.isDisconnected) {
-            // 斷線等待中 → 恢復資料
-            existingPlayer = p;
-            existingSocketId = sid;
-          } else {
-            // 同名玩家仍在線 → 拒絕加入
-            socket.emit('error', { message: `「${playerName}」已在此房間中，請換個名字。` });
-            return;
-          }
-          break;
-        }
+      if (socketRoomMap.has(playerIdentity(socket))) {
+        emitClient(socket, 'error', { message: '你已加入房間，請先離開原房間。' }); return;
       }
-
-      if (existingPlayer && existingSocketId) {
-        // 將舊 socket id 的玩家資料移轉到新 socket id
-        existingPlayer.id = socket.id;
-        existingPlayer.isDisconnected = false;
-        gs.players.delete(existingSocketId);
-        gs.players.set(socket.id, existingPlayer);
-
-        const orderIdx = gs.playerOrder.indexOf(existingSocketId);
-        if (orderIdx !== -1) gs.playerOrder[orderIdx] = socket.id;
-        if (gs.currentPlayerTurnId === existingSocketId) gs.currentPlayerTurnId = socket.id;
-        gs.finalRoundPendingPlayerIds = gs.finalRoundPendingPlayerIds.map((id) =>
-          id === existingSocketId ? socket.id : id
-        );
-
-        socket.join(roomCode);
-        socketRoomMap.set(socket.id, roomCode);
-
-        console.log(`[playerJoin] ${playerName} 同名重連，恢復至房間 ${roomCode}`);
-        socket.emit('rejoinSuccess', { playerId: socket.id });
-        emitToRoom(roomCode, 'gameStateUpdate', serializeGameState(gs));
-        return;
+      if ([...gs.players.values()].some(p => p.name === playerName.trim())) {
+        emitClient(socket, 'error', { message: '此名字已被使用。原玩家請用原裝置重新連線。' }); return;
+      }
+      if (![GamePhase.WaitingForPlayers, GamePhase.Pre20].includes(gs.gamePhase)) {
+        emitClient(socket, 'error', { message: '遊戲已開始，請等待下一場再加入。' }); return;
       }
 
       // ── 全新玩家加入 ──────────────────────────────────────────
       // 加入 Socket.io 房間與映射表
       socket.join(roomCode);
-      socketRoomMap.set(socket.id, roomCode);
+      socketRoomMap.set(playerIdentity(socket), roomCode);
 
       console.log(
-        `[playerJoin] ${playerName}（socket: ${socket.id}）加入房間 ${roomCode}，職業指定：${professionId ?? '隨機'}`
+        `[playerJoin] ${playerName}（socket: ${playerIdentity(socket)}）加入房間 ${roomCode}，職業指定：${professionId ?? '隨機'}`
       );
 
-      const player = createPlayer(socket.id, playerName, professionId);
+      const player = createPlayer(playerIdentity(socket), playerName.trim(), professionId);
+      socket.data.playerId = player.id;
+      socket.join(player.id);
+      const token = randomBytes(32).toString('hex');
+      playerSessions.set(player.id, { roomId: roomCode, token, socketId: socket.id });
       gs.addPlayer(player);
+      emitClient(socket, 'playerSession', { playerId: player.id, reconnectToken: token, roomCode, playerName: player.name });
 
       // 第一位玩家加入後，進入 Pre-20 設定階段
       if (gs.gamePhase === GamePhase.WaitingForPlayers) {
@@ -2507,7 +2567,7 @@ io.on('connection', (socket: Socket) => {
 
       // 若是第一位玩家，設定為當前回合玩家
       if (gs.playerOrder.length === 1) {
-        gs.currentPlayerTurnId = socket.id;
+        gs.currentPlayerTurnId = playerIdentity(socket);
       }
 
       console.log(
@@ -2525,32 +2585,32 @@ io.on('connection', (socket: Socket) => {
   /**
    * Client → Server: { diceCount?: 1 | 2 }   預設 2 顆骰子
    */
-  socket.on(
+  onSafe(
     'playerRoll',
     async (payload: { diceCount?: 1 | 2 }) => {
       const gs = getRoomState(socket);
-      if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+      if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
       const roomId = gs.gameId;
 
       if (gs.gamePhase === GamePhase.GameOver) {
-        socket.emit('error', { message: '遊戲已結束，請進入復盤。' });
+        emitClient(socket, 'error', { message: '遊戲已結束，請進入復盤。' });
         return;
       }
 
       if (gs.turnInProgress || gs.pausedAt !== null || gs.decisionPhase || gs.facilitatorScene || gs.globalPaydayPending || gs.globalPaydayInProgress) {
-        socket.emit('error', { message: '目前由主持人控制流程，請等待主持人繼續遊戲。' });
+        emitClient(socket, 'error', { message: '目前由主持人控制流程，請等待主持人繼續遊戲。' });
         return;
       }
 
       // --- 1. 回合驗證 ---
-      if (socket.id !== gs.currentPlayerTurnId) {
-        socket.emit('error', { message: '尚未輪到你的回合。' });
+      if (playerIdentity(socket) !== gs.currentPlayerTurnId) {
+        emitClient(socket, 'error', { message: '尚未輪到你的回合。' });
         return;
       }
 
-      const player = gs.players.get(socket.id);
+      const player = gs.players.get(playerIdentity(socket));
       if (!player || !player.isAlive) {
-        socket.emit('error', { message: '玩家不存在或已出局。' });
+        emitClient(socket, 'error', { message: '玩家不存在或已出局。' });
         return;
       }
 
@@ -2571,7 +2631,7 @@ io.on('connection', (socket: Socket) => {
 
           emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
         } else {
-          socket.emit('turnSkipped', {
+          emitClient(socket, 'turnSkipped', {
             playerId: player.id,
             reason: 'bedridden',
             turnsRemaining: 0,
@@ -2585,7 +2645,7 @@ io.on('connection', (socket: Socket) => {
       // --- 1c. turnsToSkip 跳回合檢查 ---
       if (player.turnsToSkip > 0) {
         player.turnsToSkip -= 1;
-        socket.emit('turnSkipped', {
+        emitClient(socket, 'turnSkipped', {
           playerId: player.id,
           reason: 'crisis',
           turnsRemaining: player.turnsToSkip,
@@ -2622,7 +2682,7 @@ io.on('connection', (socket: Socket) => {
           `路過發薪日：${passedPaydays.length > 0 ? passedPaydays.join(', ') : '無'}`
       );
 
-      socket.emit('rollResult', {
+      emitClient(socket, 'rollResult', {
         diceCount,
         rolled,
         newPosition: newPos,
@@ -2705,7 +2765,7 @@ io.on('connection', (socket: Socket) => {
                 })()
               : null;
 
-          socket.emit('paydayPlanningRequired', {
+          emitClient(socket, 'paydayPlanningRequired', {
             paydayPosition: paydayPos,
             paydayIndex: 1,
             totalPaydays: passedPaydays.length,
@@ -2761,7 +2821,7 @@ io.on('connection', (socket: Socket) => {
           }
 
           if (player.stats.careerSkill >= SKILL_CAREER_CHANGE_THRESHOLD) {
-            socket.emit('careerChangeUnlocked', {
+            emitClient(socket, 'careerChangeUnlocked', {
               message: '恭喜！你的第二專長已達到頂峰，可以轉職了！',
               availableProfessions: buildAvailableProfessions(player),
             });
@@ -2953,7 +3013,7 @@ io.on('connection', (socket: Socket) => {
           canCongratulate: true,   // 前端可顯示祝賀按鈕
           bucketList: goalDetails,
         });
-        socket.emit('bucketListAssigned', { goals: goalDetails });
+        emitClient(socket, 'bucketListAssigned', { goals: goalDetails });
 
         // 立刻檢查一次：高被動收入、長壽等可能在進外圈當下就達成
         checkBucketGoals(player, gs, roomId, socket);
@@ -2978,9 +3038,9 @@ io.on('connection', (socket: Socket) => {
       emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
     } catch (err) {
       console.error(`[playerRoll] 未預期錯誤：`, err);
-      socket.emit('error', { message: '擲骰處理時發生錯誤，請重新整理頁面。' });
+      emitClient(socket, 'error', { message: '擲骰處理時發生錯誤，請重新整理頁面。' });
       // 發送一個空的 rollResult 讓前端解除 rollingLocked
-      socket.emit('rollResult', { diceCount: 1, rolled: 0, newPosition: -1, passedPaydays: [] });
+      emitClient(socket, 'rollResult', { diceCount: 1, rolled: 0, newPosition: -1, passedPaydays: [] });
       // 不強制 advanceToNextTurn —— 此時玩家可能已移動但發薪流程未完成，
       // 強制換回合會讓狀態與下家流程錯亂；交給管理員手動干預（或玩家重新整理）。
       try {
@@ -2997,21 +3057,21 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 主持人收束目前決策階段
   // ----------------------------------------------------------
-  socket.on('continueDecisionPhase', (payload?: { phaseId?: string }) => {
+  onSafe('continueDecisionPhase', (payload?: { phaseId?: string }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
     if (!isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '只有主持人可以結束決策階段。' });
+      emitClient(socket, 'error', { message: '只有主持人可以結束決策階段。' });
       return;
     }
 
     const waiter = decisionReleaseWaiters.get(gs.gameId);
     if (!gs.decisionPhase || !waiter) {
-      socket.emit('error', { message: '目前沒有等待中的決策。' });
+      emitClient(socket, 'error', { message: '目前沒有等待中的決策。' });
       return;
     }
     if (payload?.phaseId && payload.phaseId !== waiter.phaseId) {
-      socket.emit('error', { message: '決策階段已更新，請重新操作。' });
+      emitClient(socket, 'error', { message: '決策階段已更新，請重新操作。' });
       return;
     }
 
@@ -3019,16 +3079,16 @@ io.on('connection', (socket: Socket) => {
   });
 
   // 倒數只作為全場節奏提醒；歸零不會自動替玩家選擇或結束階段。
-  socket.on('setDecisionReminder', (payload?: { phaseId?: string; seconds?: number; addSeconds?: number }) => {
+  onSafe('setDecisionReminder', (payload?: { phaseId?: string; seconds?: number; addSeconds?: number }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
     if (!isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '只有主持人可以調整決策倒數。' });
+      emitClient(socket, 'error', { message: '只有主持人可以調整決策倒數。' });
       return;
     }
     const phase = gs.decisionPhase;
     if (!phase || (payload?.phaseId && payload.phaseId !== phase.id)) {
-      socket.emit('error', { message: '目前的決策階段已更新。' });
+      emitClient(socket, 'error', { message: '目前的決策階段已更新。' });
       return;
     }
 
@@ -3044,15 +3104,15 @@ io.on('connection', (socket: Socket) => {
   });
 
   // 舞台決策倒數同樣只作提醒，主持人仍保有完整決定權。
-  socket.on('setFacilitatorReminder', (payload?: { sceneId?: string; seconds?: number; addSeconds?: number }) => {
+  onSafe('setFacilitatorReminder', (payload?: { sceneId?: string; seconds?: number; addSeconds?: number }) => {
     const gs = getRoomState(socket);
     if (!gs || !isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '只有主持人可以調整舞台倒數。' });
+      emitClient(socket, 'error', { message: '只有主持人可以調整舞台倒數。' });
       return;
     }
     const scene = gs.facilitatorScene;
     if (!scene || scene.stage !== 'prompt' || (payload?.sceneId && payload.sceneId !== scene.id)) {
-      socket.emit('error', { message: '目前的舞台事件已更新。' });
+      emitClient(socket, 'error', { message: '目前的舞台事件已更新。' });
       return;
     }
 
@@ -3069,24 +3129,24 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 請求轉職 (requestCareerChange)
   // ----------------------------------------------------------
-  socket.on('requestCareerChange', (payload: { newProfessionId: string }) => {
+  onSafe('requestCareerChange', (payload: { newProfessionId: string }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
-    const player = gs.players.get(socket.id);
+    const player = gs.players.get(playerIdentity(socket));
     if (!player || !player.isAlive) {
-      socket.emit('error', { message: '玩家不存在或已出局。' });
+      emitClient(socket, 'error', { message: '玩家不存在或已出局。' });
       return;
     }
 
     if (player.isBedridden) {
-      socket.emit('careerChangeResult', { success: false, message: '臥床中無法轉職。' });
+      emitClient(socket, 'careerChangeResult', { success: false, message: '臥床中無法轉職。' });
       return;
     }
 
     if (player.stats.health < HP_ACTIVITY_THRESHOLDS.careerChange) {
-      socket.emit('careerChangeResult', {
+      emitClient(socket, 'careerChangeResult', {
         success: false,
         message: `健康值不足，需要 ${HP_ACTIVITY_THRESHOLDS.careerChange} 才能轉職（目前：${player.stats.health}）。`,
       });
@@ -3095,7 +3155,7 @@ io.on('connection', (socket: Socket) => {
 
     const { SKILL_CAREER_CHANGE_THRESHOLD: threshold } = require('./gameConfig');
     if (player.stats.careerSkill < threshold) {
-      socket.emit('careerChangeResult', {
+      emitClient(socket, 'careerChangeResult', {
         success: false,
         message: `第二專長值不足，需達到 ${threshold} 才能轉職（目前：${player.stats.careerSkill}）。`,
       });
@@ -3104,7 +3164,7 @@ io.on('connection', (socket: Socket) => {
 
     const _ccCB = player.cash; const _ccFB = player.monthlyCashflow; const _ccNWB = calcNetWorth(player);
     const result = executeCareerChange(player, payload.newProfessionId);
-    socket.emit('careerChangeResult', result);
+    emitClient(socket, 'careerChangeResult', result);
 
     if (result.success) {
       logPlayerEvent(player, gs, 'career_change', `轉職：${result.previousProfession} → ${result.newProfession}`, _ccCB, _ccFB, _ccNWB, { previousProfession: result.previousProfession, newProfession: result.newProfession, salaryChange: result.salaryChange });
@@ -3123,25 +3183,25 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 出售資產 (sellAsset)
   // ----------------------------------------------------------
-  socket.on('sellAsset', (payload: { assetId: string }) => {
+  onSafe('sellAsset', (payload: { assetId: string }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
 
-    const player = gs.players.get(socket.id);
+    const player = gs.players.get(playerIdentity(socket));
     if (!player || !player.isAlive) {
-      socket.emit('error', { message: '玩家不存在或已出局。' });
+      emitClient(socket, 'error', { message: '玩家不存在或已出局。' });
       return;
     }
 
     const _saCB = player.cash; const _saFB = player.monthlyCashflow; const _saNWB = calcNetWorth(player);
     const result = sellAsset(player, payload.assetId);
     if (!result.success) {
-      socket.emit('error', { message: result.message });
+      emitClient(socket, 'error', { message: result.message });
       return;
     }
     logPlayerEvent(player, gs, 'asset_sell', `出售資產，淨收益 $${(result.netCashChange ?? 0).toLocaleString()}`, _saCB, _saFB, _saNWB, { assetId: result.assetId, proceeds: result.proceeds, debtSettled: result.debtSettled });
 
-    socket.emit('assetSold', {
+    emitClient(socket, 'assetSold', {
       assetId: result.assetId,
       proceeds: result.proceeds,
       debtSettled: result.debtSettled,
@@ -3154,23 +3214,23 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 購買保險 (buyInsurance)
   // ----------------------------------------------------------
-  socket.on('buyInsurance', (payload: { insuranceType: InsuranceType }) => {
+  onSafe('buyInsurance', (payload: { insuranceType: InsuranceType }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
 
-    const player = gs.players.get(socket.id);
+    const player = gs.players.get(playerIdentity(socket));
     if (!player || !player.isAlive) {
-      socket.emit('error', { message: '玩家不存在或已出局。' });
+      emitClient(socket, 'error', { message: '玩家不存在或已出局。' });
       return;
     }
 
     const result = buyInsurance(player, payload.insuranceType);
     if (!result.success) {
-      socket.emit('error', { message: result.message });
+      emitClient(socket, 'error', { message: result.message });
       return;
     }
 
-    socket.emit('insuranceUpdated', {
+    emitClient(socket, 'insuranceUpdated', {
       insuranceType: payload.insuranceType,
       active: true,
       activationFee: result.activationFee,
@@ -3187,19 +3247,19 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 取消保險 (cancelInsurance)
   // ----------------------------------------------------------
-  socket.on('cancelInsurance', (payload: { insuranceType: InsuranceType }) => {
+  onSafe('cancelInsurance', (payload: { insuranceType: InsuranceType }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
 
-    const player = gs.players.get(socket.id);
+    const player = gs.players.get(playerIdentity(socket));
     if (!player || !player.isAlive) {
-      socket.emit('error', { message: '玩家不存在或已出局。' });
+      emitClient(socket, 'error', { message: '玩家不存在或已出局。' });
       return;
     }
 
     cancelInsurance(player, payload.insuranceType);
 
-    socket.emit('insuranceUpdated', {
+    emitClient(socket, 'insuranceUpdated', {
       insuranceType: payload.insuranceType,
       active: false,
       activationFee: 0,
@@ -3212,23 +3272,23 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 應急借款 (takeEmergencyLoan)
   // ----------------------------------------------------------
-  socket.on('takeEmergencyLoan', (payload: { amount: number }) => {
+  onSafe('takeEmergencyLoan', (payload: { amount: number }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
 
-    const player = gs.players.get(socket.id);
+    const player = gs.players.get(playerIdentity(socket));
     if (!player || !player.isAlive) {
-      socket.emit('error', { message: '玩家不存在或已出局。' });
+      emitClient(socket, 'error', { message: '玩家不存在或已出局。' });
       return;
     }
 
     const result = takeEmergencyLoan(player, payload.amount);
     if (!result.success) {
-      socket.emit('error', { message: result.message });
+      emitClient(socket, 'error', { message: result.message });
       return;
     }
 
-    socket.emit('loanTaken', {
+    emitClient(socket, 'loanTaken', {
       liabilityId: result.liabilityId,
       loanType: 'emergency',
       amount: result.amount,
@@ -3242,19 +3302,19 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 股票定期定額投資 (investStockDCA)
   // ----------------------------------------------------------
-  socket.on('investStockDCA', (payload: { amount: number }) => {
+  onSafe('investStockDCA', (payload: { amount: number }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
 
-    const player = gs.players.get(socket.id);
+    const player = gs.players.get(playerIdentity(socket));
     if (!player || !player.isAlive) {
-      socket.emit('error', { message: '玩家不存在或已出局。' });
+      emitClient(socket, 'error', { message: '玩家不存在或已出局。' });
       return;
     }
 
     const amount = payload.amount ?? 0;
-    if (amount <= 0) { socket.emit('error', { message: '投資金額必須大於 0。' }); return; }
-    if (player.cash < amount) { socket.emit('error', { message: '現金不足，無法投資。' }); return; }
+    if (amount <= 0) { emitClient(socket, 'error', { message: '投資金額必須大於 0。' }); return; }
+    if (player.cash < amount) { emitClient(socket, 'error', { message: '現金不足，無法投資。' }); return; }
 
     player.cash -= amount;
     const existing = player.assets.find((a) => a.id === 'stock-dca');
@@ -3272,7 +3332,7 @@ io.on('connection', (socket: Socket) => {
       });
     }
     const updated = player.assets.find((a) => a.id === 'stock-dca');
-    socket.emit('stockDCAResult', {
+    emitClient(socket, 'stockDCAResult', {
       amount,
       newPortfolioValue: updated?.currentValue ?? amount,
       remainingCash: player.cash,
@@ -3283,25 +3343,25 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 投資槓桿借款 (takeLeverageLoan)
   // ----------------------------------------------------------
-  socket.on(
+  onSafe(
     'takeLeverageLoan',
     (payload: { amount: number; targetAssetName: string }) => {
       const gs = getRoomState(socket);
-      if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+      if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
 
-      const player = gs.players.get(socket.id);
+      const player = gs.players.get(playerIdentity(socket));
       if (!player || !player.isAlive) {
-        socket.emit('error', { message: '玩家不存在或已出局。' });
+        emitClient(socket, 'error', { message: '玩家不存在或已出局。' });
         return;
       }
 
       const result = takeLeverageLoan(player, payload.amount, payload.targetAssetName);
       if (!result.success) {
-        socket.emit('error', { message: result.message });
+        emitClient(socket, 'error', { message: result.message });
         return;
       }
 
-      socket.emit('loanTaken', {
+      emitClient(socket, 'loanTaken', {
         liabilityId: result.liabilityId,
         loanType: 'leverage',
         amount: result.amount,
@@ -3316,23 +3376,23 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 還款 (repayLoan)
   // ----------------------------------------------------------
-  socket.on('repayLoan', (payload: { liabilityId: string; amount: number }) => {
+  onSafe('repayLoan', (payload: { liabilityId: string; amount: number }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
 
-    const player = gs.players.get(socket.id);
+    const player = gs.players.get(playerIdentity(socket));
     if (!player || !player.isAlive) {
-      socket.emit('error', { message: '玩家不存在或已出局。' });
+      emitClient(socket, 'error', { message: '玩家不存在或已出局。' });
       return;
     }
 
-    const result = repayLoan(player, payload.liabilityId, payload.amount);
+    const result = repayRoomLoan(gs.players.values(), player, payload.liabilityId, payload.amount);
     if (!result.success) {
-      socket.emit('error', { message: result.message });
+      emitClient(socket, 'error', { message: result.message });
       return;
     }
 
-    socket.emit('loanRepaid', {
+    emitClient(socket, 'loanRepaid', {
       liabilityId: payload.liabilityId,
       amountPaid: result.amountPaid,
       remainingDebt: result.remainingDebt,
@@ -3346,41 +3406,41 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 觸發全局市場事件 (triggerGlobalEvent) — 主持人專用
   // ----------------------------------------------------------
-  socket.on('getAdaptiveDirectorStatus', (payload?: { roomId?: string }) => {
+  onSafe('getAdaptiveDirectorStatus', (payload?: { roomId?: string }) => {
     const gs = (payload?.roomId ? rooms.get(payload.roomId) : null) ?? getRoomState(socket);
     if (!gs || !isRoomAdmin(socket, gs)) return;
     emitAdaptiveDirectorStatus(gs);
   });
 
-  socket.on('setAdaptiveDirectorEnabled', (payload: { enabled: boolean; roomId?: string }) => {
+  onSafe('setAdaptiveDirectorEnabled', (payload: { enabled: boolean; roomId?: string }) => {
     const gs = (payload?.roomId ? rooms.get(payload.roomId) : null) ?? getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
     if (!isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '只有主持人可以調整自動難度。' });
+      emitClient(socket, 'error', { message: '只有主持人可以調整自動難度。' });
       return;
     }
     gs.adaptiveDirector.enabled = Boolean(payload.enabled);
     emitAdaptiveDirectorStatus(gs);
   });
 
-  socket.on('triggerGlobalEvent', (payload: { eventId: string; roomId?: string }) => {
+  onSafe('triggerGlobalEvent', (payload: { eventId: string; roomId?: string }) => {
     const gs = (payload.roomId ? rooms.get(payload.roomId) : null) ?? getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
     if (!isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '權限不足：僅管理員可觸發全局事件。' });
+      emitClient(socket, 'error', { message: '權限不足：僅管理員可觸發全局事件。' });
       return;
     }
     const event = ADMIN_GLOBAL_EVENT_MAP.get(payload.eventId);
     if (!event) {
-      socket.emit('error', { message: `找不到事件 ID：${payload.eventId}` });
+      emitClient(socket, 'error', { message: `找不到事件 ID：${payload.eventId}` });
       return;
     }
 
     const restriction = worldEventRestriction(gs, event);
     if (restriction || gs.pendingWorldEvent) {
-      socket.emit('error', { message: restriction ?? '已有待登場的世界事件，請先處理或取消。' });
+      emitClient(socket, 'error', { message: restriction ?? '已有待登場的世界事件，請先處理或取消。' });
       return;
     }
     gs.pendingWorldEvent = { id: randomBytes(8).toString('hex'), event, source: 'manual', deferred: false };
@@ -3389,11 +3449,11 @@ io.on('connection', (socket: Socket) => {
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
   });
 
-  socket.on('manageWorldEvent', (payload?: { id?: string; action?: string }) => {
+  onSafe('manageWorldEvent', (payload?: { id?: string; action?: string }) => {
     const gs = getRoomState(socket);
-    if (!gs || !isRoomAdmin(socket, gs)) { socket.emit('error', { message: '只有主持人可以安排世界事件。' }); return; }
-    if (!gs.pendingWorldEvent || gs.pendingWorldEvent.id !== payload?.id) { socket.emit('error', { message: '待登場事件已更新。' }); return; }
-    if (gs.facilitatorScene?.kind === 'global_event') { socket.emit('error', { message: '請使用目前舞台上的按鈕。' }); return; }
+    if (!gs || !isRoomAdmin(socket, gs)) { emitClient(socket, 'error', { message: '只有主持人可以安排世界事件。' }); return; }
+    if (!gs.pendingWorldEvent || gs.pendingWorldEvent.id !== payload?.id) { emitClient(socket, 'error', { message: '待登場事件已更新。' }); return; }
+    if (gs.facilitatorScene?.kind === 'global_event') { emitClient(socket, 'error', { message: '請使用目前舞台上的按鈕。' }); return; }
     if (payload.action === 'cancel') gs.pendingWorldEvent = null;
     else if (payload.action === 'open') { gs.pendingWorldEvent.deferred = false; tryOpenWorldEvent(gs); }
     else return;
@@ -3406,19 +3466,19 @@ io.on('connection', (socket: Socket) => {
   // 起標金額 = downPayment ?? cost；得標者扣現金後該資產直接寫入持有，
   // 起標金額會以「無主來源」（沒有原持有者）銷毀，等同新發行的特殊資產。
   // ----------------------------------------------------------
-  socket.on('triggerSpecialAuction', async (payload: { roomId?: string; cardId?: string }) => {
+  onSafe('triggerSpecialAuction', async (payload: { roomId?: string; cardId?: string }) => {
     const gs = (payload?.roomId ? rooms.get(payload.roomId) : null) ?? getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
     if (!isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '權限不足：僅管理員可觸發特殊拍賣。' });
+      emitClient(socket, 'error', { message: '權限不足：僅管理員可觸發特殊拍賣。' });
       return;
     }
     if (![GamePhase.RatRace, GamePhase.FastTrack].includes(gs.gamePhase) || gs.finalRoundStarted
       || gs.turnInProgress || gs.decisionPhase || gs.facilitatorScene || gs.globalPaydayPending || gs.globalPaydayInProgress
       || Object.keys(gs.activeAuctions ?? {}).length > 0) {
-      socket.emit('error', { message: '請在遊戲進行中，完成目前決策、舞台事件與季度發薪後再開啟拍賣。' });
+      emitClient(socket, 'error', { message: '請在遊戲進行中，完成目前決策、舞台事件與季度發薪後再開啟拍賣。' });
       return;
     }
 
@@ -3429,7 +3489,7 @@ io.on('connection', (socket: Socket) => {
       : pool[Math.floor(Math.random() * pool.length)];
 
     if (!auctionCard) {
-      socket.emit('error', { message: '特殊拍賣牌組已空。' });
+      emitClient(socket, 'error', { message: '特殊拍賣牌組已空。' });
       return;
     }
 
@@ -3522,13 +3582,16 @@ io.on('connection', (socket: Socket) => {
   // 百歲人生：開局流程事件
   // ----------------------------------------------------------
 
-  socket.on('rollSocialClass', () => {
+  onSafe('rollSocialClass', () => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
 
-    const player = gs.players.get(socket.id);
-    if (!player) { socket.emit('error', { message: '玩家不存在。' }); return; }
+    const player = gs.players.get(playerIdentity(socket));
+    if (!player) { emitClient(socket, 'error', { message: '玩家不存在。' }); return; }
 
+    const session = playerSessions.get(player.id);
+    if (session?.setupStep) { emitClient(socket, 'error', { message: '出生背景已確定，不能重複抽取。' }); return; }
+    if (session) session.setupStep = 'allocate';
     const sc = rollSocialClass();
     const config = SOCIAL_CLASS_CONFIG[sc];
 
@@ -3538,7 +3601,7 @@ io.on('connection', (socket: Socket) => {
 
     console.log(`[rollSocialClass] ${player.name}（${gs.gameId}）投胎為「${config.label}」`);
 
-    socket.emit('socialClassRolled', {
+    emitClient(socket, 'socialClassRolled', {
       socialClass: sc,
       label: config.label,
       growthPoints: config.growthPoints,
@@ -3548,27 +3611,30 @@ io.on('connection', (socket: Socket) => {
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 
-  socket.on('allocateGrowthStats', (payload: { academic: number; health: number; social: number; resource: number }) => {
+  onSafe('allocateGrowthStats', (payload: { academic: number; health: number; social: number; resource: number }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
 
-    const player = gs.players.get(socket.id);
-    if (!player) { socket.emit('error', { message: '玩家不存在。' }); return; }
+    const player = gs.players.get(playerIdentity(socket));
+    if (!player) { emitClient(socket, 'error', { message: '玩家不存在。' }); return; }
+    const session = playerSessions.get(player.id);
+    if (session?.setupStep !== 'allocate') { emitClient(socket, 'error', { message: '請先確定出生背景，且成長點數只能分配一次。' }); return; }
 
     const { academic, health, social, resource } = payload;
     const total = academic + health + social + resource;
 
     if (total > player.growthPointsRemaining) {
-      socket.emit('error', { message: `分配點數 (${total}) 超過可用點數 (${player.growthPointsRemaining})。` });
+      emitClient(socket, 'error', { message: `分配點數 (${total}) 超過可用點數 (${player.growthPointsRemaining})。` });
       return;
     }
     if ([academic, health, social, resource].some((v) => v < 0)) {
-      socket.emit('error', { message: '各維度點數不可為負數。' });
+      emitClient(socket, 'error', { message: '各維度點數不可為負數。' });
       return;
     }
 
     const _gsCashBefore = player.cash;
     applyGrowthStats(player, { academic, health, social, resource });
+    session.setupStep = 'career';
     const resourceCashGain = player.cash - _gsCashBefore;
 
     const availableProfessions = getAvailableProfessions(player).map((p) => ({
@@ -3580,7 +3646,7 @@ io.on('connection', (socket: Socket) => {
       hasFlexibleSchedule: p.hasFlexibleSchedule,
     }));
 
-    socket.emit('growthStatsApplied', {
+    emitClient(socket, 'growthStatsApplied', {
       stats: player.stats,
       availableProfessions,
       canContinueEducation: true,
@@ -3590,14 +3656,14 @@ io.on('connection', (socket: Socket) => {
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 
-  socket.on('continueEducation', () => {
+  onSafe('continueEducation', () => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
 
-    const player = gs.players.get(socket.id);
-    if (!player) { socket.emit('error', { message: '玩家不存在。' }); return; }
+    const player = gs.players.get(playerIdentity(socket));
+    if (!player) { emitClient(socket, 'error', { message: '玩家不存在。' }); return; }
     if (player.hasContinuedEducation) {
-      socket.emit('error', { message: '你已選擇繼續進修。' });
+      emitClient(socket, 'error', { message: '你已選擇繼續進修。' });
       return;
     }
 
@@ -3614,7 +3680,7 @@ io.on('connection', (socket: Socket) => {
       hasFlexibleSchedule: p.hasFlexibleSchedule,
     }));
 
-    socket.emit('educationLoanApplied', {
+    emitClient(socket, 'educationLoanApplied', {
       newFQ: player.stats.financialIQ,
       lifeExpGained: LIFE_EXP.CONTINUED_EDUCATION,
       availableProfessions,
@@ -3623,13 +3689,13 @@ io.on('connection', (socket: Socket) => {
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 
-  socket.on('selectQuadrant', (payload: { quadrant: 'E' | 'S' | 'B' | 'I' }) => {
+  onSafe('selectQuadrant', (payload: { quadrant: 'E' | 'S' | 'B' | 'I' }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
-    const player = gs.players.get(socket.id);
-    if (!player) { socket.emit('error', { message: '玩家不存在。' }); return; }
+    const player = gs.players.get(playerIdentity(socket));
+    if (!player) { emitClient(socket, 'error', { message: '玩家不存在。' }); return; }
 
     const { quadrant } = payload;
     const hasEdu = player.hasContinuedEducation;
@@ -3641,7 +3707,7 @@ io.on('connection', (socket: Socket) => {
         player.growthStats.academic < t.academicMin ||
         player.growthStats.resource < t.resourceMin
       ) {
-        socket.emit('error', {
+        emitClient(socket, 'error', {
           message: `${quadrant} 象限門檻：${t.description}（你目前 學識=${player.growthStats.academic}、資源=${player.growthStats.resource}）。`,
         });
         return;
@@ -3668,7 +3734,7 @@ io.on('connection', (socket: Socket) => {
     const chosen = PROFESSIONS.find((p) => p.id === randomId);
 
     if (!chosen) {
-      socket.emit('error', { message: '職業分配失敗，請重試。' });
+      emitClient(socket, 'error', { message: '職業分配失敗，請重試。' });
       return;
     }
 
@@ -3738,7 +3804,7 @@ io.on('connection', (socket: Socket) => {
 
     console.log(`[selectQuadrant] ${player.name}（${roomId}）選擇 ${quadrant} 象限，分配職業：${chosen.name}${hasEdu ? '（進修後）' : ''}`);
 
-    socket.emit('professionAssigned', {
+    emitClient(socket, 'professionAssigned', {
       profession: chosen,
       quadrant,
       initialCashflow: player.monthlyCashflow,
@@ -3759,21 +3825,21 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 申請加盟（buyFranchise）
   // ----------------------------------------------------------
-  socket.on('buyFranchise', () => {
+  onSafe('buyFranchise', () => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
-    const player = gs.players.get(socket.id);
-    if (!player) { socket.emit('error', { message: '玩家不存在。' }); return; }
+    const player = gs.players.get(playerIdentity(socket));
+    if (!player) { emitClient(socket, 'error', { message: '玩家不存在。' }); return; }
 
     if (player.cash < FRANCHISE_CASH_THRESHOLD) {
-      socket.emit('error', { message: `申請加盟需要現金 $${FRANCHISE_CASH_THRESHOLD.toLocaleString()}，你目前不足。` });
+      emitClient(socket, 'error', { message: `申請加盟需要現金 $${FRANCHISE_CASH_THRESHOLD.toLocaleString()}，你目前不足。` });
       return;
     }
 
     const franchise = PROFESSIONS.find((p) => p.id === 'franchise_owner');
-    if (!franchise) { socket.emit('error', { message: '加盟職業設定錯誤。' }); return; }
+    if (!franchise) { emitClient(socket, 'error', { message: '加盟職業設定錯誤。' }); return; }
 
     // ⚠ 實際扣除加盟金（先前的 bug：只檢查門檻不扣錢）
     const _bfCB = player.cash;
@@ -3823,39 +3889,39 @@ io.on('connection', (socket: Socket) => {
       _bfCB, _bfFB, 0, {});
 
     console.log(`[buyFranchise] ${player.name}（${roomId}）成功申請加盟`);
-    socket.emit('franchisePurchased', { professionName: franchise.name, initialCashflow: player.monthlyCashflow });
+    emitClient(socket, 'franchisePurchased', { professionName: franchise.name, initialCashflow: player.monthlyCashflow });
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
   });
 
   // ----------------------------------------------------------
   // 合夥投資（partnershipOffer / partnershipResponse）
   // ----------------------------------------------------------
-  socket.on('partnershipOffer', (payload: { targetPlayerId: string; dealCardId?: string }) => {
+  onSafe('partnershipOffer', (payload: { targetPlayerId: string; dealCardId?: string }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
-    const offeror = gs.players.get(socket.id);
+    const offeror = gs.players.get(playerIdentity(socket));
     const target = gs.players.get(payload.targetPlayerId);
-    if (!offeror || !target) { socket.emit('error', { message: '玩家不存在。' }); return; }
-    if (!target.isAlive) { socket.emit('error', { message: '目標玩家已出局。' }); return; }
+    if (!offeror || !target) { emitClient(socket, 'error', { message: '玩家不存在。' }); return; }
+    if (!target.isAlive) { emitClient(socket, 'error', { message: '目標玩家已出局。' }); return; }
 
     // 儲存待定合夥 offer（用 Map 存放）
     const offerId = `po-${Date.now()}`;
     if (!gs.pendingPartnershipOffers) gs.pendingPartnershipOffers = {};
     gs.pendingPartnershipOffers[offerId] = {
-      offerorId: socket.id,
+      offerorId: playerIdentity(socket),
       targetId: payload.targetPlayerId,
       dealCardId: payload.dealCardId,
       createdAt: Date.now(),
     };
 
     // 通知目標玩家
-    const targetSocket = [...socketRoomMap.entries()].find(([, r]) => r === roomId && gs.players.has(socket.id));
+    const targetSocket = [...socketRoomMap.entries()].find(([, r]) => r === roomId && gs.players.has(playerIdentity(socket)));
     // 廣播給目標玩家的 socket
     emitToRoom(roomId, 'partnershipOfferReceived', {
       offerId,
-      offerorId: socket.id,
+      offerorId: playerIdentity(socket),
       offerorName: offeror.name,
       targetId: payload.targetPlayerId,
       targetName: target.name,
@@ -3865,22 +3931,22 @@ io.on('connection', (socket: Socket) => {
     console.log(`[partnership] ${offeror.name} 邀請 ${target.name} 合夥`);
   });
 
-  socket.on('partnershipResponse', (payload: { offerId: string; accepted: boolean }) => {
+  onSafe('partnershipResponse', (payload: { offerId: string; accepted: boolean }) => {
     const gs = getRoomState(socket);
     if (!gs) return;
     const roomId = gs.gameId;
 
     const offer = gs.pendingPartnershipOffers?.[payload.offerId];
-    if (!offer) { socket.emit('error', { message: '合夥邀請已過期。' }); return; }
+    if (!offer) { emitClient(socket, 'error', { message: '合夥邀請已過期。' }); return; }
 
     const offeror = gs.players.get(offer.offerorId);
-    const target = gs.players.get(socket.id);
+    const target = gs.players.get(playerIdentity(socket));
     if (!offeror || !target) return;
 
     delete gs.pendingPartnershipOffers![payload.offerId];
 
     if (!payload.accepted) {
-      emitToRoom(roomId, 'partnershipDeclined', { offerorId: offer.offerorId, targetId: socket.id });
+      emitToRoom(roomId, 'partnershipDeclined', { offerorId: offer.offerorId, targetId: playerIdentity(socket) });
       return;
     }
 
@@ -3908,7 +3974,7 @@ io.on('connection', (socket: Socket) => {
 
     emitToRoom(roomId, 'partnershipAccepted', {
       offerorId: offer.offerorId, offerorName: offeror.name,
-      targetId: socket.id,        targetName: target.name,
+      targetId: playerIdentity(socket),        targetName: target.name,
       dividend,
       passiveSum,
     });
@@ -3919,67 +3985,71 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // P2P 借貸（loanOffer / loanResponse / repayP2PLoan）
   // ----------------------------------------------------------
-  socket.on('loanOffer', (payload: { targetPlayerId: string; amount: number; monthlyRate: number }) => {
+  onSafe('loanOffer', (payload: { targetPlayerId: string; amount: number; monthlyRate: number }) => {
     const gs = getRoomState(socket);
     if (!gs) return;
     const roomId = gs.gameId;
 
-    const lender = gs.players.get(socket.id);
+    const lender = gs.players.get(playerIdentity(socket));
     const borrower = gs.players.get(payload.targetPlayerId);
-    if (!lender || !borrower) { socket.emit('error', { message: '玩家不存在。' }); return; }
-    if (lender.cash < payload.amount) { socket.emit('error', { message: `現金不足（$${payload.amount}）。` }); return; }
-    if (payload.monthlyRate < 0 || payload.monthlyRate > 0.1) { socket.emit('error', { message: '月利率需在 0–10% 之間。' }); return; }
+    if (!lender || !borrower) { emitClient(socket, 'error', { message: '玩家不存在。' }); return; }
+    const invalid = validatePlayerLoan(lender, borrower, payload.amount, payload.monthlyRate);
+    if (invalid) { emitClient(socket, 'error', { message: invalid }); return; }
+    if (lender.cash < payload.amount) { emitClient(socket, 'error', { message: `現金不足（$${payload.amount}）。` }); return; }
+    if (payload.monthlyRate < 0 || payload.monthlyRate > 0.1) { emitClient(socket, 'error', { message: '月利率需在 0–10% 之間。' }); return; }
 
-    const offerId = `lo-${Date.now()}`;
+    const offerId = `lo-${randomBytes(12).toString("hex")}`;
     if (!gs.pendingLoanOffers) gs.pendingLoanOffers = {};
-    gs.pendingLoanOffers[offerId] = { lenderId: socket.id, borrowerId: payload.targetPlayerId, amount: payload.amount, monthlyRate: payload.monthlyRate, createdAt: Date.now() };
+    gs.pendingLoanOffers[offerId] = { lenderId: playerIdentity(socket), borrowerId: payload.targetPlayerId, amount: payload.amount, monthlyRate: payload.monthlyRate, createdAt: Date.now() };
 
     emitToRoom(roomId, 'loanOfferReceived', {
-      offerId, lenderId: socket.id, lenderName: lender.name,
+      offerId, lenderId: playerIdentity(socket), lenderName: lender.name,
       borrowerId: payload.targetPlayerId, borrowerName: borrower.name,
       amount: payload.amount, monthlyRate: payload.monthlyRate,
     });
   });
 
-  socket.on('loanResponse', (payload: { offerId: string; accepted: boolean }) => {
+  onSafe('loanResponse', (payload: { offerId: string; accepted: boolean }) => {
     const gs = getRoomState(socket);
     if (!gs) return;
     const roomId = gs.gameId;
 
     const offer = gs.pendingLoanOffers?.[payload.offerId];
-    if (!offer) { socket.emit('error', { message: '借貸邀請已過期。' }); return; }
+    if (!offer) { emitClient(socket, 'error', { message: '借貸邀請已過期。' }); return; }
 
     // ⚠ 安全性：只有「指定的借款人」可以接受／拒絕這筆 offer
-    if (socket.id !== offer.borrowerId) {
-      socket.emit('error', { message: '此借貸邀請不是給你的，無權回應。' });
+    if (playerIdentity(socket) !== offer.borrowerId) {
+      emitClient(socket, 'error', { message: '此借貸邀請不是給你的，無權回應。' });
       return;
     }
 
     const lender = gs.players.get(offer.lenderId);
-    const borrower = gs.players.get(socket.id);
+    const borrower = gs.players.get(playerIdentity(socket));
     if (!lender || !borrower) return;
 
     delete gs.pendingLoanOffers![payload.offerId];
 
     if (!payload.accepted) {
-      emitToRoom(roomId, 'loanDeclined', { lenderId: offer.lenderId, borrowerId: socket.id });
+      emitToRoom(roomId, 'loanDeclined', { lenderId: offer.lenderId, borrowerId: playerIdentity(socket) });
       return;
     }
+    const invalid = Date.now() - offer.createdAt > 120_000 ? '借貸邀請已過期，請重新提出。' : validatePlayerLoan(lender, borrower, offer.amount, offer.monthlyRate);
+    if (invalid) { emitClient(socket, 'error', { message: invalid }); return; }
 
-    if (lender.cash < offer.amount) { socket.emit('error', { message: '貸款方現金已不足。' }); return; }
+    if (lender.cash < offer.amount) { emitClient(socket, 'error', { message: '貸款方現金已不足。' }); return; }
 
     // 資金轉移
     lender.cash -= offer.amount;
     borrower.cash += offer.amount;
 
-    const loanId = `p2p-${Date.now()}`;
+    const loanId = `p2p-${randomBytes(12).toString("hex")}`;
     const monthlyInterest = Math.round(offer.amount * offer.monthlyRate);
 
     // 貸款方：新增「借出款項」資產
     lender.assets.push({
       id: loanId,
       name: `借出給 ${borrower.name}`,
-      type: 'Business' as import('./gameConstants').AssetType,
+      type: AssetType.Other,
       cost: offer.amount,
       currentValue: offer.amount,
       monthlyCashflow: monthlyInterest,
@@ -3991,13 +4061,14 @@ io.on('connection', (socket: Socket) => {
       name: `向 ${lender.name} 借款`,
       totalDebt: offer.amount,
       monthlyPayment: monthlyInterest,
+      monthlyRate: offer.monthlyRate,
     });
     // ⚠ 不再寫入 otherExpenses（會被無擔保負債月付自動加進 totalExpenses）。
     // 過去這樣寫會導致還清後 otherExpenses 殘留幽靈月息。
 
     emitToRoom(roomId, 'loanAccepted', {
       loanId, lenderId: offer.lenderId, lenderName: lender.name,
-      borrowerId: socket.id, borrowerName: borrower.name,
+      borrowerId: playerIdentity(socket), borrowerName: borrower.name,
       amount: offer.amount, monthlyRate: offer.monthlyRate, monthlyInterest,
     });
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
@@ -4008,21 +4079,21 @@ io.on('connection', (socket: Socket) => {
   // P2P 借貸：「主動請求借款」（loanRequest / loanRequestResponse）
   // 借款人發起 → 指定的貸款方可以接受/拒絕
   // ----------------------------------------------------------
-  socket.on('loanRequest', (payload: { targetPlayerId: string; amount: number; monthlyRate: number }) => {
+  onSafe('loanRequest', (payload: { targetPlayerId: string; amount: number; monthlyRate: number }) => {
     const gs = getRoomState(socket);
     if (!gs) return;
     const roomId = gs.gameId;
 
-    const borrower = gs.players.get(socket.id);
+    const borrower = gs.players.get(playerIdentity(socket));
     const lender = gs.players.get(payload.targetPlayerId);
-    if (!borrower || !lender) { socket.emit('error', { message: '玩家不存在。' }); return; }
-    if (!lender.isAlive) { socket.emit('error', { message: '對方已出局。' }); return; }
-    if (borrower.id === lender.id) { socket.emit('error', { message: '不能向自己借款。' }); return; }
+    if (!borrower || !lender) { emitClient(socket, 'error', { message: '玩家不存在。' }); return; }
+    if (!lender.isAlive) { emitClient(socket, 'error', { message: '對方已出局。' }); return; }
+    if (borrower.id === lender.id) { emitClient(socket, 'error', { message: '不能向自己借款。' }); return; }
     if (!Number.isFinite(payload.amount) || payload.amount <= 0) {
-      socket.emit('error', { message: '借款金額必須為正數。' }); return;
+      emitClient(socket, 'error', { message: '借款金額必須為正數。' }); return;
     }
     if (payload.monthlyRate < 0 || payload.monthlyRate > 0.1) {
-      socket.emit('error', { message: '月利率需在 0–10% 之間。' }); return;
+      emitClient(socket, 'error', { message: '月利率需在 0–10% 之間。' }); return;
     }
     // 借款人現有無擔保負債 + 此次借款不可超過信用上限
     const _existingUnsecured = (() => {
@@ -4035,43 +4106,43 @@ io.on('connection', (socket: Socket) => {
     const { getLoanLimit } = require('./gameConfig');
     const maxLoan = getLoanLimit(borrower.creditScore);
     if (_existingUnsecured + payload.amount > maxLoan) {
-      socket.emit('error', {
+      emitClient(socket, 'error', {
         message: `超過你的借款上限 $${maxLoan.toLocaleString()}（已用 $${_existingUnsecured.toLocaleString()}）。`,
       });
       return;
     }
 
-    const requestId = `lr-${Date.now()}`;
+    const requestId = `lr-${randomBytes(12).toString("hex")}`;
     if (!gs.pendingLoanRequests) gs.pendingLoanRequests = {};
     gs.pendingLoanRequests[requestId] = {
-      borrowerId: socket.id, lenderId: payload.targetPlayerId,
+      borrowerId: playerIdentity(socket), lenderId: payload.targetPlayerId,
       amount: payload.amount, monthlyRate: payload.monthlyRate, createdAt: Date.now(),
     };
 
     emitToRoom(roomId, 'loanRequestReceived', {
       requestId,
-      borrowerId: socket.id, borrowerName: borrower.name,
+      borrowerId: playerIdentity(socket), borrowerName: borrower.name,
       lenderId: payload.targetPlayerId, lenderName: lender.name,
       amount: payload.amount, monthlyRate: payload.monthlyRate,
     });
     console.log(`[loanRequest] ${borrower.name} 請求 ${lender.name} 借款 $${payload.amount}（月利率 ${(payload.monthlyRate * 100).toFixed(2)}%）`);
   });
 
-  socket.on('loanRequestResponse', (payload: { requestId: string; accepted: boolean }) => {
+  onSafe('loanRequestResponse', (payload: { requestId: string; accepted: boolean }) => {
     const gs = getRoomState(socket);
     if (!gs) return;
     const roomId = gs.gameId;
 
     const req = gs.pendingLoanRequests?.[payload.requestId];
-    if (!req) { socket.emit('error', { message: '借款請求已過期。' }); return; }
+    if (!req) { emitClient(socket, 'error', { message: '借款請求已過期。' }); return; }
 
     // 安全性：只有「指定的貸款方」可以接受／拒絕
-    if (socket.id !== req.lenderId) {
-      socket.emit('error', { message: '此借款請求不是給你的，無權回應。' });
+    if (playerIdentity(socket) !== req.lenderId) {
+      emitClient(socket, 'error', { message: '此借款請求不是給你的，無權回應。' });
       return;
     }
 
-    const lender = gs.players.get(socket.id);
+    const lender = gs.players.get(playerIdentity(socket));
     const borrower = gs.players.get(req.borrowerId);
     if (!lender || !borrower) return;
 
@@ -4081,27 +4152,29 @@ io.on('connection', (socket: Socket) => {
       emitToRoom(roomId, 'loanRequestDeclined', {
         requestId: payload.requestId,
         borrowerId: req.borrowerId,
-        lenderId: socket.id,
+        lenderId: playerIdentity(socket),
       });
       return;
     }
 
     if (lender.cash < req.amount) {
-      socket.emit('error', { message: '你的現金已不足以提供此筆借款。' });
+      emitClient(socket, 'error', { message: '你的現金已不足以提供此筆借款。' });
       return;
     }
+    const invalid = Date.now() - req.createdAt > 120_000 ? '借貸邀請已過期，請重新提出。' : validatePlayerLoan(lender, borrower, req.amount, req.monthlyRate);
+    if (invalid) { emitClient(socket, 'error', { message: invalid }); return; }
 
     // 資金轉移
     lender.cash -= req.amount;
     borrower.cash += req.amount;
 
-    const loanId = `p2p-${Date.now()}`;
+    const loanId = `p2p-${randomBytes(12).toString("hex")}`;
     const monthlyInterest = Math.round(req.amount * req.monthlyRate);
 
     lender.assets.push({
       id: loanId,
       name: `借出給 ${borrower.name}`,
-      type: 'Business' as import('./gameConstants').AssetType,
+      type: AssetType.Other,
       cost: req.amount,
       currentValue: req.amount,
       monthlyCashflow: monthlyInterest,
@@ -4112,11 +4185,12 @@ io.on('connection', (socket: Socket) => {
       name: `向 ${lender.name} 借款`,
       totalDebt: req.amount,
       monthlyPayment: monthlyInterest,
+      monthlyRate: req.monthlyRate,
     });
 
     emitToRoom(roomId, 'loanAccepted', {
       loanId,
-      lenderId: socket.id, lenderName: lender.name,
+      lenderId: playerIdentity(socket), lenderName: lender.name,
       borrowerId: req.borrowerId, borrowerName: borrower.name,
       amount: req.amount, monthlyRate: req.monthlyRate, monthlyInterest,
       initiatedBy: 'borrower',
@@ -4128,30 +4202,30 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // BigDeal 競標（bidDeal）
   // ----------------------------------------------------------
-  socket.on('bidDeal', (payload: { auctionId: string; bidAmount: number }) => {
+  onSafe('bidDeal', (payload: { auctionId: string; bidAmount: number }) => {
     const gs = getRoomState(socket);
     if (!gs) return;
     const roomId = gs.gameId;
 
-    const bidder = gs.players.get(socket.id);
+    const bidder = gs.players.get(playerIdentity(socket));
     if (!bidder || !bidder.isAlive) return;
     if (!payload || typeof payload.auctionId !== 'string' || !Number.isSafeInteger(payload.bidAmount) || payload.bidAmount <= 0) {
-      socket.emit('error', { message: '請輸入有效的正整數出價。' }); return;
+      emitClient(socket, 'error', { message: '請輸入有效的正整數出價。' }); return;
     }
 
     if (!gs.activeAuctions) gs.activeAuctions = {};
     const auction = gs.activeAuctions[payload.auctionId];
-    if (!auction) { socket.emit('error', { message: '競標已結束或不存在。' }); return; }
-    if (bidder.cash < payload.bidAmount) { socket.emit('error', { message: '現金不足。' }); return; }
-    if (payload.bidAmount < (auction.minBid ?? 0)) { socket.emit('error', { message: `出價不得低於起標金額 $${(auction.minBid ?? 0).toLocaleString()}。` }); return; }
-    if (payload.bidAmount <= (auction.highestBid ?? 0)) { socket.emit('error', { message: '出價需高於目前最高標。' }); return; }
+    if (!auction) { emitClient(socket, 'error', { message: '競標已結束或不存在。' }); return; }
+    if (bidder.cash < payload.bidAmount) { emitClient(socket, 'error', { message: '現金不足。' }); return; }
+    if (payload.bidAmount < (auction.minBid ?? 0)) { emitClient(socket, 'error', { message: `出價不得低於起標金額 $${(auction.minBid ?? 0).toLocaleString()}。` }); return; }
+    if (payload.bidAmount <= (auction.highestBid ?? 0)) { emitClient(socket, 'error', { message: '出價需高於目前最高標。' }); return; }
 
     auction.highestBid = payload.bidAmount;
-    auction.highestBidderId = socket.id;
+    auction.highestBidderId = playerIdentity(socket);
     auction.highestBidderName = bidder.name;
 
     emitToRoom(roomId, 'dealBidUpdated', {
-      auctionId: payload.auctionId, bidderId: socket.id, bidderName: bidder.name,
+      auctionId: payload.auctionId, bidderId: playerIdentity(socket), bidderName: bidder.name,
       bidAmount: payload.bidAmount, newHighest: payload.bidAmount,
     });
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
@@ -4160,25 +4234,25 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 人生事件祝賀（congratulate）
   // ----------------------------------------------------------
-  socket.on('congratulate', (payload: { targetPlayerId: string; event: string }) => {
+  onSafe('congratulate', (payload: { targetPlayerId: string; event: string }) => {
     const gs = getRoomState(socket);
     if (!gs) return;
     const roomId = gs.gameId;
 
-    const sender = gs.players.get(socket.id);
+    const sender = gs.players.get(playerIdentity(socket));
     const target = gs.players.get(payload.targetPlayerId);
     if (!sender || !target) return;
-    if (!sender.isAlive) { socket.emit('error', { message: '已出局玩家無法送祝賀。' }); return; }
-    if (!target.isAlive) { socket.emit('error', { message: '對方已離世，無法送上祝賀。' }); return; }
+    if (!sender.isAlive) { emitClient(socket, 'error', { message: '已出局玩家無法送祝賀。' }); return; }
+    if (!target.isAlive) { emitClient(socket, 'error', { message: '對方已離世，無法送上祝賀。' }); return; }
     const CONGRATS_AMOUNT = 7_500;
-    if (sender.cash < CONGRATS_AMOUNT) { socket.emit('error', { message: `現金不足（需 $${CONGRATS_AMOUNT.toLocaleString()}）。` }); return; }
+    if (sender.cash < CONGRATS_AMOUNT) { emitClient(socket, 'error', { message: `現金不足（需 $${CONGRATS_AMOUNT.toLocaleString()}）。` }); return; }
 
     sender.cash -= CONGRATS_AMOUNT;
     target.cash += CONGRATS_AMOUNT;
     target.stats.network = Math.min(target.profession.salaryType === 'nt_driven' ? Infinity : 10, target.stats.network + 0.2);
 
     emitToRoom(roomId, 'congratulationSent', {
-      senderId: socket.id, senderName: sender.name,
+      senderId: playerIdentity(socket), senderName: sender.name,
       targetId: payload.targetPlayerId, targetName: target.name,
       event: payload.event, amount: CONGRATS_AMOUNT,
     });
@@ -4192,23 +4266,36 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 主持人踢出玩家 (kickPlayer) — 主要用於清除卡在設定階段或長期斷線的玩家
   // ----------------------------------------------------------
-  socket.on('kickPlayer', (payload: { playerId: string }) => {
+  onSafe('kickPlayer', (payload: { playerId: string }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
     if (!isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '只有管理員可以踢出玩家。' });
+      emitClient(socket, 'error', { message: '只有管理員可以踢出玩家。' });
       return;
     }
 
     const target = gs.players.get(payload.playerId);
     if (!target) {
-      socket.emit('error', { message: '找不到該玩家。' });
+      emitClient(socket, 'error', { message: '找不到該玩家。' });
       return;
     }
 
     const wasCurrentTurn = gs.currentPlayerTurnId === payload.playerId;
+    if (gs.decisionPhase || gs.facilitatorScene || gs.turnInProgress || gs.globalPaydayInProgress) {
+      emitClient(socket, 'error', { message: '請先收束目前決策，再移除玩家。' }); return;
+    }
+    if (target.assets.some(a => a.id.startsWith('p2p-')) || target.liabilities.some(l => l.id.startsWith('p2p-'))) {
+      emitClient(socket, 'error', { message: '此玩家仍有玩家借貸，請先結清，以免另一方帳目遺失。' }); return;
+    }
+    const targetSocket = getPlayerSocket(target.id);
+    targetSocket?.leave(target.id);
+    targetSocket?.leave(roomId);
+    socketRoomMap.delete(target.id);
+    playerSessions.delete(target.id);
+    privateReplay.delete(target.id);
+    targetSocket?.emit('playerKicked', { playerId: target.id, playerName: target.name });
     gs.removePlayer(payload.playerId);
     if (wasCurrentTurn && gs.playerOrder.length > 0) {
       advanceTurn(gs);
@@ -4219,17 +4306,17 @@ io.on('connection', (socket: Socket) => {
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
   });
 
-  socket.on('startGame', (payload?: { durationMinutes?: number; force?: boolean }) => {
+  onSafe('startGame', (payload?: { durationMinutes?: number; force?: boolean }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
     if (!isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '只有管理員可以啟動遊戲。' });
+      emitClient(socket, 'error', { message: '只有管理員可以啟動遊戲。' });
       return;
     }
     if (gs.players.size === 0) {
-      socket.emit('error', { message: '目前沒有玩家，請先讓至少一位玩家加入後再啟動遊戲。' });
+      emitClient(socket, 'error', { message: '目前沒有玩家，請先讓至少一位玩家加入後再啟動遊戲。' });
       return;
     }
 
@@ -4244,7 +4331,7 @@ io.on('connection', (socket: Socket) => {
     if (notReady.length > 0) {
       if (!payload?.force) {
         const names = notReady.map((p) => p.name).join('、');
-        socket.emit('error', {
+        emitClient(socket, 'error', {
           message: `以下玩家尚未完成職業選擇：${names}。可請他們完成或按「強制開始」由系統自動分配。`,
         });
         return;
@@ -4305,17 +4392,17 @@ io.on('connection', (socket: Socket) => {
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
   });
 
-  socket.on('pauseGame', (payload?: { reason?: string }) => {
+  onSafe('pauseGame', (payload?: { reason?: string }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
     if (!isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '只有管理員可以暫停遊戲。' });
+      emitClient(socket, 'error', { message: '只有管理員可以暫停遊戲。' });
       return;
     }
     if (gs.pausedAt !== null) {
-      socket.emit('error', { message: '遊戲已在暫停中。' });
+      emitClient(socket, 'error', { message: '遊戲已在暫停中。' });
       return;
     }
 
@@ -4330,25 +4417,25 @@ io.on('connection', (socket: Socket) => {
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
   });
 
-  socket.on('resumeGame', () => {
+  onSafe('resumeGame', () => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
     if (!isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '只有管理員可以恢復遊戲。' });
+      emitClient(socket, 'error', { message: '只有管理員可以恢復遊戲。' });
       return;
     }
     if (gs.decisionPhase) {
-      socket.emit('error', { message: '目前是主持人控制的決策階段，請使用「結束決策並繼續」。' });
+      emitClient(socket, 'error', { message: '目前是主持人控制的決策階段，請使用「結束決策並繼續」。' });
       return;
     }
     if (gs.facilitatorScene) {
-      socket.emit('error', { message: '大螢幕舞台事件尚未結束，請先揭曉並關閉舞台。' });
+      emitClient(socket, 'error', { message: '大螢幕舞台事件尚未結束，請先揭曉並關閉舞台。' });
       return;
     }
     if (gs.pausedAt === null) {
-      socket.emit('error', { message: '遊戲未在暫停中。' });
+      emitClient(socket, 'error', { message: '遊戲未在暫停中。' });
       return;
     }
 
@@ -4367,7 +4454,7 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 主持人導演模式：所有內容只在大螢幕公開，並由主持人揭曉
   // ----------------------------------------------------------
-  socket.on('startFacilitatorScene', (payload?: {
+  onSafe('startFacilitatorScene', (payload?: {
     kind?: string;
     cardId?: string;
     contractId?: string;
@@ -4381,26 +4468,26 @@ io.on('connection', (socket: Socket) => {
   }) => {
     const gs = getRoomState(socket);
     if (!gs || !isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '權限不足：只有主持人可以啟動大螢幕舞台事件。' });
+      emitClient(socket, 'error', { message: '權限不足：只有主持人可以啟動大螢幕舞台事件。' });
       return;
     }
     if (gs.gamePhase !== GamePhase.RatRace && gs.gamePhase !== GamePhase.FastTrack) {
-      socket.emit('error', { message: '主持人導演事件只會在遊戲進行中開放。' });
+      emitClient(socket, 'error', { message: '主持人導演事件只會在遊戲進行中開放。' });
       return;
     }
     if (gs.facilitatorScene) {
-      socket.emit('error', { message: '目前已有舞台事件，請先完成或關閉。' });
+      emitClient(socket, 'error', { message: '目前已有舞台事件，請先完成或關閉。' });
       return;
     }
     if (gs.turnInProgress || gs.decisionPhase || gs.globalPaydayPending || gs.globalPaydayInProgress) {
-      socket.emit('error', { message: '請先完成目前玩家決策或季度發薪，再啟動舞台事件。' });
+      emitClient(socket, 'error', { message: '請先完成目前玩家決策或季度發薪，再啟動舞台事件。' });
       return;
     }
 
     if (payload?.kind === 'community') {
       const card = COMMUNITY_CHOICE_CARDS.find((candidate) => candidate.id === payload.cardId);
       if (!card) {
-        socket.emit('error', { message: '找不到這張共同抉擇事件。' });
+        emitClient(socket, 'error', { message: '找不到這張共同抉擇事件。' });
         return;
       }
       beginFacilitatorScene(gs, {
@@ -4417,7 +4504,7 @@ io.on('connection', (socket: Socket) => {
     if (payload?.kind === 'echo') {
       const echo = findDecisionEcho(gs);
       if (!echo) {
-        socket.emit('error', { message: '目前還沒有發生至少 8 年、且適合回看的關鍵選擇。' });
+        emitClient(socket, 'error', { message: '目前還沒有發生至少 8 年、且適合回看的關鍵選擇。' });
         return;
       }
       beginFacilitatorScene(gs, {
@@ -4437,13 +4524,13 @@ io.on('connection', (socket: Socket) => {
       const playerA = gs.players.get(payload.playerAId ?? '');
       const playerB = gs.players.get(payload.playerBId ?? '');
       if (!contract || !playerA?.isAlive || !playerB?.isAlive || playerA.id === playerB.id) {
-        socket.emit('error', { message: '請選擇兩位不同且仍在遊戲中的玩家與有效契約。' });
+        emitClient(socket, 'error', { message: '請選擇兩位不同且仍在遊戲中的玩家與有效契約。' });
         return;
       }
       const requiredA = contractId === 'mutual_aid' ? 15_000 : contractId === 'joint_venture' ? 10_000 : 8_000;
       const requiredB = contractId === 'mutual_aid' ? 0 : contractId === 'joint_venture' ? 10_000 : 8_000;
       if (playerA.cash < requiredA || playerB.cash < requiredB) {
-        socket.emit('error', { message: '其中一位玩家的現金不足以成立這份契約。' });
+        emitClient(socket, 'error', { message: '其中一位玩家的現金不足以成立這份契約。' });
         return;
       }
       beginFacilitatorScene(gs, {
@@ -4466,7 +4553,7 @@ io.on('connection', (socket: Socket) => {
       const deceased = gs.players.get(payload.deceasedPlayerId ?? '');
       const beneficiary = gs.players.get(payload.beneficiaryId ?? '');
       if (!legacy || !deceased || deceased.isAlive || deceased.legacyActionUsed || !beneficiary?.isAlive) {
-        socket.emit('error', { message: '請選擇尚未傳承的已故玩家，以及一位仍在遊戲中的承接者。' });
+        emitClient(socket, 'error', { message: '請選擇尚未傳承的已故玩家，以及一位仍在遊戲中的承接者。' });
         return;
       }
       beginFacilitatorScene(gs, {
@@ -4491,17 +4578,17 @@ io.on('connection', (socket: Socket) => {
           ? 'matchmaker'
           : 'love';
       if (!player?.isAlive || player.isMarried) {
-        socket.emit('error', { message: '請選擇一位仍在遊戲中的未婚玩家。' });
+        emitClient(socket, 'error', { message: '請選擇一位仍在遊戲中的未婚玩家。' });
         return;
       }
       if ((route === 'love' || route === 'matchmaker') && (!player.relationshipActive || player.relationshipPoints < RELATIONSHIP_MARRIAGE_THRESHOLD)) {
-        socket.emit('error', { message: `關係經營值需達 ${RELATIONSHIP_MARRIAGE_THRESHOLD} 才能提出婚姻。` });
+        emitClient(socket, 'error', { message: `關係經營值需達 ${RELATIONSHIP_MARRIAGE_THRESHOLD} 才能提出婚姻。` });
         return;
       }
       if (route === 'arranged') {
         const cost = getArrangedMarriageCost(getPlayerAge(gs, player));
         if (player.isBedridden || player.stats.health < HP_ACTIVITY_THRESHOLDS.arrangedMarriage || player.cash < cost) {
-          socket.emit('error', { message: `付費婚配需要健康 ${HP_ACTIVITY_THRESHOLDS.arrangedMarriage} 以上與現金 $${cost.toLocaleString()}。` });
+          emitClient(socket, 'error', { message: `付費婚配需要健康 ${HP_ACTIVITY_THRESHOLDS.arrangedMarriage} 以上與現金 $${cost.toLocaleString()}。` });
           return;
         }
       }
@@ -4512,26 +4599,26 @@ io.on('connection', (socket: Socket) => {
     if (payload?.kind === 'family') {
       const player = gs.players.get(payload.playerId ?? '');
       if (!player?.isAlive) {
-        socket.emit('error', { message: '請選擇一位仍在遊戲中的玩家。' });
+        emitClient(socket, 'error', { message: '請選擇一位仍在遊戲中的玩家。' });
         return;
       }
       startFamilyScene(gs, player, player.isInFastTrack ? 'outer' : 'inner');
       return;
     }
 
-    socket.emit('error', { message: '未知的主持人導演事件。' });
+    emitClient(socket, 'error', { message: '未知的主持人導演事件。' });
   });
 
-  socket.on('resolveFacilitatorScene', (payload?: { sceneId?: string; choiceId?: string }) => {
+  onSafe('resolveFacilitatorScene', (payload?: { sceneId?: string; choiceId?: string }) => {
     const gs = getRoomState(socket);
     if (!gs || !isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '權限不足：只有主持人可以揭曉舞台事件。' });
+      emitClient(socket, 'error', { message: '權限不足：只有主持人可以揭曉舞台事件。' });
       return;
     }
     const scene = gs.facilitatorScene;
     const context = gs.facilitatorSceneContext;
     if (!scene || !context || scene.stage !== 'prompt' || (payload?.sceneId && payload.sceneId !== scene.id)) {
-      socket.emit('error', { message: '舞台事件已更新，請重新操作。' });
+      emitClient(socket, 'error', { message: '舞台事件已更新，請重新操作。' });
       return;
     }
     const choiceId = payload?.choiceId ?? '';
@@ -4539,16 +4626,16 @@ io.on('connection', (socket: Socket) => {
     if (scene.kind === 'global_event') {
       const pending = gs.pendingWorldEvent;
       if (!pending || context.worldEventId !== pending.id) {
-        socket.emit('error', { message: '世界事件已更新，請關閉舞台後重新安排。' }); return;
+        emitClient(socket, 'error', { message: '世界事件已更新，請關閉舞台後重新安排。' }); return;
       }
       if (choiceId === 'defer') {
         pending.deferred = true;
         closeFacilitatorScene(gs);
         return;
       }
-      if (choiceId !== 'apply') { socket.emit('error', { message: '請選擇揭曉或延後。' }); return; }
+      if (choiceId !== 'apply') { emitClient(socket, 'error', { message: '請選擇揭曉或延後。' }); return; }
       const restriction = worldEventRestriction(gs, pending.event);
-      if (restriction) { socket.emit('error', { message: restriction }); return; }
+      if (restriction) { emitClient(socket, 'error', { message: restriction }); return; }
       if (pending.source === 'automatic' && hasFragilePlayers(gs) && pending.event.effects.some((effect) =>
         (effect.multiplier ?? 1) < 1 || (effect.type === 'ExpenseChange' && (effect.flatAmount ?? 0) > 0)
         || (effect.type === 'HealthChange' && (effect.flatAmount ?? 0) < 0))) {
@@ -4582,7 +4669,7 @@ io.on('connection', (socket: Socket) => {
     if (scene.kind === 'community') {
       const result = applyCommunityChoice(gs, String(context.cardId ?? ''), choiceId);
       if (!result) {
-        socket.emit('error', { message: '請選擇有效的共同決策。' });
+        emitClient(socket, 'error', { message: '請選擇有效的共同決策。' });
         return;
       }
       const optionLabel = scene.options?.find((option) => option.id === choiceId)?.label ?? '共同決策';
@@ -4592,13 +4679,13 @@ io.on('connection', (socket: Socket) => {
 
     if (scene.kind === 'echo') {
       if (choiceId !== 'reveal') {
-        socket.emit('error', { message: '請由主持人揭曉決策回聲。' });
+        emitClient(socket, 'error', { message: '請由主持人揭曉決策回聲。' });
         return;
       }
       const player = gs.players.get(String(context.playerId ?? ''));
       const event = context.event as PlayerEvent | undefined;
       if (!player || !event) {
-        socket.emit('error', { message: '找不到這次決策回聲的原始資料。' });
+        emitClient(socket, 'error', { message: '找不到這次決策回聲的原始資料。' });
         return;
       }
       gs.facilitatorEchoHistory.add(String(context.eventKey ?? ''));
@@ -4612,20 +4699,20 @@ io.on('connection', (socket: Socket) => {
         return;
       }
       if (choiceId !== 'accept') {
-        socket.emit('error', { message: '請確認是否成立合作契約。' });
+        emitClient(socket, 'error', { message: '請確認是否成立合作契約。' });
         return;
       }
       const contractId = context.contractId as keyof typeof COOPERATION_CONTRACTS;
       const playerA = gs.players.get(String(context.playerAId ?? ''));
       const playerB = gs.players.get(String(context.playerBId ?? ''));
       if (!COOPERATION_CONTRACTS[contractId] || !playerA?.isAlive || !playerB?.isAlive) {
-        socket.emit('error', { message: '契約參與者狀態已改變，無法成立。' });
+        emitClient(socket, 'error', { message: '契約參與者狀態已改變，無法成立。' });
         return;
       }
       const requiredA = contractId === 'mutual_aid' ? 15_000 : contractId === 'joint_venture' ? 10_000 : 8_000;
       const requiredB = contractId === 'mutual_aid' ? 0 : contractId === 'joint_venture' ? 10_000 : 8_000;
       if (playerA.cash < requiredA || playerB.cash < requiredB) {
-        socket.emit('error', { message: '玩家目前現金已不足，這份契約沒有成立。' });
+        emitClient(socket, 'error', { message: '玩家目前現金已不足，這份契約沒有成立。' });
         return;
       }
       revealFacilitatorResult(gs, '合作契約正式成立', applyCooperationContract(gs, contractId, playerA, playerB));
@@ -4638,14 +4725,14 @@ io.on('connection', (socket: Socket) => {
         return;
       }
       if (choiceId !== 'accept') {
-        socket.emit('error', { message: '請確認是否完成傳承。' });
+        emitClient(socket, 'error', { message: '請確認是否完成傳承。' });
         return;
       }
       const legacyId = context.legacyId as keyof typeof LEGACY_CHOICES;
       const deceased = gs.players.get(String(context.deceasedPlayerId ?? ''));
       const beneficiary = gs.players.get(String(context.beneficiaryId ?? ''));
       if (!LEGACY_CHOICES[legacyId] || !deceased || deceased.isAlive || deceased.legacyActionUsed || !beneficiary?.isAlive) {
-        socket.emit('error', { message: '傳承參與者狀態已改變，請重新安排。' });
+        emitClient(socket, 'error', { message: '傳承參與者狀態已改變，請重新安排。' });
         return;
       }
       revealFacilitatorResult(gs, '影響力被留下來了', applyLegacyAction(gs, legacyId, deceased, beneficiary));
@@ -4654,12 +4741,12 @@ io.on('connection', (socket: Socket) => {
 
     if (scene.kind === 'family') {
       if (choiceId !== 'reveal') {
-        socket.emit('error', { message: '請由主持人揭曉家庭事件。' });
+        emitClient(socket, 'error', { message: '請由主持人揭曉家庭事件。' });
         return;
       }
       const player = gs.players.get(String(context.playerId ?? ''));
       if (!player?.isAlive) {
-        socket.emit('error', { message: '這位玩家目前無法進行家庭事件。' });
+        emitClient(socket, 'error', { message: '這位玩家目前無法進行家庭事件。' });
         return;
       }
       resolveFamilyScene(gs, player);
@@ -4669,7 +4756,7 @@ io.on('connection', (socket: Socket) => {
     if (scene.kind === 'marriage') {
       const player = gs.players.get(String(context.playerId ?? ''));
       if (!player?.isAlive || player.isMarried) {
-        socket.emit('error', { message: '這次婚姻事件已失效。' });
+        emitClient(socket, 'error', { message: '這次婚姻事件已失效。' });
         return;
       }
       if (choiceId === 'decline') {
@@ -4678,26 +4765,26 @@ io.on('connection', (socket: Socket) => {
         return;
       }
       if (choiceId !== 'accept') {
-        socket.emit('error', { message: '請確認是否接受這次婚姻選擇。' });
+        emitClient(socket, 'error', { message: '請確認是否接受這次婚姻選擇。' });
         return;
       }
       const result = applyMarriageScene(gs, player, context);
       if (!result) {
-        socket.emit('error', { message: '目前條件已改變，婚姻無法成立。' });
+        emitClient(socket, 'error', { message: '目前條件已改變，婚姻無法成立。' });
         return;
       }
       revealFacilitatorResult(gs, '兩段人生決定同行 💍', result);
     }
   });
 
-  socket.on('closeFacilitatorScene', (payload?: { sceneId?: string }) => {
+  onSafe('closeFacilitatorScene', (payload?: { sceneId?: string }) => {
     const gs = getRoomState(socket);
     if (!gs || !isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '權限不足：只有主持人可以關閉舞台事件。' });
+      emitClient(socket, 'error', { message: '權限不足：只有主持人可以關閉舞台事件。' });
       return;
     }
     if (!gs.facilitatorScene || (payload?.sceneId && payload.sceneId !== gs.facilitatorScene.id)) {
-      socket.emit('error', { message: '目前沒有可關閉的舞台事件。' });
+      emitClient(socket, 'error', { message: '目前沒有可關閉的舞台事件。' });
       return;
     }
     closeFacilitatorScene(gs);
@@ -4710,17 +4797,17 @@ io.on('connection', (socket: Socket) => {
    * 將遊戲重置到 Pre20 階段，所有玩家回到重新投胎狀態。
    * 保留同一房間內的玩家名單（socket ID 與姓名），讓大家重新分配成長點數、選職業。
    */
-  socket.on('restartGame', () => {
+  onSafe('restartGame', () => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
     if (!isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '只有管理員可以重啟遊戲。' });
+      emitClient(socket, 'error', { message: '只有管理員可以重啟遊戲。' });
       return;
     }
     if (gs.decisionPhase || gs.facilitatorScene) {
-      socket.emit('error', { message: '請先結束目前的決策或大螢幕舞台事件，再重新開始遊戲。' });
+      emitClient(socket, 'error', { message: '請先結束目前的決策或大螢幕舞台事件，再重新開始遊戲。' });
       return;
     }
 
@@ -4734,7 +4821,11 @@ io.on('connection', (socket: Socket) => {
     gs.players.clear();
     gs.playerOrder = [];
     for (const { id, name } of playerInfos) {
+      const session = playerSessions.get(id);
+      if (session) session.setupStep = undefined;
+      privateReplay.delete(id);
       const freshPlayer = createPlayer(id, name);
+      freshPlayer.isDisconnected = !getPlayerSocket(id)?.connected;
       gs.players.set(id, freshPlayer);
       gs.playerOrder.push(id);
     }
@@ -4790,28 +4881,28 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 主持人觸發邂逅 (triggerRelationship)
   // ----------------------------------------------------------
-  socket.on('triggerRelationship', (payload: { targetPlayerId: string }) => {
+  onSafe('triggerRelationship', (payload: { targetPlayerId: string }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
     const roomId = gs.gameId;
 
     if (!isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '只有管理員可以觸發邂逅事件。' });
+      emitClient(socket, 'error', { message: '只有管理員可以觸發邂逅事件。' });
       return;
     }
     if (gs.decisionPhase || gs.facilitatorScene || gs.globalPaydayPending || gs.globalPaydayInProgress) {
-      socket.emit('error', { message: '請先完成目前的全場決策或舞台事件。' });
+      emitClient(socket, 'error', { message: '請先完成目前的全場決策或舞台事件。' });
       return;
     }
 
     const target = gs.players.get(payload?.targetPlayerId);
     if (!target || !target.isAlive) {
-      socket.emit('error', { message: '目標玩家不存在或已出局。' });
+      emitClient(socket, 'error', { message: '目標玩家不存在或已出局。' });
       return;
     }
 
     const result = activateRelationship(target);
-    socket.emit('triggerRelationshipResult', result);
+    emitClient(socket, 'triggerRelationshipResult', result);
 
     if (result.activated) {
       console.log(`[relationship] ${target.name}（${roomId}）邂逅觸發`);
@@ -4827,9 +4918,9 @@ io.on('connection', (socket: Socket) => {
         });
       } else {
         // fallback：直接用 target.id 找 socket
-        const targetSocket = io.sockets.sockets.get(target.id);
+        const targetSocket = getPlayerSocket(target.id);
         if (targetSocket) {
-          targetSocket.emit('relationshipActivated', {
+          emitClient(targetSocket, 'relationshipActivated', {
             drsBonus: HOST_ACTIVATION_DRS_BONUS,
             currentDrs: target.relationshipPoints,
             threshold: require('./gameConfig').RELATIONSHIP_MARRIAGE_THRESHOLD,
@@ -4851,21 +4942,21 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 管理員：手動調整玩家能力值 (setPlayerStats)
   // ----------------------------------------------------------
-  socket.on('setPlayerStats', (payload: {
+  onSafe('setPlayerStats', (payload: {
     targetPlayerId: string;
     stats: { fq?: number; hp?: number; sk?: number; nt?: number };
   }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
 
     if (!isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '只有管理員可以調整玩家能力值。' });
+      emitClient(socket, 'error', { message: '只有管理員可以調整玩家能力值。' });
       return;
     }
 
     const target = gs.players.get(payload?.targetPlayerId);
     if (!target) {
-      socket.emit('error', { message: '目標玩家不存在。' });
+      emitClient(socket, 'error', { message: '目標玩家不存在。' });
       return;
     }
 
@@ -4891,24 +4982,24 @@ io.on('connection', (socket: Socket) => {
 
     console.log(`[admin] 房間 ${gs.gameId} 調整 ${target.name} 能力值：${JSON.stringify(changed)}`);
 
-    socket.emit('setPlayerStatsResult', { success: true, targetPlayerId: target.id, stats: changed });
+    emitClient(socket, 'setPlayerStatsResult', { success: true, targetPlayerId: target.id, stats: changed });
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 
   // ----------------------------------------------------------
   // 旅遊行動 (goTravel)
   // ----------------------------------------------------------
-  socket.on('goTravel', (payload: { destinationId: string }) => {
+  onSafe('goTravel', (payload: { destinationId: string }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
 
-    const player = gs.players.get(socket.id);
+    const player = gs.players.get(playerIdentity(socket));
     if (!player || !player.isAlive) {
-      socket.emit('error', { message: '玩家不存在或已出局。' });
+      emitClient(socket, 'error', { message: '玩家不存在或已出局。' });
       return;
     }
     if (gs.decisionPhase || gs.facilitatorScene || gs.pausedAt !== null) {
-      socket.emit('error', { message: '決策階段中請先完成目前選擇，主持人揭曉後再行動。' });
+      emitClient(socket, 'error', { message: '決策階段中請先完成目前選擇，主持人揭曉後再行動。' });
       return;
     }
 
@@ -4918,17 +5009,17 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 聯誼活動 (attendSocialEvent)
   // ----------------------------------------------------------
-  socket.on('attendSocialEvent', () => {
+  onSafe('attendSocialEvent', () => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
 
-    const player = gs.players.get(socket.id);
+    const player = gs.players.get(playerIdentity(socket));
     if (!player || !player.isAlive) {
-      socket.emit('error', { message: '玩家不存在或已出局。' });
+      emitClient(socket, 'error', { message: '玩家不存在或已出局。' });
       return;
     }
     if (gs.decisionPhase || gs.facilitatorScene || gs.pausedAt !== null) {
-      socket.emit('error', { message: '決策階段中請先完成目前選擇，主持人揭曉後再行動。' });
+      emitClient(socket, 'error', { message: '決策階段中請先完成目前選擇，主持人揭曉後再行動。' });
       return;
     }
 
@@ -4938,34 +5029,34 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 求婚 (proposeMarriage)
   // ----------------------------------------------------------
-  socket.on('proposeMarriage', (payload: { type?: 'love' | 'matchmaker' }) => {
+  onSafe('proposeMarriage', (payload: { type?: 'love' | 'matchmaker' }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
 
-    const player = gs.players.get(socket.id);
+    const player = gs.players.get(playerIdentity(socket));
     if (!player || !player.isAlive) {
-      socket.emit('error', { message: '玩家不存在或已出局。' });
+      emitClient(socket, 'error', { message: '玩家不存在或已出局。' });
       return;
     }
 
     void payload;
-    socket.emit('error', { message: '婚姻必須在大螢幕共同觀看，請由主持人開啟婚姻舞台。' });
+    emitClient(socket, 'error', { message: '婚姻必須在大螢幕共同觀看，請由主持人開啟婚姻舞台。' });
   });
 
   // ----------------------------------------------------------
   // 買賣婚姻 (buyArrangedMarriage)
   // ----------------------------------------------------------
-  socket.on('buyArrangedMarriage', () => {
+  onSafe('buyArrangedMarriage', () => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
 
-    const player = gs.players.get(socket.id);
+    const player = gs.players.get(playerIdentity(socket));
     if (!player || !player.isAlive) {
-      socket.emit('error', { message: '玩家不存在或已出局。' });
+      emitClient(socket, 'error', { message: '玩家不存在或已出局。' });
       return;
     }
 
-    socket.emit('error', { message: '付費婚配必須由主持人在大螢幕開啟並確認。' });
+    emitClient(socket, 'error', { message: '付費婚配必須由主持人在大螢幕開啟並確認。' });
   });
 
   // ----------------------------------------------------------
@@ -4976,25 +5067,25 @@ io.on('connection', (socket: Socket) => {
    * Client → Server: { targetPlayerId?: string }  省略則回傳自己的資料
    * Server → Caller: playerAnalysis { playerId, playerName, eventLog, stats }
    */
-  socket.on('requestPlayerAnalysis', (payload?: { targetPlayerId?: string }) => {
+  onSafe('requestPlayerAnalysis', (payload?: { targetPlayerId?: string }) => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
     if (gs.gamePhase !== GamePhase.GameOver) {
-      socket.emit('error', { message: '完整決策分析會在遊戲結束後的復盤階段開放。' });
+      emitClient(socket, 'error', { message: '完整決策分析會在遊戲結束後的復盤階段開放。' });
       return;
     }
 
-    const targetId = payload?.targetPlayerId ?? socket.id;
+    const targetId = payload?.targetPlayerId ?? playerIdentity(socket);
     const target = gs.players.get(targetId);
 
     // 主持人可查詢任意玩家；玩家只能查自己
-    if (targetId !== socket.id && !isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '只能查看自己的分析資料，或由管理員查詢。' });
+    if (targetId !== playerIdentity(socket) && !isRoomAdmin(socket, gs)) {
+      emitClient(socket, 'error', { message: '只能查看自己的分析資料，或由管理員查詢。' });
       return;
     }
 
     if (!target) {
-      socket.emit('error', { message: '玩家不存在。' });
+      emitClient(socket, 'error', { message: '玩家不存在。' });
       return;
     }
 
@@ -5036,7 +5127,7 @@ io.on('connection', (socket: Socket) => {
       : (eventLog.find((e) => e.type === 'death')?.age ?? Math.round(getCurrentAge(gs)));
     const finalScore = calculateLifeScore(target, deathAge);
 
-    socket.emit('playerAnalysis', {
+    emitClient(socket, 'playerAnalysis', {
       playerId: target.id,
       playerName: target.name,
       profession: target.profession.name,
@@ -5079,21 +5170,21 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 主持人控制大螢幕復盤頁面 (setReviewView)
   // ----------------------------------------------------------
-  socket.on('setReviewView', (payload?: { view?: string }) => {
+  onSafe('setReviewView', (payload?: { view?: string }) => {
     const gs = getRoomState(socket);
     if (!gs || !isRoomAdmin(socket, gs)) {
-      socket.emit('error', { message: '權限不足：只有主持人可以控制大螢幕復盤。' });
+      emitClient(socket, 'error', { message: '權限不足：只有主持人可以控制大螢幕復盤。' });
       return;
     }
     if (gs.gamePhase !== GamePhase.GameOver) {
-      socket.emit('error', { message: '大螢幕復盤會在遊戲結束後開放。' });
+      emitClient(socket, 'error', { message: '大螢幕復盤會在遊戲結束後開放。' });
       return;
     }
 
     const allowedViews = new Set(['game', 'intro', 'analysis', 'history']);
     const view = payload?.view;
     if (!view || !allowedViews.has(view)) {
-      socket.emit('error', { message: '無效的復盤畫面。' });
+      emitClient(socket, 'error', { message: '無效的復盤畫面。' });
       return;
     }
 
@@ -5108,11 +5199,11 @@ io.on('connection', (socket: Socket) => {
    * Client → Server: {}
    * Server → Caller: roomAnalysis { players: [...] }
    */
-  socket.on('requestRoomAnalysis', () => {
+  onSafe('requestRoomAnalysis', () => {
     const gs = getRoomState(socket);
-    if (!gs) { socket.emit('error', { message: '尚未加入任何房間。' }); return; }
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
     if (gs.gamePhase !== GamePhase.GameOver) {
-      socket.emit('error', { message: '全場分析會在遊戲結束後的復盤階段開放。' });
+      emitClient(socket, 'error', { message: '全場分析會在遊戲結束後的復盤階段開放。' });
       return;
     }
 
@@ -5264,17 +5355,18 @@ io.on('connection', (socket: Socket) => {
       '如果回到當時，你會改變選擇，還是改變準備方式？',
     );
 
-    socket.emit('roomAnalysis', { roomId: gs.gameId, players, currentAge, awards });
+    emitClient(socket, 'roomAnalysis', { roomId: gs.gameId, players, currentAge, awards });
   });
 
   // ----------------------------------------------------------
   // 客戶端斷線 (disconnect)
   // ----------------------------------------------------------
-  socket.on('disconnect', () => {
-    console.log(`[斷線] 客戶端離線：${socket.id}`);
+  onSafe('disconnect', () => {
+    if (socket.data.playerId && playerSessions.get(playerIdentity(socket))?.socketId !== socket.id) return;
+    console.log(`[斷線] 客戶端離線：${playerIdentity(socket)}`);
 
-    const roomId = socketRoomMap.get(socket.id);
-    socketRoomMap.delete(socket.id);
+    const roomId = socketRoomMap.get(playerIdentity(socket));
+    socketRoomMap.delete(playerIdentity(socket));
 
     if (!roomId) return;
 
@@ -5283,31 +5375,19 @@ io.on('connection', (socket: Socket) => {
 
     // 若斷線的是管理員，清除管理員狀態（玩家資料保留，等待重新登入）
     if (isRoomAdmin(socket, gs)) {
-      removeRoomAdmin(roomId, socket.id);
+      removeRoomAdmin(roomId, playerIdentity(socket));
       console.log(`[斷線] 房間 ${roomId} 管理員離線，等待重新登入`);
       scheduleEmptyRoomCleanup(roomId);
     }
 
-    const player = gs.players.get(socket.id);
+    const player = gs.players.get(playerIdentity(socket));
     if (player) {
-      // 標記為斷線狀態，10 分鐘內可重連恢復資料
+      // 保留角色；所有人離線後才啟動整房閒置清理。
       player.isDisconnected = true;
-      console.log(`[斷線] 玩家 ${player.name} 斷線，保留資料 10 分鐘等待重連`);
+      console.log(`[斷線] 玩家 ${player.name} 斷線，保留角色等待原裝置重連`);
       emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
 
-      setTimeout(() => {
-        // 10 分鐘後若仍是斷線狀態（未重連），才真正移除
-        if (player.isDisconnected) {
-          const wasCurrentTurn = gs.currentPlayerTurnId === socket.id;
-          gs.removePlayer(socket.id);
-          if (wasCurrentTurn && gs.playerOrder.length > 0) {
-            advanceTurn(gs);
-          }
-          console.log(`[斷線] 玩家 ${player.name} 重連逾時，已移除。房間 ${roomId} 剩 ${gs.players.size} 人`);
-          emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
-          scheduleEmptyRoomCleanup(roomId);
-        }
-      }, 10 * 60 * 1000);
+      // Preserve disconnected characters until the host explicitly removes them.
     }
 
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
@@ -5319,49 +5399,38 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 玩家重連恢復 (playerRejoin)
   // ----------------------------------------------------------
-  socket.on('playerRejoin', (payload: { playerName: string; roomCode: string }) => {
-    const { playerName, roomCode } = payload;
-
-    const gs = rooms.get(roomCode);
-    if (!gs) {
-      socket.emit('rejoinFailed', { message: `房間 ${roomCode} 不存在或已結束。` });
-      return;
+  onSafe('playerRejoin', (payload: { playerName: string; roomCode: string; reconnectToken: string }) => {
+    const gs = rooms.get(payload.roomCode);
+    const entry = [...playerSessions.entries()].find(([, session]) =>
+      session.roomId === payload.roomCode && session.token === payload.reconnectToken);
+    const player = entry && gs?.players.get(entry[0]);
+    if (!gs || !entry || !player || player.name !== payload.playerName) {
+      socket.emit('rejoinFailed', { message: '無法驗證續玩身分，請使用原裝置，或請主持人協助。' }); return;
     }
-    cancelEmptyRoomCleanup(roomCode);
-
-    // 在房間內尋找同名且處於斷線狀態的玩家
-    let foundPlayer: Player | undefined;
-    let oldSocketId: string | undefined;
-    for (const [sid, p] of gs.players.entries()) {
-      if (p.name === playerName && p.isDisconnected) {
-        foundPlayer = p;
-        oldSocketId = sid;
-        break;
-      }
+    if (socketRoomMap.has(playerIdentity(socket)) && playerIdentity(socket) !== player.id) {
+      socket.emit('rejoinFailed', { message: '此裝置已加入其他角色。' }); return;
     }
-
-    if (!foundPlayer || !oldSocketId) {
-      socket.emit('rejoinFailed', { message: '找不到可重連的資料，請重新加入遊戲。' });
-      return;
+    const oldSocket = getPlayerSocket(player.id);
+    entry[1].socketId = socket.id;
+    socket.data.playerId = player.id;
+    if (oldSocket && oldSocket !== socket) oldSocket.disconnect(true);
+    socket.join(player.id);
+    socket.join(gs.gameId);
+    socketRoomMap.set(player.id, gs.gameId);
+    player.isDisconnected = false;
+    cancelEmptyRoomCleanup(gs.gameId);
+    emitClient(socket, 'playerSession', { playerId: player.id, reconnectToken: entry[1].token, roomCode: gs.gameId, playerName: player.name });
+    emitClient(socket, 'rejoinSuccess', { playerId: player.id });
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+    if (gs.gamePhase === GamePhase.Pre20) {
+      if (player.pre20Done) emitClient(socket, 'professionAssigned', { profession: player.profession, quadrant: player.profession.quadrant, initialCashflow: player.monthlyCashflow });
+      else if (entry[1].setupStep === 'career') emitClient(socket, 'growthStatsApplied', { stats: player.stats, availableProfessions: getAvailableProfessions(player), canContinueEducation: !player.hasContinuedEducation });
+      else if (entry[1].setupStep === 'allocate') emitClient(socket, 'socialClassRolled', { socialClass: player.socialClass, label: SOCIAL_CLASS_CONFIG[player.socialClass].label, growthPoints: player.growthPointsRemaining, startingCashBonus: 0 });
     }
-
-    // 將舊 socket id 的玩家資料移轉到新 socket id
-    foundPlayer.id = socket.id;
-    foundPlayer.isDisconnected = false;
-    gs.players.delete(oldSocketId);
-    gs.players.set(socket.id, foundPlayer);
-
-    // 更新回合順序中的 id
-    const orderIdx = gs.playerOrder.indexOf(oldSocketId);
-    if (orderIdx !== -1) gs.playerOrder[orderIdx] = socket.id;
-    if (gs.currentPlayerTurnId === oldSocketId) gs.currentPlayerTurnId = socket.id;
-
-    socket.join(roomCode);
-    socketRoomMap.set(socket.id, roomCode);
-
-    console.log(`[重連] 玩家 ${playerName} 重連成功，恢復至房間 ${roomCode}`);
-    socket.emit('rejoinSuccess', { playerId: socket.id });
-    emitToRoom(roomCode, 'gameStateUpdate', serializeGameState(gs));
+    if (gs.decisionPhase?.playerId === player.id) {
+      for (const [event, args] of privateReplay.get(player.id) ?? []) socket.emit(event, ...args);
+      if (gs.decisionPhase.submitted) emitClient(socket, 'decisionSubmitted', { phaseId: gs.decisionPhase.id });
+    }
   });
 });
 
@@ -5427,8 +5496,8 @@ function waitForHostControlledDecision<T>(
     let hasSubmitted = false;
 
     const cleanup = () => {
-      socket.off(eventName, onDecision);
-      socket.off('disconnect', onDisconnect);
+      pendingSubmissions.delete(playerIdentity(socket));
+      privateReplay.delete(playerIdentity(socket));
       const current = decisionReleaseWaiters.get(gs.gameId);
       if (current?.phaseId === context.phaseId) decisionReleaseWaiters.delete(gs.gameId);
     };
@@ -5442,12 +5511,7 @@ function waitForHostControlledDecision<T>(
         emitToRoom(gs.gameId, 'decisionPhaseUpdated', gs.decisionPhase);
         emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
       }
-      socket.emit('decisionSubmitted', { phaseId: context.phaseId });
-    };
-
-    const onDisconnect = () => {
-      socket.off(eventName, onDecision);
-      console.log(`[decisionPhase] ${gs.decisionPhase?.playerName ?? socket.id} 斷線，等待主持人收束`);
+      emitClient(socket, 'decisionSubmitted', { phaseId: context.phaseId });
     };
 
     const release = () => {
@@ -5468,8 +5532,7 @@ function waitForHostControlledDecision<T>(
       resolve(submittedValue);
     };
 
-    socket.once(eventName, onDecision);
-    socket.once('disconnect', onDisconnect);
+    pendingSubmissions.set(playerIdentity(socket), { phaseId: context.phaseId, event: eventName, submit: value => onDecision(value as T) });
     decisionReleaseWaiters.set(gs.gameId, { phaseId: context.phaseId, release });
   });
 }
@@ -5562,7 +5625,7 @@ async function handleLandingSquare(
         const deal: DealCard = BIG_DEALS[Math.floor(Math.random() * BIG_DEALS.length)];
         emitCellEvent(socket, roomId, player.name, 'FT 大交易', `💼 外圈大型投資機會：${deal.title}！`);
         const _ftLoanAvailable = getAvailableLoan(player);
-        socket.emit('fastTrackDealCard', {
+        emitClient(socket, 'fastTrackDealCard', {
           squareType: ftSqType,
           deal,
           isFastTrack: true,
@@ -5583,10 +5646,10 @@ async function handleLandingSquare(
             if (ftBorrow > 0) {
               const lvResult = takeLeverageLoan(player, ftBorrow, deal.title);
               if (!lvResult.success) {
-                socket.emit('error', { message: `投資槓桿借款失敗：${lvResult.message}` });
+                emitClient(socket, 'error', { message: `投資槓桿借款失敗：${lvResult.message}` });
                 break;
               }
-              socket.emit('loanTaken', {
+              emitClient(socket, 'loanTaken', {
                 liabilityId: lvResult.liabilityId,
                 loanType: 'leverage',
                 amount: lvResult.amount,
@@ -5605,7 +5668,7 @@ async function handleLandingSquare(
               effect: { type: 'dealAccepted', card: deal },
             });
           } else {
-            socket.emit('error', { message: `現金不足，無法購買 ${deal.title}（需 $${ftCost.toLocaleString()}）。` });
+            emitClient(socket, 'error', { message: `現金不足，無法購買 ${deal.title}（需 $${ftCost.toLocaleString()}）。` });
           }
         }
         break;
@@ -5625,7 +5688,7 @@ async function handleLandingSquare(
       case FastTrackSquareType.Charity: {
         const charityAmount = Math.round(player.monthlyCashflow * 0.1);
         if (player.cash >= charityAmount && charityAmount > 0) {
-          socket.emit('charityCardPending', { amount: charityAmount });
+          emitClient(socket, 'charityCardPending', { amount: charityAmount });
           const charityDecision = await waitForCardDecision(socket, gs, player, 'charity', '外圈慈善選擇');
           if (charityDecision?.donate === true) {
             player.cash -= charityAmount;
@@ -5659,7 +5722,7 @@ async function handleLandingSquare(
         const amounts = [300_000, 750_000, 1_500_000];
         const investmentAmount = amounts[Math.floor(Math.random() * amounts.length)];
         emitCellEvent(socket, roomId, player.name, 'FT 科技新創', `💡 科技新創機會！投入 $${investmentAmount.toLocaleString()} 擲骰決定成敗（≥4 成功）。`);
-        socket.emit('techStartupOffer', {
+        emitClient(socket, 'techStartupOffer', {
           playerId: player.id,
           playerName: player.name,
           investmentAmount,
@@ -5676,12 +5739,12 @@ async function handleLandingSquare(
             player.assets.push({
               id: `startup-${player.id}-${Date.now()}`,
               name: '科技新創股份',
-              type: 'Business' as import('./gameConstants').AssetType,
+              type: AssetType.Other,
               cost: investmentAmount,
               currentValue: investmentAmount,
               monthlyCashflow,
             });
-            socket.emit('techStartupResult', {
+            emitClient(socket, 'techStartupResult', {
               playerId: player.id,
               invested: true,
               success: true,
@@ -5691,7 +5754,7 @@ async function handleLandingSquare(
               cashAfter: player.cash,
             });
           } else {
-            socket.emit('techStartupResult', {
+            emitClient(socket, 'techStartupResult', {
               playerId: player.id,
               invested: true,
               success: false,
@@ -5701,7 +5764,7 @@ async function handleLandingSquare(
             });
           }
         } else {
-          socket.emit('techStartupResult', { playerId: player.id, invested: false, investmentAmount });
+          emitClient(socket, 'techStartupResult', { playerId: player.id, invested: false, investmentAmount });
         }
         break;
       }
@@ -5719,20 +5782,20 @@ async function handleLandingSquare(
         const others = [...gs.players.values()].filter((p) => p.id !== player.id && p.isAlive);
         if (others.length > 0) {
           emitCellEvent(socket, roomId, player.name, 'FT 合夥機會', '🤝 合夥機會！先選擇邀請對象，再由對方決定是否合作。');
-          socket.emit('fastTrackPartnershipOptions', {
+          emitClient(socket, 'fastTrackPartnershipOptions', {
             availablePartners: others.map((p) => ({ id: p.id, name: p.name })),
           });
           const partnerPick = await waitForCardDecision(socket, gs, player, 'relationship', '外圈合夥：選擇夥伴');
           const targetId = typeof partnerPick?.targetPlayerId === 'string' ? partnerPick.targetPlayerId : null;
           const target = targetId ? gs.players.get(targetId) : undefined;
-          const targetSocket = target ? io.sockets.sockets.get(target.id) : undefined;
+          const targetSocket = target ? getPlayerSocket(target.id) : undefined;
 
           if (target?.isAlive && targetSocket && !target.isDisconnected) {
             const estimatedDividend = Math.max(
               3_000,
               Math.min(50_000, Math.round((player.totalPassiveIncome + target.totalPassiveIncome) * 0.03)),
             );
-            targetSocket.emit('fastTrackPartnershipInvitation', {
+            emitClient(targetSocket, 'fastTrackPartnershipInvitation', {
               offerorId: player.id,
               offerorName: player.name,
               estimatedDividend,
@@ -5776,7 +5839,7 @@ async function handleLandingSquare(
               crisis: c,
             });
           } else {
-            socket.emit('fastTrackCrisisCard', { crisis: c, result: crisisResult });
+            emitClient(socket, 'fastTrackCrisisCard', { crisis: c, result: crisisResult });
           }
         } else {
           emitCellEvent(socket, roomId, player.name, 'FT 危機事件', '✅ 危機牌庫已空，平安通過。');
@@ -5788,7 +5851,7 @@ async function handleLandingSquare(
         const outerDests = (TRAVEL_DESTINATIONS as Array<{ id: string; name: string; tier: string; cost: number; lifeExpGained: number; region: string }>)
           .filter((d) => d.tier === 'outer' || d.tier === 'both');
         emitCellEvent(socket, roomId, player.name, 'FT 人生旅程', '✈️ 外圈人生旅程！可選擇更遠的旅遊目的地，獲得豐富的生命體驗。');
-        socket.emit('fastTrackTravelOptions', {
+        emitClient(socket, 'fastTrackTravelOptions', {
           destinations: outerDests.map((d) => ({ id: d.id, name: d.name, region: d.region, cost: d.cost, lifeExpGained: d.lifeExpGained })),
           playerCash: player.cash,
         });
@@ -5815,7 +5878,7 @@ async function handleLandingSquare(
           const { applyRelationshipCard } = require('./cardSystem');
           applyRelationshipCard(player, rel);
           emitCellEvent(socket, roomId, player.name, 'FT 人際關係', `🤝 外圈人際事件：${rel.title}`);
-          socket.emit('relationshipCardApplied', { card: rel });
+          emitClient(socket, 'relationshipCardApplied', { card: rel });
         } else {
           emitCellEvent(socket, roomId, player.name, 'FT 人際關係', '🤝 外圈人際關係格，無特殊事件。');
         }
@@ -5826,7 +5889,7 @@ async function handleLandingSquare(
         const bonus = Math.max(player.totalPassiveIncome * 2, 75_000);
         player.cash += bonus;
         emitCellEvent(socket, roomId, player.name, 'FT 資產槓桿', `🚀 資產槓桿！獲得 +$${bonus.toLocaleString()} 現金獎勵。`);
-        socket.emit('assetLeverageBonus', {
+        emitClient(socket, 'assetLeverageBonus', {
           playerId: player.id,
           playerName: player.name,
           bonus,
@@ -5859,7 +5922,7 @@ async function handleLandingSquare(
             crisis: diseaseCard,
           });
         } else {
-          socket.emit('diseaseCrisisCard', {
+          emitClient(socket, 'diseaseCrisisCard', {
             crisis: diseaseCard,
             result: crisisResult,
             hpBefore,
@@ -5907,7 +5970,7 @@ async function handleLandingSquare(
       const result = applyDoodadCard(player, card);
       gs.doodadDeck.discard(card);
       emitCellEvent(socket, roomId, player.name, '意外支出', `💸 ${card.title}：意外支出到來！`);
-      socket.emit('cardDrawn', { squareType, card });
+      emitClient(socket, 'cardDrawn', { squareType, card });
       emitToRoom(roomId, 'cardApplied', { playerId: player.id, squareType, effect: result });
       break;
     }
@@ -5985,7 +6048,7 @@ async function handleLandingSquare(
           _lkCB, _lkFB, _lkNWB,
           { cardId: lucky.id, cashGain: lkResult.cashGain }
         );
-        socket.emit('luckyCardDrawn', {
+        emitClient(socket, 'luckyCardDrawn', {
           card: lucky,
           cashGain: lkResult.cashGain,
           newCash: player.cash,
@@ -5995,11 +6058,11 @@ async function handleLandingSquare(
         break;
       }
 
-      socket.emit('squareLandingNotice', { cellName: dealTypeName, message: `📋 ${dealTypeName}機會出現！查看可用的投資選項。` });
-      io.to(roomId).emit('cellEventBroadcast', { playerId: socket.id, playerName: player.name, cellName: dealTypeName, message: `📋 ${dealTypeName}機會出現！`, ts: Date.now() });
+      emitClient(socket, 'squareLandingNotice', { cellName: dealTypeName, message: `📋 ${dealTypeName}機會出現！查看可用的投資選項。` });
+      io.to(roomId).emit('cellEventBroadcast', { playerId: playerIdentity(socket), playerName: player.name, cellName: dealTypeName, message: `📋 ${dealTypeName}機會出現！`, ts: Date.now() });
 
       if (squareType === SquareType.BigDeal && player.stats.health < HP_ACTIVITY_THRESHOLDS.bigDeal) {
-        socket.emit('error', {
+        emitClient(socket, 'error', {
           message: `健康值不足，無法執行大型交易（需要 ${HP_ACTIVITY_THRESHOLDS.bigDeal}，目前 ${player.stats.health}）。`,
         });
         break;
@@ -6029,7 +6092,7 @@ async function handleLandingSquare(
       }));
       // 計算玩家當前可用「投資槓桿借款」額度（只計算無擔保負債，房貸/事業貸款不計入）
       const _loanAvailable = getAvailableLoan(player);
-      socket.emit('dealCardsDrawn', {
+      emitClient(socket, 'dealCardsDrawn', {
         cards: cardsForClient,
         canPickTwo: drawCount > 1,
         playerCash: player.cash,
@@ -6059,12 +6122,12 @@ async function handleLandingSquare(
           if (borrowAmount > 0) {
             const lvResult = takeLeverageLoan(player, borrowAmount, chosen.title);
             if (!lvResult.success) {
-              socket.emit('error', { message: `投資槓桿借款失敗：${lvResult.message}` });
+              emitClient(socket, 'error', { message: `投資槓桿借款失敗：${lvResult.message}` });
               drawnCards.forEach((c) => deck.discard(c));
               emitToRoom(roomId, 'cardApplied', { playerId: player.id, squareType, effect: { type: 'dealDeclined' } });
               break;
             }
-            socket.emit('loanTaken', {
+            emitClient(socket, 'loanTaken', {
               liabilityId: lvResult.liabilityId,
               loanType: 'leverage',
               amount: lvResult.amount,
@@ -6075,7 +6138,7 @@ async function handleLandingSquare(
         }
 
         if (player.cash < downPayment) {
-          socket.emit('error', { message: `現金不足，無法完成此交易（需 $${downPayment.toLocaleString()}，目前 $${player.cash.toLocaleString()}）。` });
+          emitClient(socket, 'error', { message: `現金不足，無法完成此交易（需 $${downPayment.toLocaleString()}，目前 $${player.cash.toLocaleString()}）。` });
           drawnCards.forEach((c) => deck.discard(c));
           emitToRoom(roomId, 'cardApplied', {
             playerId: player.id,
@@ -6184,7 +6247,7 @@ async function handleLandingSquare(
       const donationAmount = Math.round(player.salary * card.donationPercentage);
 
       emitCellEvent(socket, roomId, player.name, '慈善捐款', `❤️ 慈善格子！捐出 $${donationAmount.toLocaleString()} 可獲得生命體驗與傳承加成，是否參與？`);
-      socket.emit('charityCardPending', { amount: donationAmount });
+      emitClient(socket, 'charityCardPending', { amount: donationAmount });
       const decision = await waitForCardDecision(socket, gs, player, 'charity', '慈善捐款');
       const donate = decision?.donate === true;
 
@@ -6232,7 +6295,7 @@ async function handleLandingSquare(
       emitCellEvent(socket, roomId, player.name, '危機事件', `⚠️ 危機來臨：${card.title}！`);
 
       if (player.stats.network >= 3 && !player.stats.networkCrisisSkipUsed) {
-        socket.emit('crisisNTSkipAvailable', { card, timeoutMs: 0, controlledByHost: true });
+        emitClient(socket, 'crisisNTSkipAvailable', { card, timeoutMs: 0, controlledByHost: true });
         const decision = await waitForCardDecision(socket, gs, player, 'crisis', '危機應對');
 
         if (decision?.useNTSkip === true) {
@@ -6284,7 +6347,7 @@ async function handleLandingSquare(
 
       // ── 機遇型事件：由主持人控制決策階段 ──
       if (relCard.eventCategory === 'opportunity') {
-        socket.emit('relationshipCardDrawn', { card: relCard, timeoutMs: 0, controlledByHost: true });
+        emitClient(socket, 'relationshipCardDrawn', { card: relCard, timeoutMs: 0, controlledByHost: true });
         const relDecision = await waitForCardDecision(socket, gs, player, 'relationship', '人際關係決策');
 
         // rel-004 擲骰賭注型：伺服器自動擲骰
@@ -6316,7 +6379,7 @@ async function handleLandingSquare(
         if (relResult.triggerSmallDeal && relDecision?.accept !== false) {
           const bonusDeal = SMALL_DEALS[Math.floor(Math.random() * SMALL_DEALS.length)];
           if (bonusDeal) {
-            socket.emit('bonusSmallDeal', { card: bonusDeal, timeoutMs: 20000 });
+            emitClient(socket, 'bonusSmallDeal', { card: bonusDeal, timeoutMs: 20000 });
           }
         }
 

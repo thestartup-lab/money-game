@@ -7,7 +7,8 @@ import ClassicReviewLibrary from '../components/analysis/ClassicReviewLibrary';
 import FacilitatorControlPanel from '../components/game/FacilitatorControlPanel';
 import WorldEventControlPanel, { type AdaptiveDirectorStatus } from '../components/game/WorldEventControlPanel';
 import {
-  DEFAULT_ADMIN_PASSWORD,
+  readAdminCode,
+  rememberAdminCode,
   readRememberedAdminRoom,
   rememberAdminRoom,
   SERVER_URL,
@@ -56,6 +57,7 @@ export default function AdminPage() {
   // Login form
   const [loginRoomId, setLoginRoomId] = useState(INITIAL_REMEMBERED_ADMIN_ROOM);
   const [loginError, setLoginError] = useState('');
+  const [adminCodeInput, setAdminCodeInput] = useState('');
 
   const [adaptiveDirector, setAdaptiveDirector] = useState<AdaptiveDirectorStatus | null>(null);
 
@@ -76,16 +78,18 @@ export default function AdminPage() {
       setConnected(true);
       s.emit('listRooms');
       // 若有儲存的登入資訊，自動重新登入（斷線重連情境）
-      if (autoReloginRoomIdRef.current) {
+      if (autoReloginRoomIdRef.current && readAdminCode(autoReloginRoomIdRef.current)) {
         s.emit('adminLogin', {
-          password: DEFAULT_ADMIN_PASSWORD,
+          password: readAdminCode(autoReloginRoomIdRef.current),
           roomId: autoReloginRoomIdRef.current,
         });
       }
     });
     s.on('disconnect', () => { setConnected(false); });
 
-    s.on('adminLoginSuccess', (p: { roomId: string; message: string }) => {
+    s.on('adminLoginSuccess', (p: { roomId: string; message: string; adminCode: string }) => {
+      rememberAdminCode(p.roomId, p.adminCode);
+      setAdminCodeInput(p.adminCode);
       analysisRequestedRoomRef.current = '';
       setLoggedIn(true);
       setRoomId(p.roomId);
@@ -107,12 +111,13 @@ export default function AdminPage() {
       setLoginError(p.message ?? '登入失敗');
     });
 
-    s.on('roomCreated', (p: { roomId: string; message: string }) => {
+    s.on('roomCreated', (p: { roomId: string; message: string; adminCode: string }) => {
+      rememberAdminCode(p.roomId, p.adminCode);
       setRoomId(p.roomId);
       addLog(`房間已建立：${p.roomId}`);
       s.emit('listRooms');
-      // 新房統一使用主持人密碼 123，建立後立即進入。
-      s.emit('adminLogin', { password: DEFAULT_ADMIN_PASSWORD, roomId: p.roomId });
+      // 建立後用房間專屬控制碼立即進入。
+      s.emit('adminLogin', { password: p.adminCode, roomId: p.roomId });
     });
     s.on('roomDeleted', (p: { roomId: string }) => {
       if (autoReloginRoomIdRef.current !== p.roomId) return;
@@ -173,9 +178,17 @@ export default function AdminPage() {
       emit('requestRoomAnalysis');
       return;
     }
-    setSavedReviews(saveClassicReview(roomAnalysis));
-    setCurrentReviewSaved(true);
-    addLog(`已將房間 ${roomAnalysis.roomId} 保存為經典場次（僅此裝置）`);
+    try {
+      setSavedReviews(saveClassicReview(roomAnalysis));
+      setCurrentReviewSaved(true);
+      addLog(`已將房間 ${roomAnalysis.roomId} 保存為經典場次（僅此裝置）`);
+    } catch {
+      addLog('保存失敗：瀏覽器儲存空間不足或停用儲存，請先保留本頁。');
+    }
+  };
+  const deleteSavedReview = (id: string) => {
+    try { setSavedReviews(deleteClassicReview(id)); }
+    catch { addLog('刪除失敗：瀏覽器無法寫入儲存空間，原紀錄仍保留。'); }
   };
 
   // ── LOGIN VIEW ──
@@ -200,8 +213,7 @@ export default function AdminPage() {
           </div>
 
           <div className="rounded-2xl border border-emerald-700 bg-emerald-950/60 px-4 py-3 text-center">
-            <p className="text-sm font-bold text-emerald-200">主持人通用密碼</p>
-            <p className="mt-1 font-mono text-4xl font-black tracking-[0.3em] text-yellow-300">123</p>
+            <p className="text-sm font-bold text-emerald-200">每個房間都有專屬主持人控制碼</p>
             <p className="mt-2 text-sm text-emerald-100">同一台電腦會自動記住房間，重新整理也會直接回來。</p>
           </div>
           <div>
@@ -224,6 +236,8 @@ export default function AdminPage() {
               {loginError}
             </p>
           )}
+          <label className="admin-field-label" htmlFor="admin-access-code">主持人控制碼（加入既有房間時使用）</label>
+          <input id="admin-access-code" type="password" autoComplete="off" value={adminCodeInput} onChange={e => setAdminCodeInput(e.target.value.toUpperCase().trim())} placeholder="新房自動產生；原裝置會記住" />
 
           {/* 建立新房間（自訂或隨機代號） */}
           <button
@@ -231,7 +245,7 @@ export default function AdminPage() {
             disabled={!connected}
             onClick={() => {
               setLoginError('');
-              emit('createRoom', { password: DEFAULT_ADMIN_PASSWORD, roomId: loginRoomId.toUpperCase() || undefined });
+              emit('createRoom', { roomId: loginRoomId.toUpperCase() || undefined });
             }}
           >
             {!connected
@@ -248,7 +262,7 @@ export default function AdminPage() {
               disabled={!connected}
               onClick={() => {
                 setLoginError('');
-                emit('adminLogin', { password: DEFAULT_ADMIN_PASSWORD, roomId: loginRoomId.toUpperCase() });
+                emit('adminLogin', { password: adminCodeInput || readAdminCode(loginRoomId.toUpperCase()), roomId: loginRoomId.toUpperCase() });
               }}
             >
               加入已有房間「{loginRoomId.toUpperCase()}」
@@ -265,7 +279,9 @@ export default function AdminPage() {
                   onClick={() => {
                     setLoginRoomId(r.roomId);
                     setLoginError('');
-                    emit('adminLogin', { password: DEFAULT_ADMIN_PASSWORD, roomId: r.roomId });
+                    const code = readAdminCode(r.roomId) || adminCodeInput;
+                    if (code) emit('adminLogin', { password: code, roomId: r.roomId });
+                    else setLoginError('請輸入該房間的主持人控制碼，原主持人可在控制台查看。');
                   }}
                 >
                   <span className="font-mono font-black tracking-widest text-yellow-300">{r.roomId}</span>
@@ -278,7 +294,7 @@ export default function AdminPage() {
 
           <ClassicReviewLibrary
             reviews={savedReviews}
-            onDelete={(reviewId) => setSavedReviews(deleteClassicReview(reviewId))}
+            onDelete={deleteSavedReview}
           />
         </div>
       </div>
@@ -322,6 +338,11 @@ export default function AdminPage() {
 
   return (
     <div className="admin-shell">
+      <details className="m-4 rounded-xl border border-slate-600 p-4">
+        <summary className="cursor-pointer font-bold">主持人控制碼（請勿投影或分享給玩家）</summary>
+        <p className="mt-2 text-2xl font-mono">{adminCodeInput || readAdminCode(roomId)}</p>
+        <p>請先抄下此碼；換手機或清除瀏覽器資料後，輸入房間代碼與控制碼即可返回。同一台裝置會自動記住。</p>
+      </details>
 
       {/* ══ 頂部導覽列 ══ */}
       <header className="admin-topbar">
@@ -686,7 +707,7 @@ export default function AdminPage() {
 
           <ClassicReviewLibrary
             reviews={savedReviews}
-            onDelete={(reviewId) => setSavedReviews(deleteClassicReview(reviewId))}
+            onDelete={deleteSavedReview}
           />
 
           {/* 多房間儀表板 */}
@@ -760,7 +781,9 @@ export default function AdminPage() {
                           <button
                             className="bg-indigo-900 hover:bg-indigo-800 text-indigo-200 text-xs font-bold py-2 px-2 rounded-xl transition-colors"
                             onClick={() => {
-                              emit('adminLogin', { password: DEFAULT_ADMIN_PASSWORD, roomId: r.roomId });
+                              const code = readAdminCode(r.roomId);
+                              if (code) emit('adminLogin', { password: code, roomId: r.roomId });
+                              else addLog('此裝置未保存該房間控制碼，請先離開房間，再輸入控制碼登入。');
                             }}
                           >
                             切換

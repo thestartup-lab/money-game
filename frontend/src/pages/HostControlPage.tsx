@@ -4,7 +4,8 @@ import DecisionCountdown from '../components/game/DecisionCountdown';
 import FacilitatorControlPanel from '../components/game/FacilitatorControlPanel';
 import WorldEventControlPanel, { type AdaptiveDirectorStatus } from '../components/game/WorldEventControlPanel';
 import {
-  DEFAULT_ADMIN_PASSWORD,
+  readAdminCode,
+  rememberAdminCode,
   readRememberedAdminRoom,
   rememberAdminRoom,
   SERVER_URL,
@@ -54,6 +55,7 @@ export default function HostControlPage() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [roomId, setRoomId] = useState('');
   const [roomInput, setRoomInput] = useState(INITIAL_ROOM_ID);
+  const [adminCodeInput, setAdminCodeInput] = useState('');
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [message, setMessage] = useState('');
@@ -76,19 +78,22 @@ export default function HostControlPage() {
     socket.on('connect', () => {
       setConnected(true);
       socket.emit('listRooms');
-      if (rememberedRoomRef.current) {
+      if (rememberedRoomRef.current && readAdminCode(rememberedRoomRef.current)) {
         socket.emit('adminLogin', {
           roomId: rememberedRoomRef.current,
-          password: DEFAULT_ADMIN_PASSWORD,
+          password: readAdminCode(rememberedRoomRef.current),
         });
       }
     });
     socket.on('disconnect', () => setConnected(false));
     socket.on('roomList', (nextRooms: RoomSummary[]) => setRooms(nextRooms ?? []));
-    socket.on('roomCreated', (payload: { roomId: string }) => {
-      socket.emit('adminLogin', { roomId: payload.roomId, password: DEFAULT_ADMIN_PASSWORD });
+    socket.on('roomCreated', (payload: { roomId: string; adminCode: string }) => {
+      rememberAdminCode(payload.roomId, payload.adminCode);
+      socket.emit('adminLogin', { roomId: payload.roomId, password: payload.adminCode });
     });
-    socket.on('adminLoginSuccess', (payload: { roomId: string }) => {
+    socket.on('adminLoginSuccess', (payload: { roomId: string; adminCode: string }) => {
+      rememberAdminCode(payload.roomId, payload.adminCode);
+      setAdminCodeInput(payload.adminCode);
       analysisRequestedRoomRef.current = '';
       rememberedRoomRef.current = payload.roomId;
       rememberAdminRoom(payload.roomId);
@@ -155,9 +160,13 @@ export default function HostControlPage() {
       setMessage('正在整理本場復盤資料，請稍後再按一次保存。');
       return;
     }
-    saveClassicReview(roomAnalysis);
-    setCurrentReviewSaved(true);
-    setMessage('已保存為經典場次；資料只留在這台裝置。');
+    try {
+      saveClassicReview(roomAnalysis);
+      setCurrentReviewSaved(true);
+      setMessage('已保存為經典場次；資料只留在這台裝置。');
+    } catch {
+      setMessage('保存失敗：瀏覽器空間不足或停用儲存。請保留本頁，改由電腦後台匯出復盤。');
+    }
   };
 
   const players = gameState?.players ?? [];
@@ -198,10 +207,12 @@ export default function HostControlPage() {
               setMessage('');
             }}
           />
+          <label className="host-label" htmlFor="host-access-code">主持人控制碼</label>
+          <input id="host-access-code" type="password" autoComplete="off" placeholder="從原主持人控制台取得" value={adminCodeInput} onChange={e => setAdminCodeInput(e.target.value.toUpperCase().trim())} />
           <button
             className="host-primary-button"
             disabled={!connected || roomInput.length < 4}
-            onClick={() => emit('adminLogin', { roomId: roomInput, password: DEFAULT_ADMIN_PASSWORD })}
+            onClick={() => emit('adminLogin', { roomId: roomInput, password: readAdminCode(roomInput) || adminCodeInput })}
           >
             進入控場頁
           </button>
@@ -221,7 +232,7 @@ export default function HostControlPage() {
               {rooms.map((room) => (
                 <button
                   key={room.roomId}
-                  onClick={() => emit('adminLogin', { roomId: room.roomId, password: DEFAULT_ADMIN_PASSWORD })}
+                  onClick={() => { setRoomInput(room.roomId); const code = readAdminCode(room.roomId) || adminCodeInput; if (code) emit('adminLogin', { roomId: room.roomId, password: code }); else setMessage('請輸入原主持人控制台顯示的控制碼。'); }}
                 >
                   <strong>{room.roomId}</strong>
                   <span>{PHASE_LABELS[room.phase ?? room.gamePhase ?? ''] ?? '等待中'}</span>
@@ -269,6 +280,11 @@ export default function HostControlPage() {
       </header>
 
       <main className="host-main">
+        <details className="host-alert">
+          <summary>查看主持人控制碼（請保密）</summary>
+          <p className="text-2xl font-mono">{adminCodeInput || readAdminCode(roomId)}</p>
+          <p>請抄下控制碼。換裝置時輸入房間代碼與此碼，即可回到控場頁。</p>
+        </details>
         <section className="host-status-grid" aria-label="遊戲狀態">
           <div><span>階段</span><strong>{PHASE_LABELS[phase] ?? phase}</strong></div>
           <div><span>年齡</span><strong>{hasStarted ? `${Math.round(gameState?.currentAge ?? 20)} 歲` : '尚未開始'}</strong></div>
