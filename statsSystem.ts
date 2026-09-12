@@ -1,6 +1,7 @@
 import { Player, PaydayPlanPayload, Profession, LifeStage } from './gameDataModels';
 import {
   FQ_UPGRADE_COSTS,
+  GROWTH_CYCLES_PER_GLOBAL_PAYDAY,
   FQ_MULTIPLIERS,
   HP_DECAY_BY_STAGE,
   HP_MAINTENANCE_COST,
@@ -126,7 +127,7 @@ export function getCareerChangeAssetCost(newProfessionId: string): number {
 export function applyPaydayPlan(player: Player, plan: PaydayPlanPayload): PaydayPlanResult {
   let remainingCash = player.cash;
   let totalCostDeducted = 0;
-  const settlementMonths = Math.max(1, Math.floor(plan.settlementMonths ?? 1));
+  const settlementMonths = Math.min(GROWTH_CYCLES_PER_GLOBAL_PAYDAY, Math.max(1, Math.floor(plan.settlementMonths ?? 1)));
   const quarterlyMaintenanceCost = HP_MAINTENANCE_COST * settlementMonths;
   const quarterlyBoostCost = HP_BOOST_COST + HP_MAINTENANCE_COST * (settlementMonths - 1);
 
@@ -338,11 +339,11 @@ export function applyHPChange(player: Player, delta: number): boolean {
  *
  * @param player 玩家物件（直接修改 stats.network）
  */
-export function applyNTAutoGrowth(player: Player): void {
+export function applyNTAutoGrowth(player: Player, growthCount = player.paydayCount): void {
   const ntCap = player.profession.salaryType === 'nt_driven' ? Infinity : 10;
   if (
-    player.paydayCount > 0 &&
-    player.paydayCount % NETWORK_AUTO_GAIN_INTERVAL === 0 &&
+    growthCount > 0 &&
+    growthCount % NETWORK_AUTO_GAIN_INTERVAL === 0 &&
     player.stats.network < ntCap
   ) {
     player.stats.network = Math.min(ntCap, player.stats.network + 1);

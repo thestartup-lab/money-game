@@ -4,6 +4,7 @@ import { Server, Socket } from 'socket.io';
 import { validateSocketPayload } from './socketValidation';
 import { repayRoomLoan, validatePlayerLoan } from './playerLoans';
 import { GameState, Player, PaydayPlanPayload, GamePhase, PlayerEvent, PlayerEventType, DecisionPhaseState, FacilitatorSceneState, AssetType } from './gameDataModels';
+import { BASIC_INVESTMENTS, buyBasicInvestment } from './basicInvestments';
 import {
   createPlayer,
   applyGlobalEvent,
@@ -57,6 +58,7 @@ import {
   QUADRANT_SELECT_THRESHOLDS, FRANCHISE_CASH_THRESHOLD, PROFESSIONS,
   SECOND_LIFE_CELL,
   MONTHS_PER_GLOBAL_PAYDAY,
+  GROWTH_CYCLES_PER_GLOBAL_PAYDAY,
   YEARS_PER_COMPLETED_ROUND,
   TOTAL_LIFE_ROUNDS,
   FINAL_ROUND_START_COMPLETED_ROUNDS,
@@ -604,6 +606,7 @@ function evaluateAndMaybeTriggerAdaptiveEvent(gs: GameState): void {
 
 /** 僅在完成目前決策、擲骰及全體發薪後開啟。效果直到主持人揭曉才套用。 */
 function tryOpenWorldEvent(gs: GameState): void {
+  if ((secondLifeQueue.get(gs)?.length ?? 0) > 0) return;
   const pending = gs.pendingWorldEvent;
   if (!pending || pending.deferred || gs.turnInProgress || gs.decisionPhase || gs.facilitatorScene
     || gs.globalPaydayInProgress || gs.globalPaydayPending) return;
@@ -1164,6 +1167,7 @@ function resolveFamilyScene(gs: GameState, player: Player): void {
 }
 
 function closeFacilitatorScene(gs: GameState): void {
+  if (gs.facilitatorScene?.kind === 'second_life' && gs.facilitatorScene.stage === 'prompt') return;
   if (gs.facilitatorScene?.kind === 'global_event' && gs.facilitatorScene.stage === 'prompt'
     && !gs.pendingWorldEvent?.deferred) gs.pendingWorldEvent = null;
   const shouldResume = Boolean(gs.facilitatorScene?.resumeOnClose);
@@ -1732,6 +1736,7 @@ function serializeGameState(gs: GameState): object {
     globalPaydayPending: gs.globalPaydayPending,
     globalPaydayInProgress: gs.globalPaydayInProgress,
     globalPaydayNumber: gs.globalPaydayNumber,
+    basicInvestmentOffers: gs.globalPaydayInProgress ? BASIC_INVESTMENTS : [],
     finalRoundStarted: gs.finalRoundStarted,
     finalRoundPendingPlayerIds: gs.finalRoundPendingPlayerIds,
     decisionPhase: gs.decisionPhase,
@@ -1874,6 +1879,8 @@ function skipCurrentEducationTurns(gs: GameState): void {
  */
 function continueAfterTurnAdvance(gs: GameState): void {
   if (gs.gamePhase === GamePhase.GameOver || gs.facilitatorScene) return;
+  if (tryOpenSecondLife(gs)) return;
+  if ((secondLifeQueue.get(gs)?.length ?? 0) > 0) return;
   if (gs.finalRoundStarted && gs.finalRoundPendingPlayerIds.length === 0) {
     finishGame(gs, 'finalRoundComplete');
     return;
@@ -1928,6 +1935,118 @@ function getQuarterTravelDestinations(player: Player): Array<{
       lifeExpGained: destination.lifeExpGained,
       salaryPenalty: destination.salaryPenalty,
     }));
+}
+
+type SecondLifeEntry = { playerId: string; eligibility: ReturnType<typeof evaluateSecondLifeEligibility> };
+const secondLifeQueue = new WeakMap<GameState, SecondLifeEntry[]>();
+
+/** 僅在完整操作結算後保存達標快照，不在月結中途判斷。 */
+function queueSecondLifeCandidates(gs: GameState, settledPlayer?: Player): void {
+  if (![GamePhase.RatRace, GamePhase.FastTrack].includes(gs.gamePhase)) return;
+  const queue = secondLifeQueue.get(gs) ?? [];
+  for (const player of settledPlayer ? [settledPlayer] : gs.players.values()) {
+    if (!player.isAlive || player.isInFastTrack || !player.hasPassedSecondLife || queue.some(e => e.playerId === player.id)) continue;
+    const eligibility = evaluateSecondLifeEligibility(player);
+    if (eligibility.eligible) queue.push({ playerId: player.id, eligibility });
+  }
+  secondLifeQueue.set(gs, queue);
+}
+
+function tryOpenSecondLife(gs: GameState): boolean {
+  if (gs.gamePhase === GamePhase.GameOver || gs.facilitatorScene || gs.decisionPhase || gs.turnInProgress || gs.globalPaydayInProgress) return false;
+  const queue = secondLifeQueue.get(gs) ?? [];
+  while (queue.length && (!gs.players.get(queue[0].playerId)?.isAlive || gs.players.get(queue[0].playerId)?.isInFastTrack)) queue.shift();
+  const player = queue[0] && gs.players.get(queue[0].playerId);
+  if (!player) return false;
+  beginFacilitatorScene(gs, { kind: 'second_life', kicker: '第二人生資格已達成',
+    title: player.name + ' 的第二人生即將啟動',
+    description: '已路過第二人生格，並在完整結算後達成資格。由主持人揭曉，無須再繞一圈。',
+    participantNames: [player.name], options: [{ id: 'reveal', label: '揭曉第二人生', description: '正式進入外圈。' }] },
+    { playerId: player.id });
+  return true;
+}
+
+function revealSecondLife(gs: GameState): void {
+  const entry = secondLifeQueue.get(gs)?.shift();
+  const player = entry && gs.players.get(entry.playerId);
+  if (!entry || !player?.isAlive || player.isInFastTrack) {
+    revealFacilitatorResult(gs, '資格公告已結束', '請主持人繼續遊戲。'); return;
+  }
+  promoteSecondLife(gs, player, entry.eligibility);
+}
+
+function promoteSecondLife(gs: GameState, player: Player, secondLifeEligibility: ReturnType<typeof evaluateSecondLifeEligibility>): void {
+  const roomId = gs.gameId;
+  const socket = getPlayerSocket(player.id);
+  const escapeRouteLabel = secondLifeEligibility.route === 'balancedLife'
+    ? '平衡人生'
+    : '財務突破';
+  const achievedLifeIndicators = secondLifeEligibility.indicators
+    .filter((indicator) => indicator.achieved)
+    .map((indicator) => indicator.label);
+  console.log(`[ratRace] ${player.name}（${roomId}）透過「${escapeRouteLabel}」進入第二人生！`);
+  const _rrCB = player.cash; const _rrFB = player.monthlyCashflow; const _rrNWB = calcNetWorth(player);
+  player.isInFastTrack = true;
+  const allAlivePlayersAreInFastTrack = [...gs.players.values()]
+    .filter((candidate) => candidate.isAlive)
+    .every((candidate) => candidate.isInFastTrack);
+  if (allAlivePlayersAreInFastTrack) gs.gamePhase = GamePhase.FastTrack;
+  addLifeExperience(player, LIFE_EXP.FAST_TRACK_ENTER);
+
+  // B1：進入外圈時隨機抽 3 個人生夢想目標
+  assignBucketList(player, 3);
+  const goalDetails = player.bucketList
+    .map((e) => getBucketGoal(e.id))
+    .filter((g): g is NonNullable<typeof g> => !!g)
+    .map((g) => ({
+      id: g.id,
+      emoji: g.emoji,
+      title: g.title,
+      description: g.description,
+      legacyReward: g.legacyReward,
+      lifeExpReward: g.lifeExpReward,
+      cashReward: g.cashReward ?? 0,
+    }));
+
+  logPlayerEvent(
+    player,
+    gs,
+    'rat_race_escaped',
+    `進入第二人生（${escapeRouteLabel}）：有效被動收入 $${secondLifeEligibility.effectivePassiveIncome.toLocaleString()}，完成人生指標 ${achievedLifeIndicators.join('、')}`,
+    _rrCB,
+    _rrFB,
+    _rrNWB,
+    {
+      escapeRoute: secondLifeEligibility.route,
+      escapeRouteLabel,
+      passiveIncome: secondLifeEligibility.rawPassiveIncome,
+      effectivePassiveIncome: secondLifeEligibility.effectivePassiveIncome,
+      totalExpenses: secondLifeEligibility.totalExpenses,
+      coverageRatio: secondLifeEligibility.coverageRatio,
+      achievedIndicatorCount: secondLifeEligibility.achievedIndicatorCount,
+      indicators: secondLifeEligibility.indicators,
+      financialBreakthroughMet: secondLifeEligibility.financialBreakthroughMet,
+      balancedLifeMet: secondLifeEligibility.balancedLifeMet,
+    },
+  );
+  emitToRoom(roomId, 'ratRaceEscaped', {
+    playerId: player.id,
+    playerName: player.name,
+    route: secondLifeEligibility.route,
+    routeLabel: escapeRouteLabel,
+    monthlyPassiveIncome: secondLifeEligibility.rawPassiveIncome,
+    effectivePassiveIncome: secondLifeEligibility.effectivePassiveIncome,
+    totalExpenses: secondLifeEligibility.totalExpenses,
+    achievedLifeIndicators,
+    lifeExpGained: LIFE_EXP.FAST_TRACK_ENTER,
+    canCongratulate: true,   // 前端可顯示祝賀按鈕
+    bucketList: goalDetails,
+  });
+  if (socket) emitClient(socket, 'bucketListAssigned', { goals: goalDetails });
+
+  // 立刻檢查一次：高被動收入、長壽等可能在進外圈當下就達成
+  if (socket) checkBucketGoals(player, gs, roomId, socket);
+  revealFacilitatorResult(gs, player.name + ' 的第二人生啟動了！', '完成「' + escapeRouteLabel + '」，正式進入外圈。新的機會與風險，現在開始。');
 }
 
 function emitQuarterMilestones(
@@ -1987,7 +2106,7 @@ function settleQuarterMonths(
       dcaAsset.monthlyCashflow = dcaDividend;
     }
 
-    triggerPayday(player, gs, maintenanceCovered);
+    triggerPayday(player, gs, maintenanceCovered, month <= GROWTH_CYCLES_PER_GLOBAL_PAYDAY);
     logPlayerEvent(
       player,
       gs,
@@ -2131,6 +2250,7 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
         currentStats: player.stats,
         currentCash: player.cash,
         affordableOptions: buildAffordableOptions(player, MONTHS_PER_GLOBAL_PAYDAY),
+        basicInvestments: BASIC_INVESTMENTS,
         currentInsurance: player.insurance,
         stockDCAPortfolioValue: player.assets.find((asset) => asset.id === 'stock-dca')?.currentValue ?? 0,
         travelDestinations: getQuarterTravelDestinations(player),
@@ -2163,7 +2283,17 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
       emitQuarterMilestones(playerSocket, gs, player, planResult);
     }
 
+    const investmentCash = player.cash;
+    const investmentFlow = player.monthlyCashflow;
+    const investmentWorth = calcNetWorth(player);
+    const basicInvestment = buyBasicInvestment(player, quarterlyPlan.basicInvestmentId, gs.globalPaydayNumber + 1);
+    if (basicInvestment.success) {
+      logPlayerEvent(player, gs, 'asset_buy', basicInvestment.message, investmentCash, investmentFlow, investmentWorth,
+        { source: 'basic_investment', offerId: quarterlyPlan.basicInvestmentId, globalPaydayNumber: gs.globalPaydayNumber + 1 });
+    }
+    emitToRoom(roomId, 'basicInvestmentResult', { playerId: player.id, playerName: player.name, ...basicInvestment });
     settleQuarterMonths(playerSocket, gs, player, maintenanceCovered);
+    queueSecondLifeCandidates(gs, player);
     player.paydayPlanningPending = false;
 
     emitToRoom(roomId, 'paydayPlanResult', {
@@ -2209,6 +2339,8 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
       currentAge: Math.round(getCurrentAge(gs) * 10) / 10,
     });
   }
+  queueSecondLifeCandidates(gs);
+  tryOpenSecondLife(gs);
   evaluateAndMaybeTriggerAdaptiveEvent(gs);
   tryOpenWorldEvent(gs);
   emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
@@ -2256,7 +2388,15 @@ io.on('connection', (socket: Socket) => {
       if (gs) emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
     };
     socket.on(event, (...args: T) => {
-      try { Promise.resolve(handler(...args)).catch(report); } catch (error) { report(error); }
+      try {
+        Promise.resolve(handler(...args)).then(() => {
+          if (!financialActions.has(event) && !['setPlayerStats', 'resolveFacilitatorScene', 'closeFacilitatorScene', 'triggerRelationship', 'triggerSpecialAuction'].includes(event)) return;
+          const gs = getRoomState(socket);
+          if (!gs || gs.turnInProgress || gs.globalPaydayInProgress) return;
+          queueSecondLifeCandidates(gs);
+          tryOpenSecondLife(gs);
+        }).catch(report);
+      } catch (error) { report(error); }
     });
   }
   socket.use(([event, payload], next) => {
@@ -2947,77 +3087,7 @@ io.on('connection', (socket: Socket) => {
         }
       }
 
-      const secondLifeEligibility = evaluateSecondLifeEligibility(player);
-      if (!player.isInFastTrack && player.hasPassedSecondLife && secondLifeEligibility.eligible) {
-        const escapeRouteLabel = secondLifeEligibility.route === 'balancedLife'
-          ? '平衡人生'
-          : '財務突破';
-        const achievedLifeIndicators = secondLifeEligibility.indicators
-          .filter((indicator) => indicator.achieved)
-          .map((indicator) => indicator.label);
-        console.log(`[ratRace] ${player.name}（${roomId}）透過「${escapeRouteLabel}」進入第二人生！`);
-        const _rrCB = player.cash; const _rrFB = player.monthlyCashflow; const _rrNWB = calcNetWorth(player);
-        player.isInFastTrack = true;
-        const allAlivePlayersAreInFastTrack = [...gs.players.values()]
-          .filter((candidate) => candidate.isAlive)
-          .every((candidate) => candidate.isInFastTrack);
-        if (allAlivePlayersAreInFastTrack) gs.gamePhase = GamePhase.FastTrack;
-        addLifeExperience(player, LIFE_EXP.FAST_TRACK_ENTER);
-
-        // B1：進入外圈時隨機抽 3 個人生夢想目標
-        assignBucketList(player, 3);
-        const goalDetails = player.bucketList
-          .map((e) => getBucketGoal(e.id))
-          .filter((g): g is NonNullable<typeof g> => !!g)
-          .map((g) => ({
-            id: g.id,
-            emoji: g.emoji,
-            title: g.title,
-            description: g.description,
-            legacyReward: g.legacyReward,
-            lifeExpReward: g.lifeExpReward,
-            cashReward: g.cashReward ?? 0,
-          }));
-
-        logPlayerEvent(
-          player,
-          gs,
-          'rat_race_escaped',
-          `進入第二人生（${escapeRouteLabel}）：有效被動收入 $${secondLifeEligibility.effectivePassiveIncome.toLocaleString()}，完成人生指標 ${achievedLifeIndicators.join('、')}`,
-          _rrCB,
-          _rrFB,
-          _rrNWB,
-          {
-            escapeRoute: secondLifeEligibility.route,
-            escapeRouteLabel,
-            passiveIncome: secondLifeEligibility.rawPassiveIncome,
-            effectivePassiveIncome: secondLifeEligibility.effectivePassiveIncome,
-            totalExpenses: secondLifeEligibility.totalExpenses,
-            coverageRatio: secondLifeEligibility.coverageRatio,
-            achievedIndicatorCount: secondLifeEligibility.achievedIndicatorCount,
-            indicators: secondLifeEligibility.indicators,
-            financialBreakthroughMet: secondLifeEligibility.financialBreakthroughMet,
-            balancedLifeMet: secondLifeEligibility.balancedLifeMet,
-          },
-        );
-        emitToRoom(roomId, 'ratRaceEscaped', {
-          playerId: player.id,
-          playerName: player.name,
-          route: secondLifeEligibility.route,
-          routeLabel: escapeRouteLabel,
-          monthlyPassiveIncome: secondLifeEligibility.rawPassiveIncome,
-          effectivePassiveIncome: secondLifeEligibility.effectivePassiveIncome,
-          totalExpenses: secondLifeEligibility.totalExpenses,
-          achievedLifeIndicators,
-          lifeExpGained: LIFE_EXP.FAST_TRACK_ENTER,
-          canCongratulate: true,   // 前端可顯示祝賀按鈕
-          bucketList: goalDetails,
-        });
-        emitClient(socket, 'bucketListAssigned', { goals: goalDetails });
-
-        // 立刻檢查一次：高被動收入、長壽等可能在進外圈當下就達成
-        checkBucketGoals(player, gs, roomId, socket);
-      }
+      queueSecondLifeCandidates(gs);
 
       // --- 5c. FastTrack 資產增值 ---
       // 注意：FT 資產增值由「踩到外圈發薪格」時於 handleLandingSquare 觸發
@@ -3049,6 +3119,7 @@ io.on('connection', (socket: Socket) => {
       } catch (_) { /* ignore */ }
     } finally {
       gs.turnInProgress = false;
+      continueAfterTurnAdvance(gs);
       tryOpenWorldEvent(gs);
     }
     }
@@ -4623,6 +4694,11 @@ io.on('connection', (socket: Socket) => {
     }
     const choiceId = payload?.choiceId ?? '';
 
+    if (scene.kind === 'second_life') {
+      if (choiceId === 'reveal') revealSecondLife(gs);
+      return;
+    }
+
     if (scene.kind === 'global_event') {
       const pending = gs.pendingWorldEvent;
       if (!pending || context.worldEventId !== pending.id) {
@@ -4864,6 +4940,7 @@ io.on('connection', (socket: Socket) => {
     gs.adaptiveDirector.lastEventId = undefined;
     gs.adaptiveDirector.lastEventTitle = undefined;
 
+    secondLifeQueue.delete(gs);
     // 重置牌組
     gs.smallDealDeck = new Deck(SMALL_DEALS);
     gs.bigDealDeck   = new Deck(BIG_DEALS);
@@ -6418,7 +6495,7 @@ function buildAffordableOptions(player: Player, settlementMonths = 1): object {
   } = require('./gameConfig');
 
   const fqCost = getFQUpgradeCost(player.stats.financialIQ);
-  const coveredMonths = Math.max(1, Math.floor(settlementMonths));
+  const coveredMonths = Math.min(GROWTH_CYCLES_PER_GLOBAL_PAYDAY, Math.max(1, Math.floor(settlementMonths)));
   const totalMaintenanceCost = maintCost * coveredMonths;
   const totalBoostCost = boostCost + maintCost * (coveredMonths - 1);
 

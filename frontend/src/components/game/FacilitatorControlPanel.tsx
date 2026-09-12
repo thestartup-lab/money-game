@@ -89,12 +89,12 @@ export default function FacilitatorControlPanel({ gameState, emit }: Props) {
                 {option.label}
               </button>
             ))}
-            <button
+            {scene.kind !== 'second_life' && <button
               className="min-h-12 rounded-xl border border-slate-500 bg-slate-800 px-3 py-2 font-bold text-gray-200"
               onClick={() => emit('closeFacilitatorScene', { sceneId: scene.id })}
             >
               取消本次舞台
-            </button>
+            </button>}
           </div>
         ) : (
           <button

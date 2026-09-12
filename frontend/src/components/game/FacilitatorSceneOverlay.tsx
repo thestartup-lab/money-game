@@ -6,6 +6,7 @@ interface Props {
 }
 
 const KIND_THEME: Record<FacilitatorScene['kind'], { icon: string; border: string; glow: string }> = {
+  second_life: { icon: '🌟', border: 'border-amber-400', glow: 'from-amber-950/90' },
   community: { icon: '🗳️', border: 'border-cyan-400', glow: 'from-cyan-950/90' },
   echo: { icon: '🔁', border: 'border-violet-400', glow: 'from-violet-950/90' },
   cooperation: { icon: '🤝', border: 'border-blue-400', glow: 'from-blue-950/90' },
@@ -40,7 +41,7 @@ export default function FacilitatorSceneOverlay({ scene }: Props) {
           </div>
         ) : null}
 
-        {!isResult && scene.kind !== 'global_event' && scene.options && scene.options.length > 0 ? (
+        {!isResult && scene.kind !== 'global_event' && scene.kind !== 'second_life' && scene.options && scene.options.length > 0 ? (
           <div className={`mx-auto mt-6 grid max-w-5xl gap-4 ${scene.options.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
             {scene.options.map((option, index) => (
               <article key={option.id} className="rounded-3xl border-2 border-gray-600 bg-gray-900 px-6 py-5 text-left">

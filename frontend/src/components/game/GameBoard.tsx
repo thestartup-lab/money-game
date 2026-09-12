@@ -325,7 +325,7 @@ function QuarterDial({
         ))}
       </div>
       <p className="quarter-dial-status">
-        {isGlobalPayday ? '本季三個月統一結算' : `再 ${roundsLeft} 輪進入統一發薪`}
+        {isGlobalPayday ? '本次六個月收支統一結算' : `再 ${roundsLeft} 輪進入統一發薪`}
       </p>
     </div>
   );

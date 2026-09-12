@@ -65,7 +65,9 @@ export const SECOND_LIFE_EXPERIENCE_THRESHOLD = 45;
 /** 發薪日不再綁定地圖格；每三個完整輪次由伺服器統一觸發。 */
 export const PAYDAY_LOCATIONS: readonly number[] = [];
 export const ROUNDS_PER_GLOBAL_PAYDAY = 3;
-export const MONTHS_PER_GLOBAL_PAYDAY = 3;
+export const MONTHS_PER_GLOBAL_PAYDAY = 6;
+/** 健康與自然人脈仍維持原本每次發薪三個成長週期，不隨財務月份加倍。 */
+export const GROWTH_CYCLES_PER_GLOBAL_PAYDAY = 3;
 
 /** 全體玩家各完成一次行動，視為一個完整人生回合，年齡增加 4 歲。 */
 export const YEARS_PER_COMPLETED_ROUND = 4;

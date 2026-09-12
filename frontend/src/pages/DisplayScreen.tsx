@@ -227,6 +227,9 @@ export default function DisplayScreen() {
       boardFocusTimerRef.current = setTimeout(() => setBoardFocusPlayerId(undefined), 6_000);
     });
     s.on('marriageAnnouncement', (p: { playerName: string }) => addTicker(`💑 ${p.playerName} 結婚了！`));
+    s.on('basicInvestmentResult', (p: { playerName: string; message: string }) => {
+      addTicker(`💼 ${p.playerName}：${p.message}`);
+    });
     s.on('globalPaydayStarted', (p: { globalPaydayNumber: number; settlementMonths: number }) => {
       setPaydayCards(new Map());
       addTicker(`💰 第 ${p.globalPaydayNumber} 季全體發薪：一次規劃、結算 ${p.settlementMonths} 個月`);
@@ -779,7 +782,21 @@ export default function DisplayScreen() {
             className="flex-1 flex items-center justify-center overflow-hidden relative"
             style={{ maxHeight: 'calc(100vh - 90px)' }}
           >
-            <GameBoard
+            {gameState.globalPaydayInProgress && gameState.decisionPhase?.kind === 'payday' && gameState.basicInvestmentOffers?.length ? (
+              <section className="h-full w-full overflow-y-auto bg-gray-950 p-8 text-white" aria-label="公開基本投資機會">
+                <h2 className="text-4xl font-black text-amber-200">{gameState.decisionPhase.playerName} 的發薪規劃</h2>
+                <p className="my-4 text-2xl">一次配置，結算六個月收支。每人本次最多購買一份基本投資，也可以不買。</p>
+                <div className="grid gap-5">
+                  {gameState.basicInvestmentOffers.map(offer => (
+                    <article key={offer.id} className="rounded-2xl border-2 border-amber-700 bg-slate-900 p-5">
+                      <h3 className="text-3xl font-bold">{offer.name} · ${offer.cost.toLocaleString()}</h3>
+                      <p className="mt-3 text-2xl">{offer.description}</p>
+                    </article>
+                  ))}
+                </div>
+                <p className="mt-5 text-xl text-gray-300">遊戲模擬數值，不保證獲利；由玩家在手機選擇，主持人控制收束。</p>
+              </section>
+            ) : <GameBoard
               players={boardPlayers}
               currentTurnPlayerId={gameState.currentPlayerTurnId}
               focusPlayerId={boardFocusPlayerId}
@@ -787,7 +804,7 @@ export default function DisplayScreen() {
               isGlobalPayday={gameState.globalPaydayInProgress ?? false}
               showPlayerPanel={false}
               showMiniMap={false}
-            />
+            />}
 
             {/* 擲骰動畫 overlay */}
             <DiceRollOverlay

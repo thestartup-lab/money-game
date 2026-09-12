@@ -246,6 +246,9 @@ export default function PlayerPage() {
       setPaydayForm(p);
       addNotification('💰 發薪日到了！請規劃你的投資');
     });
+    s.on('basicInvestmentResult', (p: { playerId: string; message: string }) => {
+      if (p.playerId === playerIdRef.current) addNotification(`💼 ${p.message}`);
+    });
     s.on('turnSkipped', (p: { reason?: string; turnsRemaining?: number }) => {
       setRollingLocked(false);
       const reason = p.reason === 'education'

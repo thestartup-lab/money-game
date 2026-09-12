@@ -182,6 +182,7 @@ export interface GameState {
   globalPaydayPending?: boolean;
   globalPaydayInProgress?: boolean;
   globalPaydayNumber?: number;
+  basicInvestmentOffers?: Array<{ id: string; name: string; cost: number; monthlyCashflow: number; description: string }>;
   decisionPhase?: {
     id: string;
     kind: 'payday' | 'deal' | 'charity' | 'crisis' | 'relationship' | 'marriage' | 'startup' | 'auction';
@@ -197,7 +198,7 @@ export interface GameState {
 
 export interface FacilitatorScene {
   id: string;
-  kind: 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family' | 'global_event';
+  kind: 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family' | 'global_event' | 'second_life';
   stage: 'prompt' | 'result';
   kicker: string;
   title: string;
@@ -448,6 +449,7 @@ export interface PaydayFormData {
   currentCash: number;
   currentStats: { financialIQ: number; health: number; careerSkill: number; network: number };
   affordableOptions: AffordableOptions;
+  basicInvestments?: Array<{ id: string; name: string; cost: number; monthlyCashflow: number; description: string }>;
   currentInsurance: { hasMedicalInsurance: boolean; hasLifeInsurance: boolean; hasPropertyInsurance: boolean };
   stockDCAPortfolioValue: number;
   timeoutMs: number;
@@ -468,6 +470,7 @@ export interface PaydayFormData {
 /** 發薪日規劃表單的送出 payload */
 export interface PaydayPlanPayload {
   settlementMonths?: number;
+  basicInvestmentId?: string;
   investInFQUpgrade: boolean;
   investInHealthMaintenance: boolean;
   investInHealthBoost: boolean;

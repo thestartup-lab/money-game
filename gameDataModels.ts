@@ -197,7 +197,7 @@ export interface DecisionPhaseState {
   reminderEndsAt: number;
 }
 
-export type FacilitatorSceneKind = 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family' | 'global_event';
+export type FacilitatorSceneKind = 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family' | 'global_event' | 'second_life';
 
 export interface FacilitatorSceneState {
   id: string;
@@ -262,6 +262,8 @@ export interface PlayerStats {
 export interface PaydayPlanPayload {
   /** 季度制結算涵蓋的月份；省略時視為舊版單月發薪。 */
   settlementMonths?: number;
+  /** 只接受伺服器當期清單的 ID；每人每次發薪最多買一份。 */
+  basicInvestmentId?: string;
   /** 升級財商值（費用依當前 FQ 等級而定，見 FQ_UPGRADE_COSTS） */
   investInFQUpgrade: boolean;
   /** 維護健康：阻止本次 HP 自然衰退（費用 $3,000） */
@@ -366,6 +368,8 @@ export interface PlayerEvent {
  * 皆為 getter，從原始數據動態計算，確保永遠一致。
  */
 export class Player {
+  /** 獨立於財務月數的健康／自然人脈成長週期。 */
+  growthPaydayCount = 0;
   worldEffects: { eventId: string; title: string; expiresAfterPayday: number; effect: GlobalEventEffect }[] = [];
   id: string;
   name: string;

@@ -26,6 +26,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
     networkInvest: false,
   });
   const [dcaAmount, setDcaAmount] = useState(0);
+  const [basicInvestmentId, setBasicInvestmentId] = useState<string | undefined>();
   const [buyIns, setBuyIns] = useState<Array<'medical' | 'life' | 'property'>>([]);
   const [lifeChoice, setLifeChoice] = useState<LifeChoice>({ type: 'none' });
   const [showTravelList, setShowTravelList] = useState(false);
@@ -37,6 +38,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
     if (checks.skillTraining) cost += data.affordableOptions.skillTraining.cost;
     if (checks.networkInvest) cost += data.affordableOptions.networkInvest.cost;
     cost += dcaAmount;
+    cost += data.basicInvestments?.find(item => item.id === basicInvestmentId)?.cost ?? 0;
     for (const t of buyIns) cost += INSURANCE_CONFIG[t].activationFee;
     if (lifeChoice.type === 'travel') {
       const dest = data.travelDestinations?.find((d) => d.id === (lifeChoice as { type: 'travel'; destinationId: string; destinationName: string }).destinationId);
@@ -72,6 +74,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
       investInNetwork: checks.networkInvest,
       stockDCAAmount: dcaAmount,
       buyInsuranceTypes: buyIns,
+      ...(basicInvestmentId ? { basicInvestmentId } : {}),
     };
     onSubmit(plan, lifeChoice);
   }
@@ -91,7 +94,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
           </div>
           {data.globalPayday ? (
             <div className="text-xs font-semibold text-emerald-300">
-              本次涵蓋 {data.settlementMonths ?? 3} 個月，只做一次季度配置
+              本次涵蓋 {data.settlementMonths ?? 6} 個月收支，只配置一次；健康與自然人脈維持原節奏
             </div>
           ) : data.combinedPlanning ? (
             <div className="text-xs font-semibold text-emerald-300">只需規劃一次，薪資將依序結算</div>
@@ -157,7 +160,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
             {[
               { key: 'fqUpgrade' as const,     label: `財商升級 FQ ${data.currentStats.financialIQ}→${data.currentStats.financialIQ + 1}`, opt: data.affordableOptions.fqUpgrade,     icon: '📈' },
               { key: 'healthBoost' as const,    label: `積極健康 HP +20（現 ${data.currentStats.health}${data.globalPayday ? '，含整季維護' : ''}）`, opt: data.affordableOptions.healthBoost, icon: '💪' },
-              { key: 'healthMaint' as const,    label: data.globalPayday ? '整季健康維護（防 3 個月 HP 衰退）' : '健康維護（防 HP 衰退）', opt: data.affordableOptions.healthMaintenance, icon: '🛡' },
+              { key: 'healthMaint' as const,    label: data.globalPayday ? '本次健康維護（防 3 次成長週期衰退）' : '健康維護（防 HP 衰退）', opt: data.affordableOptions.healthMaintenance, icon: '🛡' },
               { key: 'skillTraining' as const,  label: `進修培訓 SK +20（現 ${data.currentStats.careerSkill}）`,                              opt: data.affordableOptions.skillTraining, icon: '📚' },
               { key: 'networkInvest' as const,  label: `人脈拓展 NT +1（現 ${data.currentStats.network}）`,                                   opt: data.affordableOptions.networkInvest, icon: '🤝' },
             ].map(({ key, label, opt, icon }) => {
@@ -194,6 +197,23 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
         </section>
 
         {/* ─── B. 獲利投資 ─── */}
+        {data.basicInvestments && (
+          <fieldset className="space-y-3 rounded-xl border-2 border-amber-500 p-4">
+            <legend className="px-2 text-xl font-bold text-amber-200">本次基本投資機會</legend>
+            <p className="text-base text-gray-200">每人本次最多一份，不搶全桌名額。先用現有現金配置，再結算六個月收支；不保證獲利。</p>
+            <label className="flex min-h-14 items-center gap-3 text-lg text-white">
+              <input type="radio" name="basic-investment" checked={!basicInvestmentId} onChange={() => setBasicInvestmentId(undefined)} className="h-5 w-5" />本次不購買
+            </label>
+            {data.basicInvestments.map(offer => (
+              <label key={offer.id} className="flex min-h-20 items-start gap-3 rounded-lg bg-gray-800 p-3 text-white">
+                <input type="radio" name="basic-investment" checked={basicInvestmentId === offer.id}
+                  disabled={remaining + (data.basicInvestments?.find(item => item.id === basicInvestmentId)?.cost ?? 0) < offer.cost}
+                  onChange={() => setBasicInvestmentId(offer.id)} className="mt-1 h-5 w-5" />
+                <span><strong className="text-lg">{offer.name} · ${offer.cost.toLocaleString()}</strong><span className="mt-1 block text-base">{offer.description}</span></span>
+              </label>
+            ))}
+          </fieldset>
+        )}
         <section>
           <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">獲利投資</h3>
 

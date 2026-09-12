@@ -170,7 +170,7 @@ export function movePlayer(player: Player, steps: number): MoveResult {
  * @param maintenanceDone 本次發薪日是否已執行健康維護（true = 阻止 HP 衰退）
  * @returns 更新後的玩家
  */
-export function triggerPayday(player: Player, gameState: GameState, maintenanceDone = false): Player {
+export function triggerPayday(player: Player, gameState: GameState, maintenanceDone = false, growthCycle = true): Player {
   // 計算當前人生階段，套用薪資倍率
   const currentAge = getCurrentAge(gameState);
   const stage = getLifeStage(currentAge);
@@ -200,8 +200,11 @@ export function triggerPayday(player: Player, gameState: GameState, maintenanceD
     adjustCreditScore(player, CREDIT_CHANGE_NEGATIVE_CF);
   }
 
-  applyHPDecay(player, maintenanceDone, stage);
-  applyNTAutoGrowth(player);
+  if (growthCycle) {
+    player.growthPaydayCount += 1;
+    applyHPDecay(player, maintenanceDone, stage);
+    applyNTAutoGrowth(player, player.growthPaydayCount);
+  }
 
   return player;
 }
