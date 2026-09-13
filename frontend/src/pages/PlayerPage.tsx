@@ -1174,7 +1174,7 @@ export default function PlayerPage() {
           {!isGameOver && myPlayer ? <CareerStagePanel gameState={gameState} player={myPlayer} emit={emit} /> : null}
 
           {/* 事件卡（有事件時取代格子顯示，或加在下面） */}
-          {activeEvent && (
+          {activeEvent && gameState.decisionPhase?.kind !== 'reading' && (
             <div className="mx-4 mb-3">
               <EventCard
                 key={JSON.stringify(activeEvent)}
@@ -1202,15 +1202,15 @@ export default function PlayerPage() {
           {gameState.decisionPhase && !paydayForm && (
             <div className="mx-4 mb-3 rounded-xl border border-indigo-700 bg-indigo-950/60 px-3 py-3 text-center">
               <p className="text-sm font-bold text-indigo-200">
-                {gameState.decisionPhase.playerId === myId
+                {gameState.decisionPhase.kind === 'reading' ? '請抬頭看落格說明，等待主持人繼續' : gameState.decisionPhase.playerId === myId
                   ? gameState.decisionPhase.submitted ? '選擇已送出，等待主持人揭曉' : '請在手機完成私人決策'
                   : `${gameState.decisionPhase.playerName} 正在決策`}
               </p>
               <p className="mt-1 text-xs text-gray-500">討論與局勢請看大螢幕</p>
-              <DecisionCountdown
+              {gameState.decisionPhase.kind !== 'reading' && <DecisionCountdown
                 reminderEndsAt={gameState.decisionPhase.reminderEndsAt}
                 className="mt-2 block font-mono text-lg font-black text-yellow-300"
-              />
+              />}
             </div>
           )}
 

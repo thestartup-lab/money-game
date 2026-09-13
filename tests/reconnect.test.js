@@ -38,6 +38,7 @@ test('本機端到端：異常封包不崩潰、禁止中途加入、暫停操�
     sockets.push(s); await wait(s, 'connect'); return s;
   }
   const admin = await connect();
+  admin.on('gameStateUpdate', g => { if (g.decisionPhase?.kind === 'reading') admin.emit('continueDecisionPhase', { phaseId: g.decisionPhase.id }); });
   await send(admin, 'playerJoin', null, 'error');
   await send(admin, 'playerJoin', { playerName: {}, roomCode: 'TEST01' }, 'error');
   assert.equal((await (await fetch(`http://127.0.0.1:${port}/health`)).json()).ok, true);
@@ -61,7 +62,7 @@ test('本機端到端：異常封包不崩潰、禁止中途加入、暫停操�
   assert.equal(repaid.players.find(x => x.id === p.id).cash, lent.players.find(x => x.id === p.id).cash + 1000);
 
   // Fixed dice land on a decision cell. The replacement socket must retain the original character.
-  const decision = await send(p, 'playerRoll', {}, 'gameStateUpdate', g => g.decisionPhase?.playerId === pSession.playerId);
+  const decision = await send(p, 'playerRoll', {}, 'gameStateUpdate', g => g.decisionPhase?.kind !== 'reading' && g.decisionPhase?.playerId === pSession.playerId);
   const disconnected = wait(admin, 'gameStateUpdate', g => g.players.find(x => x.id === pSession.playerId)?.isDisconnected);
   p.disconnect(); await disconnected;
   await send(stranger, 'playerRejoin', { playerName: '甲', roomCode: 'TEST01' }, 'rejoinFailed');

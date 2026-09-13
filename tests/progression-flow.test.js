@@ -14,7 +14,7 @@ function send(s, event, payload, response, predicate) {
   const result = wait(s, response, predicate); s.emit(event, payload); return result;
 }
 
-async function fixture(t, port, passed, passive) {
+async function fixture(t, port, passed, passive, autoReading = true, outer = false, deal = false) {
   // Test-only deterministic state: exercise production Socket handlers without adding a production test endpoint.
   const boot = `
     Math.random=()=>0.4;
@@ -23,6 +23,7 @@ async function fixture(t, port, passed, passive) {
     logic.createPlayer=(...args)=>{
       const p=create(...args);p.pre20Done=true;p.cash=200000;
       p.hasPassedSecondLife=${passed};p.stats.health=40;p.stats.careerSkill=0;
+      p.isInFastTrack=${outer};
       p.growthStats={academic:1,health:0,social:0,resource:0};
       p.expenses={taxes:0,homeMortgagePayment:0,carLoanPayment:0,creditCardPayment:0,otherExpenses:10000};
       p.liabilities=[];p.assets=[{id:'fixture',name:'測試收入',type:'Other',cost:1,currentValue:1,monthlyCashflow:${passive}}];
@@ -30,6 +31,8 @@ async function fixture(t, port, passed, passive) {
     };
     const cards=require('./dist/gameCards');
     cards.BOARD.forEach(cell=>cell.type=cards.SquareType.SecondLife);
+    if (${deal}) cards.BOARD.forEach(cell=>{cell.type=cards.SquareType.SmallDeal;cell.label='小交易';});
+    if (${outer}) cards.FAST_TRACK_BOARD.forEach(cell=>{cell.type=cards.FastTrackSquareType.TaxPlanning;cell.label='稅務規劃';});
     require('./dist/socketServer');
   `;
   const server = spawn(process.execPath, ['-e', boot], { env: { ...process.env, PORT: String(port), NODE_ENV: 'test' }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -43,13 +46,62 @@ async function fixture(t, port, passed, passive) {
   });
   async function connect() { const s = io('http://127.0.0.1:' + port, { transports: ['websocket'], reconnection: false }); sockets.push(s); await wait(s, 'connect'); return s; }
   const admin = await connect();
+  if (autoReading) admin.on('gameStateUpdate', g => { if (g.decisionPhase?.kind === 'reading') admin.emit('continueDecisionPhase', { phaseId: g.decisionPhase.id }); });
   const room = await send(admin, 'createRoom', { roomId: 'F' + port }, 'roomCreated');
   const a = await connect(), b = await connect();
   const sa = await send(a, 'playerJoin', { playerName: '甲', roomCode: room.roomId }, 'playerSession');
   const sb = await send(b, 'playerJoin', { playerName: '乙', roomCode: room.roomId }, 'playerSession');
   await send(admin, 'startGame', { force: true }, 'gameStateUpdate', g => g.gamePhase === 'RatRace');
-  return { admin, a, b, sa, sb, server };
+  return { admin, a, b, sa, sb, server, connect };
 }
+
+test('落格閱讀保留超過舊時限、主持人逐張確認、重連恢復、不能提早擲骰或越權跳過', { timeout: 15000 }, async t => {
+  const { admin, a, b, sa, sb, connect } = await fixture(t, 3229, false, 0, false);
+  const first = await send(a, 'playerRoll', { diceCount: 1 }, 'gameStateUpdate', g => g.decisionPhase?.kind === 'reading');
+  assert.match(first.decisionPhase.title, /走到了/);
+  assert.ok(first.decisionPhase.description);
+  assert.equal(first.currentPlayerTurnId, sa.playerId);
+  await send(a, 'continueDecisionPhase', { phaseId: first.decisionPhase.id }, 'error');
+  await send(b, 'playerRoll', {}, 'error');
+  await send(a, 'submitCardDecision', { phaseId: first.decisionPhase.id, accepted: true }, 'error');
+  await new Promise(resolve => setTimeout(resolve, 5200));
+  const display = await connect();
+  const afterTimeout = await send(display, 'joinDisplay', { roomId: first.roomId }, 'gameStateUpdate');
+  assert.equal(afterTimeout.decisionPhase.id, first.decisionPhase.id);
+  assert.equal(afterTimeout.isPaused, true);
+  a.disconnect();
+  const resumed = await connect();
+  const recovered = await send(resumed, 'playerRejoin', { playerName: '甲', roomCode: first.roomId, reconnectToken: sa.reconnectToken }, 'gameStateUpdate');
+  assert.equal(recovered.decisionPhase.id, first.decisionPhase.id);
+  const second = await send(admin, 'continueDecisionPhase', { phaseId: first.decisionPhase.id }, 'gameStateUpdate', g => g.decisionPhase?.kind === 'reading' && g.decisionPhase.id !== first.decisionPhase.id);
+  assert.equal(second.decisionPhase.title, '第二人生');
+  assert.equal(second.currentPlayerTurnId, sa.playerId);
+  await send(admin, 'continueDecisionPhase', { phaseId: first.decisionPhase.id }, 'error');
+  await send(admin, 'continueDecisionPhase', {}, 'error');
+  const next = await send(admin, 'continueDecisionPhase', { phaseId: second.decisionPhase.id }, 'gameStateUpdate', g => !g.decisionPhase && !g.turnInProgress && g.currentPlayerTurnId === sb.playerId);
+  assert.equal(next.isPaused, false);
+});
+
+test('閱讀完成才發出私人交易卡並開始完整決策倒數', { timeout: 10000 }, async t => {
+  const { admin, a } = await fixture(t, 3232, false, 0, false, false, true);
+  let cards = 0;
+  a.on('dealCardsDrawn', () => cards++);
+  const reading = await send(a, 'playerRoll', { diceCount: 1 }, 'gameStateUpdate', g => g.decisionPhase?.kind === 'reading');
+  assert.equal(cards, 0);
+  const decision = await send(admin, 'continueDecisionPhase', { phaseId: reading.decisionPhase.id }, 'gameStateUpdate', g => g.decisionPhase?.kind === 'deal');
+  assert.equal(cards, 1);
+  assert.ok(decision.decisionPhase.reminderEndsAt - Date.now() > 55000);
+});
+
+test('外圈也先閱讀落格再顯示結果，不提前跳至下一位', { timeout: 10000 }, async t => {
+  const { admin, a, sa, sb } = await fixture(t, 3231, true, 0, false, true);
+  const first = await send(a, 'playerRoll', { diceCount: 1 }, 'gameStateUpdate', g => g.decisionPhase?.kind === 'reading');
+  assert.match(first.decisionPhase.title, /稅務規劃/);
+  assert.equal(first.currentPlayerTurnId, sa.playerId);
+  const second = await send(admin, 'continueDecisionPhase', { phaseId: first.decisionPhase.id }, 'gameStateUpdate', g => g.decisionPhase?.kind === 'reading' && g.decisionPhase.id !== first.decisionPhase.id);
+  assert.equal(second.decisionPhase.title, 'FT 稅務規劃');
+  await send(admin, 'continueDecisionPhase', { phaseId: second.decisionPhase.id }, 'gameStateUpdate', g => !g.decisionPhase && g.currentPlayerTurnId === sb.playerId);
+});
 
 test('結算達標免再擲骰：既有舞台不被蓋住、兩位依序揭曉、重複揭曉不重複進圈', { timeout: 20000 }, async t => {
   const { admin, a, sa, sb } = await fixture(t, 3223, true, 10000);

@@ -11,6 +11,7 @@ import DiceRollOverlay, { type DiceRollData } from '../components/game/DiceRollO
 import DecisionCountdown from '../components/game/DecisionCountdown';
 import TurnIntroOverlay, { type TurnIntroData } from '../components/game/TurnIntroOverlay';
 import FacilitatorSceneOverlay from '../components/game/FacilitatorSceneOverlay';
+import BoardReadingPanel from '../components/game/BoardReadingPanel';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
@@ -87,6 +88,8 @@ export default function DisplayScreen() {
   const auctionCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [diceAnim, setDiceAnim] = useState<DiceRollData | null>(null);
+  const [boardSettling, setBoardSettling] = useState(false);
+  const boardSettlingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queuedDiceRef = useRef<DiceRollData | null>(null);
   // 骰子動畫期間：鎖定該玩家位置在 oldPosition、暫存 centerEvent，等動畫結束才釋放
   const diceAnimRef = useRef<DiceRollData | null>(null);
@@ -319,6 +322,8 @@ export default function DisplayScreen() {
     });
 
     s.on('playerRolled', (p: { playerId: string; playerName: string; colorIndex: number; dice: number[]; total: number; oldPosition: number; newPosition: number; isInFastTrack?: boolean }) => {
+      if (boardSettlingTimer.current) clearTimeout(boardSettlingTimer.current);
+      setBoardSettling(true);
       const data = { ...p, key: Date.now() };
       diceAnimRef.current = data;
       if (turnIntroBusyRef.current) {
@@ -428,6 +433,7 @@ export default function DisplayScreen() {
       if (centerRevealTimer.current) clearTimeout(centerRevealTimer.current);
       if (paydayDismissTimer.current) clearTimeout(paydayDismissTimer.current);
       if (boardFocusTimerRef.current) clearTimeout(boardFocusTimerRef.current);
+      if (boardSettlingTimer.current) clearTimeout(boardSettlingTimer.current);
     };
     return () => {
       s.disconnect();
@@ -457,7 +463,7 @@ export default function DisplayScreen() {
 
   // 回合交棒不與上一位的結果畫面搶焦點；所有演出完成後才正式叫出下一位。
   useEffect(() => {
-    if (!pendingTurnIntro || activeTurnIntro || gameState?.facilitatorScene) return;
+    if (!pendingTurnIntro || activeTurnIntro || gameState?.facilitatorScene || (gameState?.decisionPhase?.kind === 'reading' && !queuedDiceRef.current)) return;
     const visualIsBusy = Boolean(
       diceAnim ||
       centerEvent ||
@@ -473,7 +479,7 @@ export default function DisplayScreen() {
     }, 280);
 
     return () => window.clearTimeout(launchTimer);
-  }, [activeTurnIntro, centerEvent, diceAnim, pendingTurnIntro, showPaydayOverlay, gameState?.facilitatorScene]);
+  }, [activeTurnIntro, centerEvent, diceAnim, pendingTurnIntro, showPaydayOverlay, gameState?.facilitatorScene, gameState?.decisionPhase?.kind]);
 
   const emit = (ev: string, ...args: unknown[]) => socketRef.current?.emit(ev, ...args);
 
@@ -814,6 +820,7 @@ export default function DisplayScreen() {
                 const finished = diceAnimRef.current;
                 diceAnimRef.current = null;
                 setDiceAnim(null);
+                boardSettlingTimer.current = setTimeout(() => setBoardSettling(false), 450);
                 // 釋放位置鎖：玩家現在才「實際移動」到新格子
                 if (finished) {
                   setPositionOverride((prev) => {
@@ -852,7 +859,12 @@ export default function DisplayScreen() {
             />
 
             {/* 主持人控制的決策階段：只公開進度，不公開玩家選項 */}
-            {gameState.decisionPhase && !centerEvent && !diceAnim && (
+            {gameState.decisionPhase?.kind === 'reading' && !diceAnim && !activeTurnIntro && !boardSettling ? (
+              <div className="absolute inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/75 p-6">
+                <BoardReadingPanel phase={gameState.decisionPhase} />
+              </div>
+            ) : null}
+            {gameState.decisionPhase && gameState.decisionPhase.kind !== 'reading' && !centerEvent && !diceAnim && (
               <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/65 px-6 backdrop-blur-sm">
                 <div className="w-full max-w-2xl rounded-3xl border-2 border-indigo-400 bg-gradient-to-br from-indigo-950/95 to-gray-950/95 px-10 py-9 text-center shadow-2xl">
                   <p className="text-sm font-bold uppercase tracking-[0.3em] text-indigo-300">全場決策時間</p>
@@ -924,7 +936,7 @@ export default function DisplayScreen() {
             )}
 
             {/* 置中大字幕 overlay */}
-            {centerEvent && (
+            {centerEvent && gameState.decisionPhase?.kind !== 'reading' && (
               <div
                 className="absolute inset-0 flex items-center justify-center z-50 pointer-events-auto cursor-pointer"
                 style={{ animation: 'fadeInOut 0.3s ease' }}

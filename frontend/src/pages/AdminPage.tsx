@@ -5,6 +5,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import DecisionCountdown from '../components/game/DecisionCountdown';
 import ClassicReviewLibrary from '../components/analysis/ClassicReviewLibrary';
 import FacilitatorControlPanel from '../components/game/FacilitatorControlPanel';
+import BoardReadingPanel from '../components/game/BoardReadingPanel';
 import WorldEventControlPanel, { type AdaptiveDirectorStatus } from '../components/game/WorldEventControlPanel';
 import {
   readAdminCode,
@@ -509,7 +510,8 @@ export default function AdminPage() {
                 ⚡ 強制開始（為 {notReadyPlayers.length} 位玩家自動補齊）
               </button>
             )}
-            {decisionPhase && (
+            {decisionPhase?.kind === 'reading' ? <BoardReadingPanel phase={decisionPhase} emit={emit} /> : null}
+            {decisionPhase && decisionPhase.kind !== 'reading' && (
               <div className="admin-decision-panel rounded-2xl p-4 space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>

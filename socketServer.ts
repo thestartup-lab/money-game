@@ -390,6 +390,24 @@ function emitToRoom(roomId: string, event: string, ...args: unknown[]): void {
 /**
  * 向當前玩家發送落地通知，並同時廣播給全房（供大螢幕顯示）。
  */
+type BoardNotice = { playerId: string; playerName: string; title: string; description: string };
+const boardNotices = new WeakMap<GameState, BoardNotice[]>();
+
+function enqueueBoardNotice(gs: GameState, notice: BoardNotice): void {
+  const queue = boardNotices.get(gs) ?? [];
+  queue.push(notice);
+  boardNotices.set(gs, queue);
+}
+
+async function readBoardNotices(gs: GameState): Promise<void> {
+  while (!gs.facilitatorScene && !gs.decisionPhase && gs.gamePhase !== GamePhase.GameOver) {
+    const notice = boardNotices.get(gs)?.shift();
+    if (!notice) return;
+    const context = beginHostDecisionPhase(gs, { id: notice.playerId, name: notice.playerName }, 'reading', notice.title, notice.description);
+    await waitForHostRelease(gs, context);
+  }
+}
+
 function emitCellEvent(
   socket: import('socket.io').Socket,
   roomId: string,
@@ -398,6 +416,11 @@ function emitCellEvent(
   message: string
 ): void {
   emitClient(socket, 'squareLandingNotice', { cellName, message });
+  const gs = rooms.get(roomId);
+  if (gs?.turnInProgress) {
+    enqueueBoardNotice(gs, { playerId: playerIdentity(socket), playerName, title: cellName, description: message });
+    return;
+  }
   io.to(roomId).emit('cellEventBroadcast', {
     playerId: playerIdentity(socket), playerName, cellName, message, ts: Date.now(),
   });
@@ -1555,6 +1578,7 @@ function finishGame(gs: GameState, reason: 'finalRoundComplete' | 'allPlayersEli
   if (gs.gamePhase === GamePhase.GameOver) return;
 
   gs.gamePhase = GamePhase.GameOver;
+  boardNotices.delete(gs);
   gs.careerRequests = [];
   gs.pendingWorldEvent = null;
   emitAdaptiveDirectorStatus(gs);
@@ -1887,6 +1911,11 @@ function skipCurrentEducationTurns(gs: GameState): void {
  */
 function continueAfterTurnAdvance(gs: GameState): void {
   if (gs.gamePhase === GamePhase.GameOver || gs.facilitatorScene) return;
+  if (gs.decisionPhase) return;
+  if (boardNotices.get(gs)?.length) {
+    void readBoardNotices(gs).then(() => continueAfterTurnAdvance(gs)).catch(error => console.error('[boardReading]', error));
+    return;
+  }
   if (tryOpenSecondLife(gs)) return;
   if ((secondLifeQueue.get(gs)?.length ?? 0) > 0) return;
   if (gs.finalRoundStarted && gs.finalRoundPendingPlayerIds.length === 0) {
@@ -3070,7 +3099,15 @@ io.on('connection', (socket: Socket) => {
       }
 
       // --- 5. 處理落點格子 ---
+      const landingBoard = player.isInFastTrack ? FAST_TRACK_BOARD : require('./gameCards').BOARD;
+      const landingPosition = player.isInFastTrack ? player.fastTrackPosition : player.currentPosition;
+      const landingLabel = landingBoard[landingPosition % landingBoard.length]?.label ?? '人生事件';
+      enqueueBoardNotice(gs, { playerId: player.id, playerName: player.name,
+        title: `${player.name} 走到了「${landingLabel}」`,
+        description: '請一起看清落格位置。主持人按「看完了，繼續」後，才進入本格事件與決策。' });
+      await readBoardNotices(gs);
       await handleLandingSquare(socket, player, gs);
+      await readBoardNotices(gs);
 
       // ⚠ 玩家可能在 handleLandingSquare 中因危機/疾病死亡，
       //   後續 FastTrack 解鎖、增值、advanceToNextTurn 邏輯需要 isAlive 守衛
@@ -3129,6 +3166,7 @@ io.on('connection', (socket: Socket) => {
       gs.turnInProgress = false;
       continueAfterTurnAdvance(gs);
       tryOpenWorldEvent(gs);
+      emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
     }
     }
   );
@@ -3149,7 +3187,7 @@ io.on('connection', (socket: Socket) => {
       emitClient(socket, 'error', { message: '目前沒有等待中的決策。' });
       return;
     }
-    if (payload?.phaseId && payload.phaseId !== waiter.phaseId) {
+    if ((gs.decisionPhase.kind === 'reading' && payload?.phaseId !== waiter.phaseId) || (payload?.phaseId && payload.phaseId !== waiter.phaseId)) {
       emitClient(socket, 'error', { message: '決策階段已更新，請重新操作。' });
       return;
     }
@@ -4466,6 +4504,7 @@ io.on('connection', (socket: Socket) => {
     gs.facilitatorScene = null;
     gs.facilitatorSceneContext = null;
     gs.facilitatorEchoHistory = new Set();
+    boardNotices.delete(gs);
     gs.careerRequests = [];
     gs.pendingWorldEvent = null;
     gs.worldEventHistory = [];
@@ -4974,6 +5013,7 @@ io.on('connection', (socket: Socket) => {
     gs.pendingPartnershipOffers = {};
     gs.pendingLoanOffers = {};
     gs.pendingLoanRequests = {};
+    boardNotices.delete(gs);
     gs.careerRequests = [];
     gs.activeAuctions = {};
     gs.decisionPhase = null;
@@ -5582,12 +5622,14 @@ function beginHostDecisionPhase(
   player: Pick<Player, 'id' | 'name'>,
   kind: DecisionPhaseState['kind'],
   title: string,
+  description?: string,
 ): HostDecisionContext {
   const wasAlreadyPaused = gs.pausedAt !== null;
   if (!wasAlreadyPaused) pauseGameClock(gs);
 
   const phaseId = `decision-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const reminderSeconds: Record<DecisionPhaseState['kind'], number> = {
+    reading: 0,
     payday: 90,
     deal: 60,
     charity: 45,
@@ -5601,6 +5643,7 @@ function beginHostDecisionPhase(
     id: phaseId,
     kind,
     title,
+    description,
     playerId: player.id,
     playerName: player.name,
     submitted: false,
@@ -5701,13 +5744,14 @@ function waitForHostRelease(gs: GameState, context: HostDecisionContext): Promis
 // 卡牌決策等待輔助
 // ============================================================
 
-function waitForCardDecision(
+async function waitForCardDecision(
   socket: Socket,
   gs: GameState,
   player: Player,
   kind: DecisionPhaseState['kind'],
   title: string,
 ): Promise<Record<string, unknown> | null> {
+  await readBoardNotices(gs);
   const context = beginHostDecisionPhase(gs, player, kind, title);
   return waitForHostControlledDecision(socket, gs, context, 'submitCardDecision', null);
 }

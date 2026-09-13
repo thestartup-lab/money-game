@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import DecisionCountdown from '../components/game/DecisionCountdown';
 import FacilitatorControlPanel from '../components/game/FacilitatorControlPanel';
+import BoardReadingPanel from '../components/game/BoardReadingPanel';
 import WorldEventControlPanel, { type AdaptiveDirectorStatus } from '../components/game/WorldEventControlPanel';
 import {
   readAdminCode,
@@ -347,7 +348,8 @@ export default function HostControlPage() {
           )}
         </section>
 
-        {decisionPhase ? (
+        {decisionPhase?.kind === 'reading' ? <BoardReadingPanel phase={decisionPhase} emit={emit} /> : null}
+        {decisionPhase && decisionPhase.kind !== 'reading' ? (
           <section className="host-decision-card" aria-label="決策倒數控制">
             <div className="host-decision-heading">
               <div>

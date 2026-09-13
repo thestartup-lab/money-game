@@ -186,7 +186,8 @@ export interface GameState {
   basicInvestmentOffers?: Array<{ id: string; name: string; cost: number; monthlyCashflow: number; description: string }>;
   decisionPhase?: {
     id: string;
-    kind: 'payday' | 'deal' | 'charity' | 'crisis' | 'relationship' | 'marriage' | 'startup' | 'auction';
+    kind: 'reading' | 'payday' | 'deal' | 'charity' | 'crisis' | 'relationship' | 'marriage' | 'startup' | 'auction';
+    description?: string;
     title: string;
     playerId: string;
     playerName: string;
