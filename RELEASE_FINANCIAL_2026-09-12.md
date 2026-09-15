@@ -1,5 +1,17 @@
 # 財務累積與第二人生公告更新
 
+## 正式部署結果
+
+- 2026-09-12 22:40（Asia/Taipei），Production，READY。
+- 網址：https://game.cjlead.com.tw ，主持人：https://game.cjlead.com.tw/?admin 。
+- 提交：9185db93c4a098819c74342d47179dcf62992d8c。
+- 前端 React/Vite：dpl_AdeshPwEnFF84HL5wgB28dxAp5fo，https://money-game-5ka9r51zm-cjleads-projects.vercel.app 。既有正式網域已指向此部署。inspect 僅提供 0 ms 靜態輸出摘要，實際建置耗時未提供。
+- 後端 Railway/Node.js/Socket.IO：health ok=true，revision 與上述提交一致，部署前後房間數皆為 0。
+- 正式 smoke test：臨時房間建立、玩家加入、主持人登入、新版 public state 欄位與玩家憑證重連通過；測試房已刪除。
+- 正式網址 JS：PlayerPage-CcXiNHA8.js 與 DisplayScreen-Lj6pIfMK.js 含基本投資及六個月文字；正式後台顯示「伺服器已連線」，未見 console error/warn。
+- Vercel 最近十分鐘 error 日誌查詢：No logs found，不代表 Railway 全流程沒有錯誤。Drains 未檢查／新增，持續監控未配置；現場 Wi-Fi／真實多人壓測仍待彩排。
+- Vercel 從已提交原始碼的乾淨暫存目錄發布，未上傳工作區未提交的簡報與私人建置資料。
+
 ## 規則
 
 - 每三個完整人生回合仍發薪一次；每次財務結算由三個月增加為六個月，20 輪共六次、36 個月。

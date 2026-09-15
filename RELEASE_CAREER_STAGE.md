@@ -20,4 +20,10 @@
 
 ## 部署
 
-待正式部署與上線驗證完成後填寫。房間在記憶體，發布前須再次確認正式後端 rooms=0。
+- 2026-09-12 23:14（Asia/Taipei）正式發布。提交 be72a7a8ef8e2f1a426bd85e493ada01c38e1d67。
+- 前端 React/Vite：dpl_EUqRapBU5dCXAGjp8AcQt9PJ6tAT，READY，https://game.cjlead.com.tw 已指向此版。部署 URL：https://money-game-ant0lfle3-cjleads-projects.vercel.app 。inspect 僅提供 0 ms 靜態建置摘要，實際建置耗時未提供。
+- 後端 Railway：Git 自動部署完成，/health revision 與提交一致、ok=true。部署前無活動房間。
+- 正式獨立測試房：申請不扣款、開啟暫停、本人確認、主持揭曉、SK 歸零、關閉恢復通過。測試房已刪除。
+- 正式主持人手機入口 /?host 顯示「伺服器已連線」，瀏覽器未見 error/warn。
+- Vercel 最近 10 分鐘 error 日誌 No logs found；不代表 Railway 全部歷史日誌無錯誤。Drains 未檢查，未新增持續監控；現場多人彩排仍建議執行。
+- 前端從乾淨提交封存發布，未上傳簡報／私人建置資料。首次從 frontend 子目錄發布因遠端 rootDirectory 設定失敗，改從完整根目錄重發成功，未更改正式設定。
