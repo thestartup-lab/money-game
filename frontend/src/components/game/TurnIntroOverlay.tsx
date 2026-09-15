@@ -16,7 +16,7 @@ interface Props {
   onDone: () => void;
 }
 
-const PLAYER_COLORS = ['#fbbf24', '#60a5fa', '#f472b6', '#34d399', '#a78bfa', '#fb923c'];
+import { PLAYER_COLORS } from './playerColors';
 const ANNOUNCE_MS = 3_200;
 const EXIT_MS = 450;
 

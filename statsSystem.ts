@@ -174,6 +174,7 @@ export function applyPaydayPlan(player: Player, plan: PaydayPlanPayload): Payday
     if (boostOutcome.executed) {
       // boost 已含 maintenance，同時標記 maintenance 為已執行（供 applyHPDecay 判斷）
       player.stats.health = Math.min(100, player.stats.health + HP_BOOST_AMOUNT);
+      if (player.stats.health > 0 && player.isBedridden) player.isBedridden = false;
       maintOutcome.executed = true; // 視為已做維護
     }
   } else if (plan.investInHealthMaintenance) {

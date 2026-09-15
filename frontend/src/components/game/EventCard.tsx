@@ -7,6 +7,8 @@ interface EventCardProps {
   onDecision: (decision: Record<string, unknown>) => void;
   onDismiss: () => void;
   reminderEndsAt?: number;
+  /** 最新現金（自救卡用來即時顯示還差多少） */
+  playerCash?: number;
 }
 
 const borderColors: Record<string, string> = {
@@ -25,9 +27,11 @@ const borderColors: Record<string, string> = {
   fast_track_travel:   'border-violet-400',
   partnership_pick:    'border-emerald-400',
   partnership_response:'border-emerald-400',
+  relationship_choice: 'border-sky-400',
+  crisis_rescue:       'border-red-500',
 };
 
-export default function EventCard({ event, onDecision, onDismiss, reminderEndsAt }: EventCardProps) {
+export default function EventCard({ event, onDecision, onDismiss, reminderEndsAt, playerCash }: EventCardProps) {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
 
   const borderClass =
@@ -102,7 +106,7 @@ export default function EventCard({ event, onDecision, onDismiss, reminderEndsAt
           creditScore >= 750 ? 0.005 :
           creditScore >= 650 ? 0.008 :
           creditScore >= 550 ? 0.012 : 0.020;
-        const leverageRate = baseRate * 0.8;
+        const leverageRate = baseRate * 1.25; // 與伺服器 LEVERAGE_RATE_MULTIPLIER 一致
 
         const selected = event.cards.find((c) => c.id === selectedCardId);
         const selectedDownPayment = selected?.downPayment ?? 0;
@@ -281,6 +285,67 @@ export default function EventCard({ event, onDecision, onDismiss, reminderEndsAt
               onClick={() => selectedCardId && onDecision({ targetPlayerId: selectedCardId })}
             >送出邀請</button>
             <button className="rounded-xl bg-gray-700 text-white" onClick={() => onDecision({ targetPlayerId: null })}>略過</button>
+          </div>
+        </>
+      )}
+
+      {event.kind === 'crisis_rescue' && (() => {
+        const cash = playerCash ?? event.cash;
+        const shortfall = Math.max(0, event.effectiveCost - cash);
+        return (
+          <>
+            <div className="flex justify-between items-center">
+              <span className="text-red-300 font-bold text-xl">🆘 危機自救</span>
+              <span className="text-xs text-amber-300">主持人確認後判定</span>
+            </div>
+            <p className="text-base font-black text-white">{event.title}</p>
+            <p className="text-sm text-gray-300">{event.description}</p>
+            <div className="rounded-xl bg-gray-900/70 p-3 text-sm space-y-1">
+              <p className="text-gray-300">需要支付：<span className="font-bold text-white">${event.effectiveCost.toLocaleString()}</span></p>
+              <p className="text-gray-300">目前現金：<span className="font-bold text-white">${cash.toLocaleString()}</span></p>
+              <p className={shortfall > 0 ? 'text-red-300 font-bold' : 'text-emerald-300 font-bold'}>
+                {shortfall > 0 ? `還差 $${shortfall.toLocaleString()}，補不足會直接出局` : '現金已足夠，可以請主持人繼續'}
+              </p>
+            </div>
+            <p className="text-xs text-amber-200">打開下方「行動」面板：賣出資產或申請應急借款，把現金補到需要的金額。處理好後按下面的按鈕通知主持人。</p>
+            <button
+              className={`w-full py-2 rounded-xl font-bold text-white ${shortfall > 0 ? 'bg-gray-700' : 'bg-emerald-700 hover:bg-emerald-600'}`}
+              onClick={() => onDecision({ rescued: shortfall <= 0 })}
+            >
+              {shortfall > 0 ? '我放棄自救，交給主持人判定' : '我處理好了，請主持人繼續'}
+            </button>
+          </>
+        );
+      })()}
+
+      {event.kind === 'relationship_choice' && (
+        <>
+          <div className="flex justify-between items-center">
+            <span className="text-sky-300 font-bold text-xl">🤝 人際關係機遇</span>
+            <span className="text-xs text-amber-300">主持人控制時間</span>
+          </div>
+          <p className="text-base font-black text-white">{event.title}</p>
+          <p className="text-sm text-gray-300">{event.description}</p>
+          <div className="rounded-xl bg-gray-900/70 p-3 text-sm space-y-1">
+            <p className="text-gray-400">手頭現金：<span className="font-bold text-white">${event.playerCash.toLocaleString()}</span></p>
+            {event.gamble && (
+              <>
+                <p className="text-emerald-300">擲骰 ≥ {event.gamble.threshold}：投入 ${event.gamble.failureCashLoss.toLocaleString()}，每月被動收入 +${event.gamble.successCashflow.toLocaleString()}</p>
+                <p className="text-red-300">擲骰 &lt; {event.gamble.threshold}：損失 ${event.gamble.failureCashLoss.toLocaleString()}</p>
+              </>
+            )}
+            {event.salaryMultiplier !== undefined && event.turnsAffected ? (
+              <p className={event.salaryMultiplier >= 1 ? 'text-emerald-300' : 'text-orange-300'}>
+                薪資 ×{event.salaryMultiplier}，持續 {event.turnsAffected} 個月
+              </p>
+            ) : null}
+            {event.triggerSmallDeal && <p className="text-emerald-300">接受後可用現金購買一張額外的小交易牌</p>}
+            {event.networkDelta ? <p className="text-blue-300">人脈 {event.networkDelta > 0 ? '+' : ''}{event.networkDelta}</p> : null}
+            {event.lifeExpGain ? <p className="text-purple-300">生命體驗 +{event.lifeExpGain}</p> : null}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button className="rounded-xl bg-sky-700 hover:bg-sky-600 text-white py-2 font-bold" onClick={() => onDecision({ accept: true })}>接受</button>
+            <button className="rounded-xl bg-gray-700 hover:bg-gray-600 text-white py-2 font-bold" onClick={() => onDecision({ accept: false })}>婉拒</button>
           </div>
         </>
       )}

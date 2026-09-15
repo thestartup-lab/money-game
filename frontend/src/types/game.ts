@@ -115,6 +115,10 @@ export interface Player {
   marriageType?: string;
   isBedridden: boolean;
   travelPenaltyRemaining: number;
+  salaryMultiplierPending?: number;
+  salaryMultiplierMonths?: number;
+  salaryBonus?: number;
+  congratulationsReceived?: number;
   isInFastTrack: boolean;
   hasPassedSecondLife: boolean;
   fastTrackPosition: number;
@@ -172,6 +176,16 @@ export interface GameState {
   /** 主持人活動倒數剩餘時間；歸零不影響回合年齡或終局。 */
   remainingTimeMs?: number;
   isPaused: boolean;
+  /** 只有主持人手動暫停才為 true；決策與舞台的自動暫停不算 */
+  isManuallyPaused?: boolean;
+  /** 落格說明自動放行毫秒數；0 = 每次等主持人 */
+  readingAutoContinueMs?: number;
+  activeAuctions?: Array<{
+    auctionId: string; dealCardId: string; triggeredBy: string; triggeredByName: string;
+    minBid: number; highestBid: number; highestBidderId?: string; endsAt: number;
+    cardInfo?: { name: string; monthlyCashflow: number; downPayment: number };
+    isSpecialAuction: boolean;
+  }>;
   currentAge: number;
   currentStage: LifeStage;
   completedLifeRounds?: number;
@@ -194,6 +208,8 @@ export interface GameState {
     submitted: boolean;
     startedAt: number;
     reminderEndsAt: number;
+    /** 危機自救：本人可在此階段賣資產或申請應急借款 */
+    rescue?: boolean;
   } | null;
   facilitatorScene?: FacilitatorScene | null;
   turnInProgress?: boolean;
@@ -425,6 +441,8 @@ export type ActiveEvent =
   | { kind: 'asset_leverage'; bonus: number; passiveIncome: number }
   | { kind: 'disease_crisis'; title: string; description: string; effectiveCost: number; turnsLost: number; hpBefore: number; hpAfter: number; wasInsured: boolean }
   | { kind: 'global_event'; title: string; description: string }
+  | { kind: 'crisis_rescue'; title: string; description: string; effectiveCost: number; shortfall: number; cash: number }
+  | { kind: 'relationship_choice'; cardId: string; title: string; description: string; playerCash: number; gamble?: { threshold: number; successCashflow: number; failureCashLoss: number }; salaryMultiplier?: number; turnsAffected?: number; triggerSmallDeal?: boolean; lifeExpGain?: number; networkDelta?: number }
   | { kind: 'marriage_window'; title: string; description: string; monthlyBonus: number; lifeExpGain: number; inPeakWindow: boolean; timeoutMs: number };
 
 /** 發薪日規劃可用選項（後端 buildAffordableOptions 輸出格式）*/

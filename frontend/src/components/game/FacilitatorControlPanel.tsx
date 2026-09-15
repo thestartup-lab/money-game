@@ -84,7 +84,9 @@ export default function FacilitatorControlPanel({ gameState, emit }: Props) {
             {(scene.options ?? []).map((option) => (
               <button
                 key={option.id}
-                className="min-h-14 rounded-xl border border-violet-300 bg-violet-700 px-3 py-2 text-base font-black text-white hover:bg-violet-600"
+                className="min-h-14 rounded-xl border border-violet-300 bg-violet-700 px-3 py-2 text-base font-black text-white hover:bg-violet-600 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={scene.kind === 'career' && !scene.careerConfirmed}
+                title={scene.kind === 'career' && !scene.careerConfirmed ? '等待玩家本人在手機確認轉職' : undefined}
                 onClick={() => emit('resolveFacilitatorScene', { sceneId: scene.id, choiceId: option.id })}
               >
                 {option.label}

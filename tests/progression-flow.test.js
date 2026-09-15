@@ -14,7 +14,7 @@ function send(s, event, payload, response, predicate) {
   const result = wait(s, response, predicate); s.emit(event, payload); return result;
 }
 
-async function fixture(t, port, passed, passive, autoReading = true, outer = false, deal = false) {
+async function fixture(t, port, passed, passive, autoReading = true, outer = false, deal = false, seasoned = false, crisis = false) {
   // Test-only deterministic state: exercise production Socket handlers without adding a production test endpoint.
   const boot = `
     Math.random=()=>0.4;
@@ -23,7 +23,7 @@ async function fixture(t, port, passed, passive, autoReading = true, outer = fal
     logic.createPlayer=(...args)=>{
       const p=create(...args);p.pre20Done=true;p.cash=200000;
       p.hasPassedSecondLife=${passed};p.stats.health=40;p.stats.careerSkill=0;
-      p.isInFastTrack=${outer};
+      p.isInFastTrack=${outer};p.paydayCount=${seasoned ? 6 : 0};
       p.growthStats={academic:1,health:0,social:0,resource:0};
       p.expenses={taxes:0,homeMortgagePayment:0,carLoanPayment:0,creditCardPayment:0,otherExpenses:10000};
       p.liabilities=[];p.assets=[{id:'fixture',name:'測試收入',type:'Other',cost:1,currentValue:1,monthlyCashflow:${passive}}];
@@ -32,6 +32,7 @@ async function fixture(t, port, passed, passive, autoReading = true, outer = fal
     const cards=require('./dist/gameCards');
     cards.BOARD.forEach(cell=>cell.type=cards.SquareType.SecondLife);
     if (${deal}) cards.BOARD.forEach(cell=>{cell.type=cards.SquareType.SmallDeal;cell.label='小交易';});
+    if (${crisis}) { cards.BOARD.forEach(cell=>{cell.type=cards.SquareType.Crisis;cell.label='危機事件';}); cards.CRISIS_POOL_BY_STAGE.Youth.splice(0, cards.CRISIS_POOL_BY_STAGE.Youth.length, 'cr-001'); }
     if (${outer}) cards.FAST_TRACK_BOARD.forEach(cell=>{cell.type=cards.FastTrackSquareType.TaxPlanning;cell.label='稅務規劃';});
     require('./dist/socketServer');
   `;
@@ -104,13 +105,13 @@ test('外圈也先閱讀落格再顯示結果，不提前跳至下一位', { tim
 });
 
 test('結算達標免再擲骰：既有舞台不被蓋住、兩位依序揭曉、重複揭曉不重複進圈', { timeout: 20000 }, async t => {
-  const { admin, a, sa, sb } = await fixture(t, 3223, true, 10000);
+  const { admin, a, sa, sb } = await fixture(t, 3223, true, 10000, true, false, false, true);
   let announced = 0; admin.on('ratRaceEscaped', () => announced++);
-  const first = await send(admin, 'setPlayerStats', { targetPlayerId: sa.playerId, stats: { hp: 60 } }, 'gameStateUpdate', g => g.facilitatorScene?.kind === 'second_life');
+  const first = await send(admin, 'setPlayerStats', { targetPlayerId: sa.playerId, stats: { hp: 70 } }, 'gameStateUpdate', g => g.facilitatorScene?.kind === 'second_life');
   assert.equal(first.facilitatorScene.participantNames[0], '甲');
   assert.equal(first.players.find(p => p.id === sa.playerId).isInFastTrack, false);
   await send(a, 'resolveFacilitatorScene', { sceneId: first.facilitatorScene.id, choiceId: 'reveal' }, 'error');
-  await send(admin, 'setPlayerStats', { targetPlayerId: sb.playerId, stats: { hp: 60 } }, 'gameStateUpdate', g => g.players.find(p => p.id === sb.playerId).stats.health === 60);
+  await send(admin, 'setPlayerStats', { targetPlayerId: sb.playerId, stats: { hp: 70 } }, 'gameStateUpdate', g => g.players.find(p => p.id === sb.playerId).stats.health === 70);
   const result = await send(admin, 'resolveFacilitatorScene', { sceneId: first.facilitatorScene.id, choiceId: 'reveal' }, 'gameStateUpdate', g => g.facilitatorScene?.stage === 'result');
   assert.equal(result.players.find(p => p.id === sa.playerId).isInFastTrack, true);
   assert.equal(result.players.find(p => p.id === sb.playerId).isInFastTrack, false);
@@ -144,4 +145,23 @@ test('第三輪發薪：六個月、公開選項、重複提交只購買一次�
   await send(b, 'submitPaydayPlan', { phaseId: next.decisionPhase.id, stockDCAAmount: 0, buyInsuranceTypes: [] }, 'decisionSubmitted');
   const end = await send(admin, 'continueDecisionPhase', { phaseId: next.decisionPhase.id }, 'gameStateUpdate', g => g.globalPaydayNumber === 1 && !g.globalPaydayInProgress);
   assert.equal(end.players.find(p => p.id === sb.playerId).paydayCount, 6);
+});
+
+test('致死危機先開自救階段：本人可借款，補不足才死亡', { timeout: 20000 }, async t => {
+  // 落格說明由 fixture 自動放行；自救階段是 crisis 決策，不會被自動放行
+  const { admin, a, b, sa } = await fixture(t, 3236, false, 0, true, false, false, false, true);
+  const rescuePromise = wait(a, 'crisisRescueRequired', () => true, 8000);
+  const rescue = await send(a, 'playerRoll', { diceCount: 1 }, 'gameStateUpdate', g => g.decisionPhase?.rescue === true);
+  const required = await rescuePromise;
+  assert.equal(rescue.decisionPhase.kind, 'crisis');
+  assert.equal(rescue.decisionPhase.playerId, sa.playerId);
+  assert.ok(required.effectiveCost > required.cash);
+  // 其他玩家仍不能做財務操作；本人可申請應急借款
+  await send(b, 'takeEmergencyLoan', { amount: 75000 }, 'error');
+  const loan = await send(a, 'takeEmergencyLoan', { amount: 450000 }, 'loanTaken');
+  assert.equal(loan.amount, 450000);
+  await send(a, 'submitCardDecision', { phaseId: rescue.decisionPhase.id, rescued: false }, 'decisionSubmitted');
+  const after = await send(admin, 'continueDecisionPhase', { phaseId: rescue.decisionPhase.id }, 'gameStateUpdate', g => !g.decisionPhase && !g.turnInProgress);
+  const me = after.players.find(p => p.id === sa.playerId);
+  assert.equal(me.isAlive, false, '借款後仍不足應死亡');
 });

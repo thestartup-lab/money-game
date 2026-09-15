@@ -1,4 +1,5 @@
 import { useCallback, useState, useEffect, useRef } from 'react';
+import { PLAYER_COLORS, playerColor, playerColorIndex } from '../components/game/playerColors';
 import { io, Socket } from 'socket.io-client';
 import ReactECharts from '../components/analysis/GameChart';
 import { QRCodeSVG } from 'qrcode.react';
@@ -36,7 +37,7 @@ const RADAR_DIMENSIONS = [
   { key: 'legacyScore', label: '傳承' },
 ] as const;
 
-const COLORS = ['#10b981', '#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+const COLORS = PLAYER_COLORS;
 
 export default function DisplayScreen() {
   const socketRef = useRef<Socket | null>(null);
@@ -100,6 +101,7 @@ export default function DisplayScreen() {
   const [positionOverrideOuter, setPositionOverrideOuter] = useState<Map<string, number>>(new Map());
   const [boardFocusPlayerId, setBoardFocusPlayerId] = useState<string | undefined>();
   const boardFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playerOrderRef = useRef<string[]>([]);
 
   const addTicker = (msg: string) => setTicker((prev) => [msg, ...prev].slice(0, 6));
 
@@ -129,8 +131,11 @@ export default function DisplayScreen() {
     showPaydayOverlayRef.current = false;
     setShowPaydayOverlay(false);
     setPaydayCards(new Map());
+    if (paydayDismissTimer.current) { clearTimeout(paydayDismissTimer.current); paydayDismissTimer.current = null; }
     revealPendingCenterEvent(300);
   }, [revealPendingCenterEvent]);
+  const dismissPaydayOverlayRef = useRef(dismissPaydayOverlay);
+  useEffect(() => { dismissPaydayOverlayRef.current = dismissPaydayOverlay; }, [dismissPaydayOverlay]);
 
   useEffect(() => {
     const s = io(SERVER_URL, { transports: ['websocket', 'polling'], reconnection: true, reconnectionAttempts: Infinity, reconnectionDelay: 1000, reconnectionDelayMax: 5000, randomizationFactor: 0.5, timeout: 20000 });
@@ -165,6 +170,7 @@ export default function DisplayScreen() {
     });
     // 若後端尚未支援 joinDisplay，收到 gameStateUpdate 也視為成功
     s.on('gameStateUpdate', (gs: GameState) => {
+      playerOrderRef.current = gs.playerOrder ?? [];
       setGameState(gs);
       const previousTurnId = prevTurnIdRef.current;
       const previousPhase = prevGamePhaseRef.current;
@@ -206,9 +212,6 @@ export default function DisplayScreen() {
         joinedRoomRef.current = gs.roomId;
       }
     });
-    s.on('gameClock', (p: { currentAge: number; remainingTimeMs?: number }) => {
-      setGameState((gs) => gs ? { ...gs, currentAge: p.currentAge, remainingTimeMs: p.remainingTimeMs ?? gs.remainingTimeMs } : gs);
-    });
     s.on('roomAnalysis', (data: RoomAnalysis) => {
       setRoomAnalysis(data);
       setView(requestedReviewViewRef.current);
@@ -235,11 +238,14 @@ export default function DisplayScreen() {
     });
     s.on('globalPaydayStarted', (p: { globalPaydayNumber: number; settlementMonths: number }) => {
       setPaydayCards(new Map());
+      showPaydayOverlayRef.current = false;
+      setShowPaydayOverlay(false);
       addTicker(`💰 第 ${p.globalPaydayNumber} 季全體發薪：一次規劃、結算 ${p.settlementMonths} 個月`);
     });
     s.on('globalPaydayPlayerTurn', (p: {
       playerId: string; playerName: string; playerIndex: number; playerCount: number; globalPaydayNumber: number;
     }) => {
+      if (showPaydayOverlayRef.current) dismissPaydayOverlayRef.current();
       setBoardFocusPlayerId(p.playerId);
       setPendingTurnIntro({
         key: Date.now(),
@@ -287,7 +293,8 @@ export default function DisplayScreen() {
       planResult: { investments: PlanResult; stockDCA: { executed: boolean; amount: number }; insurancePurchases: Array<{ type: string; success: boolean }>; totalCostDeducted: number };
     }) => {
       setPaydayCards((prev) => {
-        const colorIdx = Array.from(prev.keys()).indexOf(p.playerId) % 6;
+        const orderIdx = playerOrderRef.current.indexOf(p.playerId);
+        const colorIdx = orderIdx >= 0 ? orderIdx : Array.from(prev.keys()).indexOf(p.playerId) % 6;
         const inv = p.planResult.investments;
         const card: PaydayCard = {
           playerName: p.playerName,
@@ -307,10 +314,16 @@ export default function DisplayScreen() {
       });
       showPaydayOverlayRef.current = true;
       setShowPaydayOverlay(true);
+      // 小卡 6 秒後自動收起；投影機通常沒有人在旁邊按 Enter
       if (paydayDismissTimer.current) clearTimeout(paydayDismissTimer.current);
+      paydayDismissTimer.current = setTimeout(() => dismissPaydayOverlayRef.current(), 6_000);
     });
     s.on('gameResumed', () => {
-      // 不強制關閉 payday overlay — 由使用者手動點擊關閉
+      // 決策結束後畫面要讓位給下一步；小卡若還開著就收起
+      if (showPaydayOverlayRef.current) dismissPaydayOverlayRef.current();
+    });
+    s.on('decisionPhaseStarted', () => {
+      if (showPaydayOverlayRef.current) dismissPaydayOverlayRef.current();
     });
 
     s.on('playerTraveled', (p: { playerId: string; playerName: string; destinationName?: string; lifeExperienceGained: number }) => {
@@ -371,18 +384,6 @@ export default function DisplayScreen() {
     s.on('milestoneAnnounced', (p: { playerName: string; milestone: string; description: string }) => {
       addTicker(`🏆 ${p.description}`);
       showCenterEvent({ playerName: p.playerName, cellName: `🏆 ${p.milestone}`, message: p.description, isMilestone: true });
-    });
-    s.on('careerChangeAnnouncement', (p: { playerName: string; previousProfession: string; newProfession: string; salaryChange?: number }) => {
-      const salaryText = p.salaryChange != null
-        ? `  薪資${p.salaryChange >= 0 ? '增加' : '變動'} $${Math.abs(p.salaryChange).toLocaleString()}/月`
-        : '';
-      showCenterEvent({
-        playerName: p.playerName,
-        cellName: '🎯 恭喜轉職！',
-        message: `${p.playerName} 從「${p.previousProfession}」\n轉職為「${p.newProfession}」！${salaryText}`,
-        isMilestone: true,
-      });
-      addTicker(`🎯 ${p.playerName} 轉職：${p.previousProfession} → ${p.newProfession}`);
     });
     s.on('playerFinalScore', (p: { playerName: string; deathAge: number; score: { total: number } }) => {
       addTicker(`⚰️ ${p.playerName} 在 ${p.deathAge} 歲結束人生，得 ${Math.round(p.score.total)} 分`);
@@ -541,7 +542,7 @@ export default function DisplayScreen() {
     fastTrackPosition: positionOverrideOuter.get(p.id) ?? p.fastTrackPosition ?? 0,
     isInFastTrack: p.isInFastTrack ?? false,
     isMe: false,
-    colorIndex: i % 6,
+    colorIndex: playerColorIndex(gameState.playerOrder, p.id, i),
     isBedridden: p.isBedridden,
     health: p.stats.health,
     monthlyCashflow: p.monthlyCashflow,
@@ -552,7 +553,9 @@ export default function DisplayScreen() {
   }));
   const currentTurnIndex = gameState.playerOrder.indexOf(gameState.currentPlayerTurnId);
   const currentTurnPlayer = gameState.players.find((p) => p.id === gameState.currentPlayerTurnId);
-  const currentTurnColorIndex = Math.max(0, gameState.players.findIndex((p) => p.id === gameState.currentPlayerTurnId));
+  // 只有主持人手動暫停才顯示「遊戲暫停」；決策與落格說明期間照常顯示現在輪到誰
+  const manualPause = gameState.isManuallyPaused ?? (gameState.isPaused && !gameState.decisionPhase && !gameState.facilitatorScene);
+  const currentTurnColorIndex = playerColorIndex(gameState.playerOrder, gameState.currentPlayerTurnId, Math.max(0, gameState.players.findIndex((p) => p.id === gameState.currentPlayerTurnId)));
   const nextTurnId = currentTurnIndex >= 0 && gameState.playerOrder.length > 1
     ? Array.from({ length: gameState.playerOrder.length - 1 }, (_, offset) =>
         gameState.playerOrder[(currentTurnIndex + offset + 1) % gameState.playerOrder.length]
@@ -596,11 +599,11 @@ export default function DisplayScreen() {
         {/* 中：持續顯示目前玩家；真正的決策倒數只在決策階段出現 */}
         <div className="text-center flex-shrink-0">
           <div className={`max-w-[34vw] truncate text-4xl font-black leading-none tracking-tight ${
-            gameState.isPaused ? 'text-orange-300' : gameState.finalRoundStarted ? 'text-purple-300' : 'text-yellow-200'
+            manualPause ? 'text-orange-300' : gameState.finalRoundStarted ? 'text-purple-300' : 'text-yellow-200'
           }`}>
             {gameState.gamePhase === 'GameOver'
               ? '人生旅程完成'
-              : gameState.isPaused
+              : manualPause
               ? '遊戲暫停'
               : gameState.finalRoundStarted
                 ? '最後一輪'
@@ -609,8 +612,10 @@ export default function DisplayScreen() {
           <div className="text-base text-gray-300 mt-0.5 tracking-wide">
             {gameState.gamePhase === 'GameOver'
               ? '從結果回看選擇與轉折'
-              : gameState.isPaused
+              : manualPause
               ? '由主持人決定何時繼續'
+              : gameState.decisionPhase
+                ? `${gameState.decisionPhase.kind === 'reading' ? '全場一起看' : '決策中'} · ${gameState.decisionPhase.title}`
               : gameState.finalRoundStarted
                 ? `現在輪到 ${currentTurnPlayer?.name ?? '—'} 完成最後行動`
                 : `現在輪到 · 下一位 ${nextTurnPlayer?.name ?? '—'}`}
@@ -860,8 +865,8 @@ export default function DisplayScreen() {
 
             {/* 主持人控制的決策階段：只公開進度，不公開玩家選項 */}
             {gameState.decisionPhase?.kind === 'reading' && !diceAnim && !activeTurnIntro && !boardSettling ? (
-              <div className="absolute inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/75 p-6">
-                <BoardReadingPanel phase={gameState.decisionPhase} />
+              <div className="absolute inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-black/75 p-6">
+                <div className="my-auto w-full"><BoardReadingPanel phase={gameState.decisionPhase} /></div>
               </div>
             ) : null}
             {gameState.decisionPhase && gameState.decisionPhase.kind !== 'reading' && !centerEvent && !diceAnim && (
@@ -896,13 +901,13 @@ export default function DisplayScreen() {
                 <p className="text-yellow-300 font-bold text-lg mb-4 tracking-wide">💵 本次發薪日決策</p>
                 <div className="flex flex-wrap justify-center gap-3 max-w-5xl px-4">
                   {Array.from(paydayCards.values()).map((card, i) => {
-                    const dotC = ['bg-amber-400','bg-blue-400','bg-pink-400','bg-emerald-400','bg-purple-400','bg-orange-400'];
+                    const dotColor = playerColor(card.colorIndex);
                     const insLabel: Record<string, string> = { medical: '醫', life: '壽', property: '財' };
                     const anyAction = card.fqUpgrade || card.healthBoost || card.healthMaint || card.skillTraining || card.networkInvest || card.dcaAmount > 0 || card.insurances.length > 0;
                     return (
                       <div key={i} className="bg-gray-900 border border-gray-700 rounded-xl p-3 min-w-[130px] text-center">
                         <div className="flex items-center justify-center gap-1.5 mb-2">
-                          <span className={`w-2 h-2 rounded-full ${dotC[card.colorIndex % 6]}`} />
+                          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: dotColor }} />
                           <span className="text-sm font-bold text-white">{card.playerName}</span>
                         </div>
                         {anyAction ? (

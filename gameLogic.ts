@@ -5,7 +5,7 @@ import {
   CREDIT_CHANGE_REPAY, CREDIT_CHANGE_FULL_REPAY,
   CREDIT_CHANGE_EMERGENCY_LOAN, CREDIT_CHANGE_NEGATIVE_CF,
   INSURANCE_ACTIVATION_FEE,
-  getLoanRate, getLoanLimit,
+  getLoanRate, getLoanLimit, LEVERAGE_RATE_MULTIPLIER,
   SOCIAL_CLASS_CONFIG, PROFESSION_THRESHOLDS,
   EDUCATION_LOAN_AMOUNT, EDUCATION_LOAN_MONTHLY, EDUCATION_FQ_BONUS,
   LIFE_EXP,
@@ -185,6 +185,18 @@ export function triggerPayday(player: Player, gameState: GameState, maintenanceD
   } else {
     // fixed 薪資也套用倍率（退休/傳承期減半或歸零）
     player.salary = Math.round(player.profession.startingSalary * salaryMult);
+  }
+
+  // 永久月薪加成（決策回聲等）
+  if (player.salaryBonus && player.salary > 0) {
+    player.salary += player.salaryBonus;
+  }
+
+  // 暫時薪資倍率（升遷 / 減薪卡），持續 salaryMultiplierMonths 個月
+  if (player.salaryMultiplierMonths > 0) {
+    player.salary = Math.round(player.salary * player.salaryMultiplierPending);
+    player.salaryMultiplierMonths -= 1;
+    if (player.salaryMultiplierMonths === 0) player.salaryMultiplierPending = 1;
   }
 
   // 旅遊請假：下次薪水打七折
@@ -378,6 +390,7 @@ export function applyGlobalEvent(
 
       if (effect.type === 'HealthChange' && effect.flatAmount !== undefined) {
         player.stats.health = Math.max(0, Math.min(100, player.stats.health + effect.flatAmount));
+        if (player.stats.health > 0 && player.isBedridden) player.isBedridden = false;
       }
     });
     player.eventLog.push({
@@ -553,8 +566,9 @@ export function getUnsecuredLiabilityTotal(player: Player): number {
       .map((a) => a.linkedLiabilityId)
       .filter((id): id is string => Boolean(id))
   );
+  // 學貸屬於長期分期，不占用信用借款額度；否則進修玩家開局就借不到任何錢
   return player.liabilities
-    .filter((l) => !securedIds.has(l.id))
+    .filter((l) => !securedIds.has(l.id) && !l.id.startsWith('edu-loan-'))
     .reduce((sum, l) => sum + l.totalDebt, 0);
 }
 
@@ -611,7 +625,7 @@ export function takeEmergencyLoan(player: Player, amount: number): LoanResult {
 
 /**
  * 向銀行申請投資槓桿借款（需指定目標資產名稱）。
- * - 月利率 = 同信用等級應急利率 × 0.8（投資性借款優惠）
+ * - 月利率 = 同信用等級應急利率 × LEVERAGE_RATE_MULTIPLIER（不扣信用，利率較高）
  * - 信用值不受影響
  */
 export function takeLeverageLoan(
@@ -632,7 +646,7 @@ export function takeLeverageLoan(
     };
   }
 
-  const rate = getLoanRate(player.creditScore) * 0.8;
+  const rate = getLoanRate(player.creditScore) * LEVERAGE_RATE_MULTIPLIER;
   const monthlyPayment = Math.max(1, Math.round(amount * rate));
   const liabilityId = `leverage-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
@@ -688,11 +702,14 @@ export function repayLoan(
   }
 
   const liability = player.liabilities[liabIndex];
+  const debtBefore = liability.totalDebt;
   const repayAmount = Math.min(amount, player.cash, liability.totalDebt);
 
   liability.totalDebt -= repayAmount;
   player.cash -= repayAmount;
-  adjustCreditScore(player, CREDIT_CHANGE_REPAY);
+  // 信用加分依還款佔債務比例計算：還 $1 不會得到整筆加分，避免刷信用
+  const repaidShare = debtBefore > 0 ? Math.min(1, repayAmount / debtBefore) : 1;
+  adjustCreditScore(player, Math.floor(CREDIT_CHANGE_REPAY * repaidShare));
 
   let fullyRepaid = false;
   if (liability.totalDebt <= 0) {
@@ -932,7 +949,8 @@ export interface LifeScoreBreakdown {
 export function calculateLifeScore(player: Player, deathAge: number): LifeScoreBreakdown {
   const totalDebt = player.liabilities.reduce((s, l) => s + l.totalDebt, 0);
   const totalAssetValue = player.assets.reduce((s, a) => s + a.currentValue, 0);
-  const netWorth = totalAssetValue - totalDebt;
+  // 淨值含現金，與 calcNetWorth / 願望清單一致
+  const netWorth = totalAssetValue + player.cash - totalDebt;
 
   // 傳承分：死後淨遺產（壽險可抵消負債）
   let netEstate: number;
@@ -955,12 +973,14 @@ export function calculateLifeScore(player: Player, deathAge: number): LifeScoreB
   legacyRaw = Math.min(100, Math.max(0, legacyRaw + charityBonus + eventBonus));
 
   // ── 7 維度原始分（0–100）──
-  const netWorth_raw        = Math.min(100, Math.max(0, netWorth / 1000));
-  const passiveIncome_raw   = Math.min(100, (player.totalPassiveIncome * 12) / 500);
+  // 數值已放大 15 倍：淨值 $1,500,000 = 100 分；年被動收入 $750,000（月 $62,500）= 100 分
+  const netWorth_raw        = Math.min(100, Math.max(0, netWorth / 15_000));
+  const passiveIncome_raw   = Math.min(100, Math.max(0, (player.totalPassiveIncome * 12) / 7_500));
   const lifeExperience_raw  = Math.min(100, player.lifeExperience / 2);
   const hp_raw              = player.stats.health;
   const ageScore_raw        = Math.min(100, ((deathAge - GAME_START_AGE) / (GAME_END_AGE - GAME_START_AGE)) * 100);
-  const family_raw          = Math.min(100, (player.isMarried ? 25 : 0) + player.numberOfChildren * 15);
+  // MAX_CHILDREN = 3：已婚 25 + 三個孩子 75 = 100
+  const family_raw          = Math.min(100, (player.isMarried ? 25 : 0) + player.numberOfChildren * 25);
   const nt_raw              = Math.min(100, player.stats.network * 10);
 
   // ── 3 大幸福指數（0–100）──

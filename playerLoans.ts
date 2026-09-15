@@ -1,13 +1,13 @@
 import { Player } from './gameDataModels';
 import { getLoanLimit } from './gameConfig';
-import { repayLoan, RepayLoanResult } from './gameLogic';
+import { repayLoan, RepayLoanResult, getUnsecuredLiabilityTotal } from './gameLogic';
 
 export function validatePlayerLoan(lender: Player, borrower: Player, amount: number, rate: number): string | null {
   if (lender.id === borrower.id || !lender.isAlive || !borrower.isAlive) return '借貸雙方必須是不同且仍在遊戲中的玩家。';
   if (!Number.isSafeInteger(amount) || amount <= 0 || !Number.isFinite(rate) || rate < 0 || rate > 0.1) return '借款金額或利率不正確。';
   if (lender.cash < amount) return '貸款方現金已不足。';
-  const secured = new Set(borrower.assets.map(a => a.linkedLiabilityId));
-  const used = borrower.liabilities.filter(l => !secured.has(l.id)).reduce((sum, l) => sum + l.totalDebt, 0);
+  // 與銀行借款同一套規則：資產連結貸款與學貸不占信用額度
+  const used = getUnsecuredLiabilityTotal(borrower);
   if (used + amount > getLoanLimit(borrower.creditScore)) return '超過借款人的信用借款上限。';
   return null;
 }

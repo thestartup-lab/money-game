@@ -58,6 +58,7 @@ export default function AdminPage() {
   // Login form
   const [loginRoomId, setLoginRoomId] = useState(INITIAL_REMEMBERED_ADMIN_ROOM);
   const [loginError, setLoginError] = useState('');
+  const [actionError, setActionError] = useState('');
   const [adminCodeInput, setAdminCodeInput] = useState('');
 
   const [adaptiveDirector, setAdaptiveDirector] = useState<AdaptiveDirectorStatus | null>(null);
@@ -151,23 +152,32 @@ export default function AdminPage() {
         : room));
     });
     s.on('roomAnalysis', (analysis: RoomAnalysis) => setRoomAnalysis(analysis));
-    s.on('gameClock', (p: { currentAge: number; remainingTimeMs?: number }) => {
-      setGameState((gs) => gs ? { ...gs, currentAge: p.currentAge, remainingTimeMs: p.remainingTimeMs ?? gs.remainingTimeMs } : gs);
-    });
 
     s.on('gamePaused', (p: { reason?: string }) => addLog(`遊戲暫停${p.reason ? `：${p.reason}` : ''}`));
     s.on('gameResumed', () => addLog('遊戲繼續'));
-    s.on('gameStarted', (p: { yearsPerRound?: number }) => addLog(`遊戲開始：每輪 +${p.yearsPerRound ?? 4} 歲，共 20 個人生輪`));
+    s.on('gameStarted', (p: { yearsPerRound?: number }) => addLog(`遊戲開始：全場年齡每輪 +${p.yearsPerRound ?? 4} 歲（個人起步年齡只影響前幾輪顯示），共 20 個人生輪`));
     s.on('gameRestarted', (p: { playerCount: number }) => addLog(`遊戲重啟，${p.playerCount} 位玩家回到投胎`));
     s.on('finalRoundStarted', (p: { firstPlayerName: string }) => addLog(`96 歲：最後一輪開始，由 ${p.firstPlayerName} 先行動`));
     s.on('educationTurnSkipped', (p: { playerName: string; careerStartAge: number }) => addLog(`${p.playerName} 完成進修延後回合，將從 ${p.careerStartAge} 歲職涯起點出發`));
     s.on('globalEventAnnouncement', (p: { event: { title: string; description: string } }) => addLog(`全局事件：${p.event?.title ?? '未知事件'}`));
     s.on('adaptiveDirectorStatus', (p: AdaptiveDirectorStatus) => setAdaptiveDirector(p));
-    s.on('playerStatUpdated', (p: { playerName: string }) => addLog(`玩家數值已更新：${p.playerName}`));
     s.on('error', (p: { message: string }) => {
       const message = p.message ?? '操作失敗，請再試一次。';
       addLog(`錯誤：${message}`);
       setLoginError(message);
+      setActionError(message);
+    });
+    s.on('globalPaydayFailed', (p: { message?: string }) => {
+      const message = `季度發薪中斷：${p.message ?? '請檢查玩家狀態後繼續'}`;
+      addLog(message);
+      setActionError(message);
+    });
+    s.on('setPlayerStatsResult', (p: { success: boolean; targetPlayerId?: string; message?: string }) => {
+      addLog(p.success ? '玩家數值已更新' : `數值更新失敗：${p.message ?? ''}`);
+    });
+    s.on('triggerRelationshipResult', (p: { activated: boolean; message?: string }) => {
+      addLog(p.activated ? '已啟動關係' : `關係啟動失敗：${p.message ?? ''}`);
+      if (!p.activated && p.message) setActionError(p.message);
     });
 
     return () => { s.disconnect(); };
@@ -305,11 +315,12 @@ export default function AdminPage() {
   const players = gameState?.players ?? [];
   const phase = gameState?.gamePhase ?? '—';
   const currentAge = gameState?.currentAge ?? 0;
-  const isPaused = gameState?.isPaused ?? false;
+  const isPaused = gameState?.isManuallyPaused ?? (gameState?.isPaused && !gameState?.decisionPhase && !gameState?.facilitatorScene) ?? false;
   const isRunning = phase === 'RatRace' || phase === 'FastTrack';
   const isStartable = phase === 'Pre20' || phase === 'WaitingForPlayers';
   const decisionPhase = gameState?.decisionPhase ?? null;
-  const notReadyPlayers = players.filter((p: Player) => !p.pre20Done && !p.isDisconnected);
+  // 離線但沒選完職業的玩家也算未就緒：開局後就再也補不了職業
+  const notReadyPlayers = players.filter((p: Player) => !p.pre20Done);
   const alivePlayers = players.filter((p: Player) => p.isAlive);
   const isMixedTrack = alivePlayers.some((p: Player) => p.isInFastTrack) && alivePlayers.some((p: Player) => !p.isInFastTrack);
 
@@ -355,6 +366,12 @@ export default function AdminPage() {
           </div>
         </div>
 
+        {actionError && (
+          <div className="mx-4 mt-2 flex items-start justify-between gap-3 rounded-xl border-2 border-red-600 bg-red-950/90 px-4 py-2 text-sm font-bold text-red-100" role="alert">
+            <span>⚠️ {actionError}</span>
+            <button type="button" className="text-xs text-red-300 underline" onClick={() => setActionError('')}>關閉</button>
+          </div>
+        )}
         <div className="admin-status-strip" aria-label="遊戲即時狀態">
           <span className="admin-status-chip admin-room-code">房間 {roomId}</span>
           <span className={`admin-status-chip ${phaseBadge(phase)}`}>{currentPhaseLabel}</span>
@@ -385,13 +402,8 @@ export default function AdminPage() {
             className="rounded-xl border border-red-700 bg-red-950 px-3 py-2 text-sm font-bold text-red-200 transition-colors hover:bg-red-900"
             onClick={() => {
               if (window.confirm('確定要刪除目前房間？')) {
+                // 等伺服器回 roomDeleted 再登出；決策進行中伺服器會拒絕刪除
                 emit('deleteRoom');
-                autoReloginRoomIdRef.current = '';
-                rememberAdminRoom('');
-                setLoggedIn(false);
-                setGameState(null);
-                setRoomId('');
-                setLoginRoomId('');
               }
             }}
           >
@@ -501,7 +513,7 @@ export default function AdminPage() {
                 title="為未完成 Pre-20 的玩家自動分配（隨機投胎 + 預設配點 + E 象限職業）並開始"
                 onClick={() => {
                   const names = notReadyPlayers.map((p) => p.name).join('、');
-                  if (window.confirm(`系統會為以下 ${notReadyPlayers.length} 位玩家自動分配「中等社會階層 / E 象限隨機職業」：\n${names}\n\n確定強制開始？`)) {
+                  if (window.confirm(`系統會為以下 ${notReadyPlayers.length} 位玩家自動補齊（隨機投胎、預設配點、E 象限基礎職業）：\n${names}\n\n確定強制開始？`)) {
                     emit('startGame', { force: true });
                     addLog(`強制開始：自動補齊 ${notReadyPlayers.length} 位玩家的 Pre-20`);
                   }
@@ -561,12 +573,42 @@ export default function AdminPage() {
                 </button>
               </div>
             )}
-            {isRunning && !decisionPhase && (
+            {isRunning && (
+              <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-2 text-xs text-gray-300">
+                <p className="mb-1 font-bold text-gray-200">落格說明節奏</p>
+                <div className="flex flex-wrap gap-1">
+                  {[0, 5, 10, 20].map((sec) => {
+                    const active = Math.round((gameState?.readingAutoContinueMs ?? 0) / 1000) === sec;
+                    return (
+                      <button
+                        key={sec}
+                        className={`rounded-lg px-2 py-1 font-bold ${active ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+                        onClick={() => emit('setReadingAutoContinue', { seconds: sec })}
+                      >{sec === 0 ? '每次手動繼續' : `${sec} 秒自動放行`}</button>
+                    );
+                  })}
+                </div>
+                <p className="mt-1 text-[11px] text-gray-500">只影響「走到了某格」這類說明；需要決策的卡片仍由你揭曉。</p>
+              </div>
+            )}
+            {isRunning && !decisionPhase && !gameState?.facilitatorScene && (
               <div className="flex gap-2">
                 {isPaused
                   ? <button className="btn-primary flex-1" onClick={() => emit('resumeGame')}>▶ 繼續</button>
                   : <button className="bg-orange-700 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-xl flex-1 transition-colors" onClick={() => emit('pauseGame', { reason: '主持人手動暫停' })}>⏸ 暫停</button>
                 }
+                {!gameState?.turnInProgress && !gameState?.globalPaydayInProgress && !gameState?.globalPaydayPending && (
+                  <button
+                    className="bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded-xl transition-colors"
+                    title="目前玩家離線、發呆或臥床時，直接交棒給下一位"
+                    onClick={() => {
+                      const current = players.find((p) => p.id === gameState?.currentPlayerTurnId);
+                      if (window.confirm(`跳過 ${current?.name ?? '目前玩家'} 的這一回合？`)) {
+                        emit('skipTurn', { playerId: current?.id });
+                      }
+                    }}
+                  >⏭ 跳過此回合</button>
+                )}
               </div>
             )}
             {players.length > 0 && (

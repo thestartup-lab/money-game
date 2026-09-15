@@ -38,9 +38,7 @@ interface GameBoardProps {
   isGlobalPayday?: boolean;
 }
 
-const PLAYER_COLORS = [
-  '#f59e0b', '#60a5fa', '#f472b6', '#34d399', '#a78bfa', '#fb923c',
-];
+import { PLAYER_COLORS } from './playerColors';
 
 // ============================================================
 // 格子中心座標（以 gameboard-wrapper 寬/高的 % 為單位）。
@@ -181,7 +179,7 @@ export function GameBoard({
               ? p.fastTrackPosition % OUTER_CELL_POSITIONS.length
               : p.position % INNER_CELL_POSITIONS.length;
             const pos = getPos(cellIdx, isOuter);
-            const color = PLAYER_COLORS[p.colorIndex % 6];
+            const color = PLAYER_COLORS[p.colorIndex % PLAYER_COLORS.length];
             const isActive = p.id === currentTurnPlayerId;
 
             // 計算此格的偏移
@@ -240,7 +238,7 @@ export function GameBoard({
                 <div className="board-player-card-header">
                   <div
                     className="board-player-dot-big"
-                    style={{ backgroundColor: PLAYER_COLORS[p.colorIndex % 6] }}
+                    style={{ backgroundColor: PLAYER_COLORS[p.colorIndex % PLAYER_COLORS.length] }}
                   />
                   <span className="board-player-name-big">{p.name}</span>
                   {p.age !== undefined && (
@@ -345,7 +343,7 @@ interface MiniMapProps {
 }
 
 function MiniMap({ isOuter, players, currentTurnPlayerId, onClick }: MiniMapProps) {
-  const cellCount = isOuter ? 17 : 25;
+  const cellCount = isOuter ? 17 : 24;
   // 內圈標準發薪日格 index（每隔 6 格）
   const paydayIndices = isOuter ? new Set([0, 4, 8, 12]) : new Set([0, 6, 12, 18]);
 
@@ -391,14 +389,14 @@ function MiniMap({ isOuter, players, currentTurnPlayerId, onClick }: MiniMapProp
           for (const p of players) {
             const idx = isOuter
               ? p.fastTrackPosition % 17
-              : p.position % 25;
+              : p.position % 24;
             if (!groups.has(idx)) groups.set(idx, []);
             groups.get(idx)!.push(p);
           }
           return players.map((p) => {
             const idx = isOuter
               ? p.fastTrackPosition % 17
-              : p.position % 25;
+              : p.position % 24;
             const { x, y } = cellAt(idx);
             const group = groups.get(idx)!;
             const slot = group.indexOf(p);
@@ -410,7 +408,7 @@ function MiniMap({ isOuter, players, currentTurnPlayerId, onClick }: MiniMapProp
               ox = Math.cos(ang) * 2.5;
               oy = Math.sin(ang) * 2.5;
             }
-            const color = PLAYER_COLORS[p.colorIndex % 6];
+            const color = PLAYER_COLORS[p.colorIndex % PLAYER_COLORS.length];
             const active = p.id === currentTurnPlayerId;
             return (
               <circle

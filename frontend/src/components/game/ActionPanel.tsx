@@ -35,6 +35,7 @@ const INSURANCE_LABELS: Record<'medical' | 'life' | 'property', string> = {
   property: '🏠 財產險',
 };
 
+const LEVERAGE_RATE_MULTIPLIER = 1.25;
 const DCA_AMOUNTS = [15_000, 30_000, 75_000] as const;
 const LOAN_AMOUNTS = [75_000, 150_000, 300_000, 450_000, 750_000] as const;
 
@@ -61,6 +62,8 @@ interface Props {
   onTravel: (destinationId: string) => void;
   onSocialEvent: () => void;
   onBuyInsurance: (type: 'medical' | 'life' | 'property') => void;
+  onCancelInsurance?: (type: 'medical' | 'life' | 'property') => void;
+  onRepayLoan?: (liabilityId: string, amount: number) => void;
   onTakeEmergencyLoan: (amount: number) => void;
   onTakeLeverageLoan: (amount: number, targetAssetName: string) => void;
   onInvestStockDCA: (amount: number) => void;
@@ -91,6 +94,8 @@ export default function ActionPanel({
   onTravel,
   onSocialEvent,
   onBuyInsurance,
+  onCancelInsurance,
+  onRepayLoan,
   onTakeEmergencyLoan,
   onTakeLeverageLoan,
   onInvestStockDCA,
@@ -104,6 +109,8 @@ export default function ActionPanel({
 }: Props) {
   const [showTravelPanel, setShowTravelPanel] = useState(false);
   const [insuranceConfirm, setInsuranceConfirm] = useState<'medical' | 'life' | 'property' | null>(null);
+  const [cancelConfirm, setCancelConfirm] = useState<'medical' | 'life' | 'property' | null>(null);
+  const [repayTarget, setRepayTarget] = useState<string | null>(null);
   const [showLoanPanel, setShowLoanPanel] = useState(false);
   const [showLeveragePanel, setShowLeveragePanel] = useState(false);
   const [leverageAssetName, setLeverageAssetName] = useState('');
@@ -136,9 +143,12 @@ export default function ActionPanel({
       .map((a) => a.linkedLiabilityId)
       .filter((id): id is string => Boolean(id))
   );
+  // 與伺服器 getUnsecuredLiabilityTotal 同規則：學貸不占信用額度
   const existingLoanTotal = (player.liabilities ?? [])
-    .filter((l) => !securedLiabilityIds.has(l.id))
+    .filter((l) => !securedLiabilityIds.has(l.id) && !l.id.startsWith('edu-loan-'))
     .reduce((s, l) => s + l.totalDebt, 0);
+  // 可主動提前還款的負債：應急、槓桿、玩家借貸、學貸（資產綁定的房貸等由賣出資產時清償）
+  const repayableLoans = (player.liabilities ?? []).filter((l) => !securedLiabilityIds.has(l.id) && l.totalDebt > 0);
   const availableLoan = Math.max(0, loanLimit - existingLoanTotal);
 
   const dcaPortfolioValue = player.assets?.find((a) => a.id === 'stock-dca')?.currentValue ?? 0;
@@ -277,18 +287,73 @@ export default function ActionPanel({
                 return (
                   <button
                     key={type}
-                    className={`text-xs py-2 rounded-lg transition-colors ${owned ? 'bg-teal-800 text-teal-200 cursor-default' : 'btn-secondary'}`}
-                    onClick={() => { if (!owned) setInsuranceConfirm(type); }}
+                    className={`text-xs py-2 rounded-lg transition-colors ${owned ? 'bg-teal-800 text-teal-200 hover:bg-teal-700' : 'btn-secondary'}`}
+                    onClick={() => { if (owned) setCancelConfirm(type); else setInsuranceConfirm(type); }}
                   >
                     {INSURANCE_LABELS[type]}<br />
                     <span className={owned ? 'text-teal-300' : 'text-gray-400'}>
-                      {owned ? '已投保' : `$${fmt(INSURANCE_COSTS[type])}`}
+                      {owned ? '已投保（點此退保）' : `$${fmt(INSURANCE_COSTS[type])}`}
                     </span>
                   </button>
                 );
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {cancelConfirm && onCancelInsurance && (
+        <div className="card space-y-2 border border-red-800">
+          <p className="text-sm font-bold text-red-200">確認退保 {INSURANCE_LABELS[cancelConfirm]}？</p>
+          <p className="text-xs text-gray-400">退保後立即停止扣保費，但之後遇到對應危機要自己付全額；已繳的啟動費不退。</p>
+          <div className="grid grid-cols-2 gap-2">
+            <button className="btn-secondary text-sm" onClick={() => setCancelConfirm(null)}>保留保險</button>
+            <button className="text-sm rounded-xl bg-red-800 text-white py-2 font-bold" onClick={() => { onCancelInsurance(cancelConfirm); setCancelConfirm(null); }}>確認退保</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── 提前還款 ──────────────── */}
+      {!isGameOver && onRepayLoan && repayableLoans.length > 0 && (
+        <div className="card">
+          <div className="flex justify-between items-center mb-2">
+            <p className="text-xs text-gray-400">提前還款</p>
+            <span className="text-xs text-gray-500">手頭現金 ${fmt(player.cash)}</span>
+          </div>
+          <div className="space-y-2">
+            {repayableLoans.map((loan) => {
+              const isOpen = repayTarget === loan.id;
+              const maxPay = Math.max(0, Math.min(player.cash, loan.totalDebt));
+              const options = [0.25, 0.5, 1].map((share) => Math.min(maxPay, Math.round(loan.totalDebt * share))).filter((v, i, arr) => v > 0 && arr.indexOf(v) === i);
+              return (
+                <div key={loan.id} className="rounded-lg border border-gray-700 bg-gray-900/60 p-2">
+                  <div className="flex justify-between items-center text-sm">
+                    <div>
+                      <p className="font-semibold text-white">{loan.name}</p>
+                      <p className="text-[11px] text-gray-400">餘額 ${fmt(loan.totalDebt)} · 月付 ${fmt(loan.monthlyPayment)}</p>
+                    </div>
+                    <button className="text-xs btn-secondary px-2 py-1" disabled={maxPay <= 0} onClick={() => setRepayTarget(isOpen ? null : loan.id)}>
+                      {maxPay <= 0 ? '現金不足' : isOpen ? '收起' : '還款'}
+                    </button>
+                  </div>
+                  {isOpen && (
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      {options.map((amt) => (
+                        <button
+                          key={amt}
+                          className="rounded-lg py-2 text-xs border border-emerald-800 bg-emerald-950 text-emerald-200 hover:bg-emerald-900"
+                          onClick={() => { onRepayLoan(loan.id, amt); setRepayTarget(null); }}
+                        >
+                          還 ${fmt(amt)}{amt >= loan.totalDebt ? '（還清）' : ''}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-[11px] text-gray-500">還款會依還款佔債務比例加信用分；還清另有加分。</p>
         </div>
       )}
 
@@ -391,13 +456,13 @@ export default function ActionPanel({
         </div>
       )}
 
-      {/* ── 投資槓桿借款（八折利率、不扣信用，僅限購買投資資產） ──── */}
+      {/* ── 投資槓桿借款（利率較高、不扣信用，僅限購買投資資產） ──── */}
       {!isGameOver && (
         <div className="card">
           <div className="flex justify-between items-center mb-2">
             <p className="text-xs text-gray-400">投資槓桿借款</p>
             <span className="text-xs text-gray-500">
-              利率 {(loanRate * 0.8 * 100).toFixed(2)}%/月（不扣信用）
+              利率 {(loanRate * LEVERAGE_RATE_MULTIPLIER * 100).toFixed(2)}%/月（不扣信用，比應急借款貴）
             </span>
           </div>
 
@@ -423,7 +488,7 @@ export default function ActionPanel({
               ) : (
                 <div className="grid grid-cols-2 gap-2">
                   {LOAN_AMOUNTS.filter((a) => a <= availableLoan).map((amt) => {
-                    const monthly = Math.max(1, Math.round(amt * loanRate * 0.8));
+                    const monthly = Math.max(1, Math.round(amt * loanRate * LEVERAGE_RATE_MULTIPLIER));
                     const disabled = !leverageAssetName.trim();
                     return (
                       <button

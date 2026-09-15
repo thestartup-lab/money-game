@@ -34,7 +34,7 @@ export default function WorldEventControlPanel({ gameState, status, emit }: Prop
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-black">自動導演・{status?.mode === 'support' ? '支援全場' : status?.mode === 'challenge' ? '加入考驗' : '維持平衡'}</h3>
           <button className={`${button} bg-cyan-800`} onClick={() => emit('setAdaptiveDirectorEnabled', { enabled: status?.enabled === false })}>
-            {status?.enabled === false ? '開啟自動選事件' : '自動選事件已開啟'}
+            {status ? (status.enabled === false ? '開啟自動選事件' : '自動選事件已開啟（點此關閉）') : '讀取狀態中…'}
           </button>
         </div>
         <p className="mt-2">上次季度評估 {status?.score ?? 50}/100</p>

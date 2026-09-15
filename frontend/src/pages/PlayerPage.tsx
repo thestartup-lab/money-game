@@ -27,10 +27,10 @@ interface AvailableProfession {
 }
 
 const SOCIAL_CLASS_LABELS: Record<string, string> = {
-  Wealthy: '富裕階層',
-  UpperMiddle: '中上階層',
+  Rich: '富裕階層',
   Middle: '中等階層',
-  LowerClass: '小康/貧窮',
+  WorkingClass: '小康階層',
+  Poor: '貧窮階層',
 };
 
 const GROWTH_FIELDS: { key: 'academic' | 'health' | 'social' | 'resource'; label: string; desc: string }[] = [
@@ -54,11 +54,20 @@ const BUCKET_GOAL_LABELS: Record<string, { emoji: string; title: string; desc: s
 
 // ── 常數與型別 ──
 
+/** 需要玩家在手機上做選擇的卡片；主持人收束決策階段時才會被清掉 */
+const DECISION_EVENT_KINDS = new Set<ActiveEvent['kind']>([
+  'deal_pick', 'charity', 'crisis_nt_skip', 'fast_track_travel', 'partnership_pick', 'partnership_response',
+  'tech_startup_offer', 'marriage_window', 'relationship_choice', 'crisis_rescue',
+]);
+
 export default function PlayerPage() {
   const socketRef = useRef<Socket | null>(null);
   const playerIdRef = useRef('');
   const sessionRef = useRef<{ playerName: string; roomCode: string; reconnectToken: string } | null>(null);
+  const hadSessionRef = useRef(false);
+  const myNetworkRef = useRef(0);
   const [connected, setConnected] = useState(false);
+  const [disconnectNotice, setDisconnectNotice] = useState<string | null>(null);
   const [myId, setMyId] = useState<string>('');
   const [view, setView] = useState<View>('join');
   const [gameState, setGameState] = useState<GameState | null>(null);
@@ -83,7 +92,6 @@ export default function PlayerPage() {
   const [activeAuction, setActiveAuction] = useState<ActiveAuction | null>(null);
   const [auctionBid, setAuctionBid] = useState('');
   const [partnershipOffer, setPartnershipOffer] = useState<PartnershipOffer | null>(null);
-  const [partnershipChoice, setPartnershipChoice] = useState<{ availablePartners: { id: string; name: string }[] } | null>(null);
   const [loanOffer, setLoanOffer] = useState<LoanOffer | null>(null);
   const [loanRequest, setLoanRequest] = useState<LoanRequest | null>(null);
 
@@ -134,9 +142,18 @@ export default function PlayerPage() {
 
     s.on('connect', () => {
       setConnected(true);
+      setDisconnectNotice(null);
       try {
         const saved = sessionRef.current ?? JSON.parse(localStorage.getItem('baisuiGame') ?? 'null');
-        if (saved?.playerName && saved?.roomCode && saved?.reconnectToken) s.emit('playerRejoin', saved);
+        if (!saved?.playerName || !saved?.roomCode || !saved?.reconnectToken) return;
+        // 掃了另一個房間的 QR 時，不要拿舊房間的身分自動續玩
+        const urlRoom = (new URLSearchParams(window.location.search).get('room') ?? '').toUpperCase();
+        if (!sessionRef.current && urlRoom && urlRoom !== String(saved.roomCode).toUpperCase()) {
+          try { localStorage.removeItem('baisuiGame'); } catch { /* storage unavailable */ }
+          return;
+        }
+        hadSessionRef.current = true;
+        s.emit('playerRejoin', saved);
       } catch { /* In-memory session still permits transient network reconnection. */ }
     });
     s.on('playerSession', (session: { playerId: string; playerName: string; roomCode: string; reconnectToken: string }) => {
@@ -146,14 +163,26 @@ export default function PlayerPage() {
       try { localStorage.setItem('baisuiGame', JSON.stringify(session)); }
       catch { addNotification('⚠️ 瀏覽器無法保存續玩身分，請勿關閉或重新整理本頁。'); }
     });
-    s.on('disconnect', () => setConnected(false));
+    s.on('disconnect', (reason: string) => {
+      setConnected(false);
+      // 伺服器主動切斷（例如角色在別處續玩）時 socket.io 不會自動重連，要明確告訴玩家
+      if (reason === 'io server disconnect') {
+        setDisconnectNotice((prev) => prev ?? '與伺服器的連線已被中止。');
+      } else {
+        setDisconnectNotice('連線中斷，正在重新連線…');
+      }
+    });
+    s.on('sessionTakenOver', (p: { message?: string }) => {
+      setDisconnectNotice(p.message ?? '你的角色已在另一個裝置繼續，本頁面已停止。');
+    });
     s.on('error', (p: { message: string }) => {
       setError(p.message);
       setRollingLocked(false);
       // 若伺服器端遺失了我們的房間記錄（Railway 重啟、idle 重置等），
-      // 主動把使用者帶回加入頁，避免一直停留在已失效的遊戲畫面
-      if (p.message?.includes('尚未加入') || p.message?.includes('房間') && p.message?.includes('不存在')) {
-        sessionRef.current = null;
+      // 主動把使用者帶回加入頁，避免一直停留在已失效的遊戲畫面。
+      // 有續玩身分時先等 rejoin 結果，避免離線期間排隊送出的動作先被拒絕就把畫面踢回加入頁。
+      const roomLost = p.message?.includes('尚未加入') || (p.message?.includes('房間') && p.message?.includes('不存在'));
+      if (roomLost && !sessionRef.current) {
         try { localStorage.removeItem('baisuiGame'); } catch { /* storage unavailable */ }
         setGameState(null);
         setView('join');
@@ -186,15 +215,39 @@ export default function PlayerPage() {
 
     // 重連失敗（資料已過期或房間不存在 — 通常是後端重啟導致）
     s.on('rejoinFailed', (p?: { message?: string }) => {
+      const wasInGame = sessionRef.current !== null;
       sessionRef.current = null;
       try { localStorage.removeItem('baisuiGame'); } catch { /* storage unavailable */ }
       setGameState(null);
       setView('join');
-      setError(p?.message ?? '伺服器資料已過期，請重新加入房間。');
+      // 只有原本真的在遊戲中才顯示錯誤；瀏覽器殘留的舊 token 失效不需要嚇新玩家
+      if (wasInGame) setError(p?.message ?? '伺服器資料已過期，請重新加入房間。');
     });
 
     s.on('gameStateUpdate', (gs: GameState) => {
       setGameState(gs);
+      const me = gs.players.find((p) => p.id === playerIdRef.current);
+      if (me) myNetworkRef.current = me.stats?.network ?? 0;
+      // 重新整理後從遊戲狀態把進行中的競標接回來（自己放棄的交易不顯示）
+      const openAuctions = gs.activeAuctions ?? [];
+      setActiveAuction((prev) => {
+        if (prev) {
+          const live = openAuctions.find((a) => a.auctionId === prev.auctionId);
+          return live ? { ...prev, highestBid: live.highestBid } : prev;
+        }
+        const mine = openAuctions.find((a) => a.isSpecialAuction || a.triggeredBy !== playerIdRef.current);
+        if (!mine) return prev;
+        return {
+          auctionId: mine.auctionId,
+          triggeredByName: mine.triggeredByName,
+          endsAt: mine.endsAt,
+          controlledByHost: true,
+          isSpecialAuction: mine.isSpecialAuction,
+          card: { id: mine.dealCardId, name: mine.cardInfo?.name ?? '交易', minBid: mine.minBid, monthlyCashflow: mine.cardInfo?.monthlyCashflow },
+          minBid: mine.minBid,
+          highestBid: mine.highestBid,
+        };
+      });
       const amIInGame = gs.players.some((p) => p.id === playerIdRef.current);
       if (gs.gamePhase === 'GameOver' && amIInGame) setView('gameover');
       else if (amIInGame && gs.gamePhase === 'Pre20') setView((v) => v === 'join' ? 'pre20' : v);
@@ -265,24 +318,6 @@ export default function PlayerPage() {
         setCongratulatableEvent({ targetId: p.playerId ?? '', targetName: p.playerName, event: '進入第二人生' });
       }
     });
-    s.on('marriageWindowOpened', (p: { card: { title: string; description: string; monthlyBonus: number; lifeExpGain: number }; currentAge: number; inPeakWindow: boolean; timeoutMs: number }) => {
-      setActiveEvent({
-        kind: 'marriage_window',
-        title: p.card.title,
-        description: p.card.description,
-        monthlyBonus: p.card.monthlyBonus,
-        lifeExpGain: p.card.lifeExpGain,
-        inPeakWindow: p.inPeakWindow,
-        timeoutMs: p.timeoutMs,
-      });
-    });
-    s.on('playerMarried', (p: { playerName: string; card: { title: string; monthlyBonus: number }; playerId?: string }) => {
-      if (p.playerId === playerIdRef.current) {
-        addNotification(`💍 恭喜結婚！${p.card.title}，月收入 +$${p.card.monthlyBonus.toLocaleString()}`);
-      } else {
-        addNotification(`💍 ${p.playerName} 結婚了！`);
-      }
-    });
     s.on('marriageDeclined', (p: { playerName: string; playerId?: string }) => {
       if (p.playerId === playerIdRef.current) {
         addNotification('💔 婉拒了這段緣分。');
@@ -320,10 +355,6 @@ export default function PlayerPage() {
       addNotification(`💰 ${p.bidderName} 出價 $${fmt(p.bidAmount)}`);
       setActiveAuction((prev) => prev ? { ...prev, highestBid: p.newHighest, highestBidderName: p.bidderName } : prev);
     });
-    s.on('partnershipOpportunity', (p: { availablePartners: { id: string; name: string }[] }) => {
-      addNotification('🤝 合夥機會！選擇一位玩家發起合夥邀請');
-      setPartnershipChoice(p);
-    });
     s.on('partnershipOfferReceived', (p: { offerId: string; offerorName: string; targetId: string }) => {
       if (p.targetId === playerIdRef.current) {
         addNotification(`🤝 ${p.offerorName} 邀請你合夥投資！`);
@@ -339,7 +370,6 @@ export default function PlayerPage() {
         : '';
       addNotification(`✅ 合夥成功：${p.offerorName} & ${p.targetName}（+15 體驗值${dividendText}）`);
       setPartnershipOffer(null);
-      setPartnershipChoice(null);
     });
     s.on('loanOfferReceived', (p: { offerId: string; lenderName: string; borrowerId: string; amount: number; monthlyRate: number }) => {
       if (p.borrowerId === playerIdRef.current) {
@@ -388,8 +418,38 @@ export default function PlayerPage() {
       addNotification(`📊 年度稅 $${fmt(p.taxAmount)}${saving}；稅後現金 $${fmt(p.cashAfterTax)}`);
     });
     s.on('decisionPhaseEnded', () => {
-      setActiveEvent(null);
+      // 只清掉「需要玩家選擇」的卡片；結果類卡片（意外支出、危機結果、創業結果…）留給玩家自己按確認
+      setActiveEvent((current) => current && DECISION_EVENT_KINDS.has(current.kind) ? null : current);
       setPaydayForm(null);
+    });
+    s.on('turnSkipped', (p: { playerId?: string; playerName?: string; reason?: string; byHost?: boolean }) => {
+      if (!p.byHost) return;
+      const who = p.playerId === playerIdRef.current ? '你' : (p.playerName ?? '玩家');
+      const why = p.reason === 'bedridden' ? '（臥床）' : p.reason === 'crisis' ? '（危機停手）' : '';
+      addNotification(`⏭️ 主持人跳過了${who}的回合${why}`);
+    });
+    s.on('travelResult', (p: { success: boolean; message?: string; destination?: { name?: string }; lifeExperienceGained?: number }) => {
+      if (p.success) addNotification(`✈️ 前往「${p.destination?.name ?? '旅遊地'}」，生命體驗 +${p.lifeExperienceGained ?? 0}`);
+      else setError(p.message ?? '這次無法旅遊。');
+    });
+    s.on('socialEventResult', (p: { success: boolean; message?: string }) => {
+      if (p.success) addNotification(`🤝 ${p.message ?? '社交活動完成'}`);
+      else setError(p.message ?? '這次無法參加社交活動。');
+    });
+    s.on('relationshipCardDrawn', (p: { card: { id: string; title: string; description: string; effect?: { gambleSuccess?: { threshold: number; successCashflow: number; failureCashLoss: number }; salaryMultiplier?: number; turnsAffected?: number; triggerSmallDeal?: boolean; lifeExpGain?: number; networkDelta?: number } }; playerCash?: number }) => {
+      setActiveEvent({
+        kind: 'relationship_choice',
+        cardId: p.card.id,
+        title: p.card.title,
+        description: p.card.description,
+        playerCash: p.playerCash ?? 0,
+        gamble: p.card.effect?.gambleSuccess,
+        salaryMultiplier: p.card.effect?.salaryMultiplier,
+        turnsAffected: p.card.effect?.turnsAffected,
+        triggerSmallDeal: p.card.effect?.triggerSmallDeal,
+        lifeExpGain: p.card.effect?.lifeExpGain,
+        networkDelta: p.card.effect?.networkDelta,
+      });
     });
     s.on('globalEventAnnouncement', (p: { event: { title: string; description: string }; stageManaged?: boolean }) => {
       addNotification(`📢 全局事件：${p.event?.title ?? ''} — ${p.event?.description ?? ''}`);
@@ -431,8 +491,12 @@ export default function PlayerPage() {
     });
 
     // 格子事件監聽
+    s.on('crisisRescueRequired', (p: { card: { title: string; description: string }; effectiveCost: number; shortfall: number; cash: number }) => {
+      setActiveEvent({ kind: 'crisis_rescue', title: p.card.title, description: p.card.description, effectiveCost: p.effectiveCost, shortfall: p.shortfall, cash: p.cash });
+      addNotification(`🆘 「${p.card.title}」需要 $${fmt(p.effectiveCost)}，現金差 $${fmt(p.shortfall)}。請在「行動」賣資產或借款自救。`);
+    });
     s.on('crisisNTSkipAvailable', (p: { card: { title: string; description: string; baseCost: number }; network?: number; timeoutMs: number }) => {
-      setActiveEvent({ kind: 'crisis_nt_skip', title: p.card.title, description: p.card.description, baseCost: p.card.baseCost, network: p.network ?? 0, timeoutMs: p.timeoutMs });
+      setActiveEvent({ kind: 'crisis_nt_skip', title: p.card.title, description: p.card.description, baseCost: p.card.baseCost, network: p.network ?? myNetworkRef.current, timeoutMs: p.timeoutMs });
     });
     s.on('dealCardsDrawn', (p: { cards: Array<{ id: string; name: string; description?: string; downPayment: number; monthlyCashflow: number }>; playerCash: number; creditScore?: number; loanAvailable?: number }) => {
       setActiveEvent({
@@ -514,6 +578,13 @@ export default function PlayerPage() {
       setPaydayForm(null);
     });
 
+    s.on('loanRepaid', (p: { amountPaid?: number; remainingDebt?: number; fullyRepaid?: boolean; newCreditScore?: number }) => {
+      addNotification(`💳 還款 $${fmt(p.amountPaid ?? 0)}${p.fullyRepaid ? '，已全部還清' : `，剩餘 $${fmt(p.remainingDebt ?? 0)}`}（信用 ${p.newCreditScore ?? ''}）`);
+    });
+    s.on('insuranceUpdated', (p: { insuranceType: string; active: boolean }) => {
+      const label = p.insuranceType === 'medical' ? '醫療險' : p.insuranceType === 'life' ? '壽險' : '財產險';
+      addNotification(p.active ? `🛡 已投保${label}` : `🛡 已退保${label}，之後不再扣保費`);
+    });
     s.on('stockDCAResult', (p: { amount: number; newPortfolioValue: number; remainingCash: number }) => {
       addNotification(`📈 投入 $${fmt(p.amount)}，股票組合總值 $${fmt(p.newPortfolioValue)}`);
     });
@@ -546,9 +617,6 @@ export default function PlayerPage() {
       } else {
         addNotification(`❌ 轉職失敗：${p.message}`);
       }
-    });
-    s.on('careerChangeAnnouncement', (p: { playerName: string; previousProfession: string; newProfession: string }) => {
-      addNotification(`🔄 ${p.playerName} 轉職：${p.previousProfession} → ${p.newProfession}！`);
     });
     s.on('milestoneAnnounced', (p: { playerName: string; milestone: string; description: string }) => {
       addNotification(`🏆 ${p.description}`);
@@ -584,14 +652,38 @@ export default function PlayerPage() {
       }
     });
 
-    s.on('gameClock', (p: { currentAge: number; remainingTimeMs?: number }) => {
-      setGameState((gs) => gs ? { ...gs, currentAge: p.currentAge, remainingTimeMs: p.remainingTimeMs ?? gs.remainingTimeMs } : gs);
-    });
 
     return () => { s.disconnect(); };
   }, []);
 
   const emit = (event: string, ...args: unknown[]) => socketRef.current?.emit(event, ...args);
+
+  // 遊戲中的錯誤提示 6 秒後自動消失，避免舊訊息一直掛在畫面上
+  useEffect(() => {
+    if (!error || view === 'join') return;
+    const timer = window.setTimeout(() => setError(''), 6000);
+    return () => window.clearTimeout(timer);
+  }, [error, view]);
+
+  const reconnectNow = () => {
+    setDisconnectNotice('正在重新連線…');
+    socketRef.current?.connect();
+  };
+
+  const connectionBanner = (!connected || disconnectNotice) && view !== 'join' ? (
+    <div className="mx-4 mt-3 rounded-xl border-2 border-orange-500 bg-orange-950/90 px-4 py-3 text-center" role="alert">
+      <p className="text-base font-black text-orange-200">📡 {disconnectNotice ?? '連線中斷，正在重新連線…'}</p>
+      <p className="mt-1 text-xs text-orange-100/80">按鈕在恢復連線前不會有反應。</p>
+      <button type="button" className="mt-2 w-full rounded-xl bg-orange-600 py-2 text-sm font-bold text-white" onClick={reconnectNow}>重新連線</button>
+    </div>
+  ) : null;
+
+  const errorToast = error && view !== 'join' ? (
+    <div className="mx-4 mt-3 rounded-xl border-2 border-red-500 bg-red-950/95 px-4 py-3 text-center shadow-lg" role="alert">
+      <p className="text-base font-bold text-red-100">⚠️ {error}</p>
+      <button type="button" className="mt-1 text-xs text-red-300 underline" onClick={() => setError('')}>關閉</button>
+    </div>
+  ) : null;
 
   function handleCardDecision(decision: Record<string, unknown>) {
     emit('submitCardDecision', { ...decision, phaseId: gameState?.decisionPhase?.id });
@@ -691,6 +783,9 @@ export default function PlayerPage() {
           <p className="text-gray-400 text-sm mt-1">你的起點決定你的可能性</p>
         </div>
 
+        {connectionBanner}
+        {errorToast}
+
         {/* 步驟指示器（3 步驟） */}
         <div className="flex items-center justify-between px-1">
           {(['roll', 'allocate', 'career'] as const).map((step, i) => {
@@ -716,7 +811,7 @@ export default function PlayerPage() {
           <div className="card space-y-3">
             <p className="text-gray-300 text-sm">你即將隨機「投胎」成為四種社會階層之一，階層決定你的成長點數上限與起始資源。</p>
             <div className="grid grid-cols-2 gap-2 text-xs">
-              {[['富裕階層', '多點數', 'text-yellow-300'], ['中上階層', '均衡', 'text-blue-300'], ['中等階層', '一般', 'text-gray-300'], ['小康/貧窮', '少點數', 'text-gray-500']].map(([name, desc, color]) => (
+              {[['富裕階層', '20 點・現金 +$75,000', 'text-yellow-300'], ['中等階層', '15 點・現金 +$30,000', 'text-blue-300'], ['小康階層', '10 點・現金 +$12,000', 'text-gray-300'], ['貧窮階層', '7 點・現金 +$3,000', 'text-gray-500']].map(([name, desc, color]) => (
                 <div key={name} className="bg-gray-800 rounded-lg p-2">
                   <p className={`font-bold ${color}`}>{name}</p>
                   <p className="text-gray-400">{desc}</p>
@@ -782,17 +877,19 @@ export default function PlayerPage() {
                 </div>
               </div>
             ))}
+            {remaining > 0 && totalAllocated > 0 && (
+              <p className="text-center text-sm font-bold text-orange-300">還有 {remaining} 點未分配，全部分完才能確認（沒分完的點數會作廢）。</p>
+            )}
             <button
               className="btn-primary w-full"
-              disabled={totalAllocated === 0}
+              disabled={totalAllocated === 0 || remaining !== 0}
               onClick={() => {
                 setError('');
                 emit('allocateGrowthStats', growthAlloc);
               }}
             >
-              確認分配（已分配 {totalAllocated} 點）
+              {remaining > 0 ? `還剩 ${remaining} 點未分配` : `確認分配（已分配 ${totalAllocated} 點）`}
             </button>
-            {error && <p className="text-red-400 text-sm text-center">{error}</p>}
           </div>
         )}
 
@@ -831,7 +928,7 @@ export default function PlayerPage() {
                     <p className="text-xs text-white font-semibold">已解鎖高階職業（保證分配，不會抽到初階）：</p>
                     <div className="flex items-start gap-1.5">
                       <span className="text-xs font-bold bg-blue-700 text-white px-1.5 py-0.5 rounded-full flex-shrink-0">E</span>
-                      <p className="text-xs text-blue-200">IT工程師、醫生、店長、公職人員</p>
+                      <p className="text-xs text-blue-200">IT工程師、醫生、店長、公職人員、工程師、會計師</p>
                     </div>
                     <div className="flex items-start gap-1.5">
                       <span className="text-xs font-bold bg-purple-700 text-white px-1.5 py-0.5 rounded-full flex-shrink-0">S</span>
@@ -948,7 +1045,6 @@ export default function PlayerPage() {
               );
             })()}
 
-            {error && <p className="text-red-400 text-sm text-center">{error}</p>}
           </div>
         )}
 
@@ -966,7 +1062,7 @@ export default function PlayerPage() {
         {congratulatableEvent && (
           <div className="card border border-yellow-600 bg-yellow-900 space-y-2">
             <p className="text-yellow-200 font-semibold text-sm">🎉 {congratulatableEvent.targetName} {congratulatableEvent.event}！</p>
-            <p className="text-yellow-400 text-xs">花費 $7,500 送上祝賀（對方 +$7,500，NT+0.2）</p>
+            <p className="text-yellow-400 text-xs">花費 $7,500 送上祝賀（對方 +$7,500，每收到 5 次祝賀 NT+1）</p>
             <div className="flex gap-2">
               <button className="btn-primary text-sm flex-1" onClick={() => {
                 emit('congratulate', { targetPlayerId: congratulatableEvent.targetId, event: congratulatableEvent.event });
@@ -1146,6 +1242,8 @@ export default function PlayerPage() {
 
         {/* ── 主要捲動區 ── */}
         <div className="flex-1 overflow-y-auto">
+          {connectionBanner}
+          {errorToast}
 
           {!isGameOver && (
             <div className={`senior-turn-card rounded-2xl border text-center ${isMyTurn ? 'border-emerald-400 bg-emerald-950/70' : 'border-slate-500 bg-slate-800'}`}>
@@ -1182,6 +1280,7 @@ export default function PlayerPage() {
                 onDecision={handleCardDecision}
                 onDismiss={() => setActiveEvent(null)}
                 reminderEndsAt={gameState.decisionPhase?.reminderEndsAt}
+                playerCash={myPlayer.cash}
               />
             </div>
           )}
@@ -1292,7 +1391,7 @@ export default function PlayerPage() {
               <FinancialStatement player={myPlayer} />
             </CollapsePanel>
 
-            {!gameState.decisionPhase && !gameState.facilitatorScene && <CollapsePanel title="行動" defaultOpen={false}>
+            {(!gameState.decisionPhase || (gameState.decisionPhase.rescue && gameState.decisionPhase.playerId === myId)) && !gameState.facilitatorScene && <CollapsePanel title="行動" defaultOpen={Boolean(gameState.decisionPhase?.rescue)}>
               <ActionPanel
                 player={myPlayer}
                 currentAge={personalAge}
@@ -1300,6 +1399,8 @@ export default function PlayerPage() {
                 onTravel={(destId) => emit('goTravel', { destinationId: destId })}
                 onSocialEvent={() => emit('attendSocialEvent')}
                 onBuyInsurance={(t) => emit('buyInsurance', { insuranceType: t })}
+                onCancelInsurance={(t) => emit('cancelInsurance', { insuranceType: t })}
+                onRepayLoan={(liabilityId, amount) => emit('repayLoan', { liabilityId, amount })}
                 onTakeEmergencyLoan={(amt) => emit('takeEmergencyLoan', { amount: amt })}
                 onTakeLeverageLoan={(amt, name) => emit('takeLeverageLoan', { amount: amt, targetAssetName: name })}
                 onInvestStockDCA={(amt) => emit('investStockDCA', { amount: amt })}
@@ -1361,32 +1462,6 @@ export default function PlayerPage() {
               <div className="flex gap-2">
                 <button className="btn-primary text-sm flex-1" onClick={() => { emit('partnershipResponse', { offerId: partnershipOffer.offerId, accepted: true }); setPartnershipOffer(null); }}>✅ 接受</button>
                 <button className="btn-secondary text-sm" onClick={() => { emit('partnershipResponse', { offerId: partnershipOffer.offerId, accepted: false }); setPartnershipOffer(null); }}>❌ 拒絕</button>
-              </div>
-            </div>
-          )}
-          {partnershipChoice && (
-            <div className="mx-4 my-2 rounded-xl border border-emerald-600 bg-emerald-900 p-3 space-y-2">
-              <p className="text-emerald-200 font-semibold text-sm">🤝 合夥機會！選擇一位夥伴發起邀請</p>
-              <p className="text-emerald-300 text-xs">合作成功雙方各得 +15 體驗值 + 雙方被動收入 × 3% 分紅（$3K-$50K）</p>
-              <div className="flex flex-wrap gap-2">
-                {partnershipChoice.availablePartners.map((partner) => (
-                  <button
-                    key={partner.id}
-                    className="btn-primary text-sm flex-1 min-w-[40%]"
-                    onClick={() => {
-                      emit('partnershipOffer', { targetPlayerId: partner.id });
-                      setPartnershipChoice(null);
-                    }}
-                  >
-                    邀請 {partner.name}
-                  </button>
-                ))}
-                <button
-                  className="btn-secondary text-sm w-full"
-                  onClick={() => setPartnershipChoice(null)}
-                >
-                  略過
-                </button>
               </div>
             </div>
           )}

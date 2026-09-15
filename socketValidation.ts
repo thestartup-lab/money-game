@@ -17,7 +17,7 @@ const required: Record<string, string[]> = {
 };
 const numeric = new Set(['amount', 'monthlyRate', 'bidAmount', 'academic', 'health', 'social', 'resource',
   'seconds', 'addSeconds', 'durationMinutes', 'diceCount', 'cash', 'hp', 'mp', 'fq', 'creditScore']);
-const boolean = new Set(['accepted', 'enabled', 'force', 'useLeverage', 'donate', 'investInFQUpgrade',
+const boolean = new Set(['accepted', 'accept', 'rescued', 'enabled', 'force', 'useLeverage', 'donate', 'investInFQUpgrade',
   'investInHealthMaintenance', 'investInHealthBoost', 'investInSkillTraining', 'investInNetwork']);
 
 function safeTree(value: unknown, depth = 0): boolean {
@@ -39,6 +39,8 @@ export function validateSocketPayload(event: string, payload: unknown): boolean 
   for (const [key, value] of Object.entries(data)) {
     if (numeric.has(key) && typeof value !== 'number') return false;
     if (boolean.has(key) && typeof value !== 'boolean') return false;
+    // 卡牌決策允許用 null 表示「略過」（例如這次不旅行、不邀請合夥）
+    if (event === 'submitCardDecision' && value === null && key.endsWith('Id') && key !== 'phaseId') continue;
     if ((key.endsWith('Id') || ['playerName', 'roomCode', 'password', 'reconnectToken', 'insuranceType', 'quadrant', 'targetAssetName'].includes(key)) &&
       (typeof value !== 'string' || !value.trim() || value.length > 256)) return false;
   }

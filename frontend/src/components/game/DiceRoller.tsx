@@ -19,9 +19,22 @@ export default function DiceRoller({ isMyTurn, isBedridden, onRoll, lastRoll, di
 
   if (isBedridden) {
     return (
-      <div className="senior-dice card text-center text-red-300 font-bold">
-        🛏 臥床中，無法行動
-        <p className="text-xs text-gray-500 mt-1">等待下回合判定是否自然死亡</p>
+      <div className="senior-dice card text-center space-y-2">
+        <p className="text-red-300 font-bold">🛏 臥床中，無法行動</p>
+        {isMyTurn ? (
+          <>
+            <p className="text-xs text-gray-400">輪到你了：按下後由系統判定本回合是否康復或自然離世，然後交棒給下一位。</p>
+            <button
+              className="btn-secondary w-full"
+              disabled={rolling || !!disabled}
+              onClick={() => handleRoll(1)}
+            >
+              {rolling ? '判定中…' : '跳過本回合（臥床判定）'}
+            </button>
+          </>
+        ) : (
+          <p className="text-xs text-gray-500">輪到你時會進行臥床判定</p>
+        )}
       </div>
     );
   }

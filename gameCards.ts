@@ -425,7 +425,7 @@ export const BIG_DEALS: DealCard[] = [
       assetType: AssetType.RealEstate,
       cost: 6_000_000,
       downPayment: 1_125_000,
-      monthlyCashflow: 24_000,
+      monthlyCashflow: 28_800,
       liabilityName: '商辦房貸',
       liabilityAmount: 4_875_000,
     },
@@ -440,7 +440,7 @@ export const BIG_DEALS: DealCard[] = [
       assetType: AssetType.Business,
       cost: 2_025_000,
       downPayment: 975_000,
-      monthlyCashflow: 18_000,
+      monthlyCashflow: 21_600,
       liabilityName: '加盟貸款',
       liabilityAmount: 1_050_000,
     },
@@ -455,7 +455,7 @@ export const BIG_DEALS: DealCard[] = [
       assetType: AssetType.RealEstate,
       cost: 7_500_000,
       downPayment: 1_500_000,
-      monthlyCashflow: 30_000,
+      monthlyCashflow: 36_000,
       liabilityName: '廠房貸款',
       liabilityAmount: 6_000_000,
     },
@@ -470,7 +470,7 @@ export const BIG_DEALS: DealCard[] = [
       assetType: AssetType.Business,
       cost: 3_750_000,
       downPayment: 1_200_000,
-      monthlyCashflow: 27_000,
+      monthlyCashflow: 32_400,
       liabilityName: '便利商店貸款',
       liabilityAmount: 2_550_000,
     },
@@ -485,7 +485,7 @@ export const BIG_DEALS: DealCard[] = [
       assetType: AssetType.RealEstate,
       cost: 4_500_000,
       downPayment: 1_350_000,
-      monthlyCashflow: 33_000,
+      monthlyCashflow: 39_600,
       liabilityName: '民宿房貸',
       liabilityAmount: 3_150_000,
     },
@@ -500,7 +500,7 @@ export const BIG_DEALS: DealCard[] = [
       assetType: AssetType.Other,
       cost: 5_250_000,
       downPayment: 1_050_000,
-      monthlyCashflow: 22_500,
+      monthlyCashflow: 27_000,
       liabilityName: '電廠建設貸款',
       liabilityAmount: 4_200_000,
     },
@@ -515,7 +515,7 @@ export const BIG_DEALS: DealCard[] = [
       assetType: AssetType.Business,
       cost: 6_750_000,
       downPayment: 1_800_000,
-      monthlyCashflow: 37_500,
+      monthlyCashflow: 45_000,
       liabilityName: '停車場貸款',
       liabilityAmount: 4_950_000,
     },
@@ -529,7 +529,7 @@ export const BIG_DEALS: DealCard[] = [
       name: '金融藍籌股組合',
       assetType: AssetType.Stock,
       cost: 600_000,
-      monthlyCashflow: 3_000,
+      monthlyCashflow: 3_600,
     },
   },
   {
@@ -541,7 +541,7 @@ export const BIG_DEALS: DealCard[] = [
       name: '半導體龍頭股',
       assetType: AssetType.Stock,
       cost: 750_000,
-      monthlyCashflow: 1_500,
+      monthlyCashflow: 1_800,
     },
   },
   {
@@ -553,7 +553,7 @@ export const BIG_DEALS: DealCard[] = [
       name: '美股 ETF',
       assetType: AssetType.Stock,
       cost: 450_000,
-      monthlyCashflow: 1_800,
+      monthlyCashflow: 2_200,
     },
   },
   {
@@ -566,7 +566,7 @@ export const BIG_DEALS: DealCard[] = [
       assetType: AssetType.RealEstate,
       cost: 9_000_000,
       downPayment: 2_250_000,
-      monthlyCashflow: 45_000,
+      monthlyCashflow: 54_000,
       liabilityName: '別墅房貸',
       liabilityAmount: 6_750_000,
     },
@@ -908,11 +908,11 @@ export const MARKET_CARDS: MarketCard[] = [
   },
   {
     id: 'mk-008',
-    title: '法拍屋出售機會',
-    description: '銀行拍賣一棟優質房產，以固定價格 $1,800,000 出售。有房地產資產的玩家可選擇出售持有物件。',
+    title: '法拍屋搶購潮',
+    description: '銀行法拍釋出優質房產引發搶購，區域房價被拉高，所有房地產市值上漲 15%。',
     targetAssetType: AssetType.RealEstate,
-    effect: 'SellOpportunity',
-    fixedPriceOffer: 1_800_000,
+    effect: 'PriceIncrease',
+    priceMultiplier: 1.15,
   },
   // ── 新增：股票股息系列（讓持股玩家有實質現金入帳） ──
   {
@@ -1277,8 +1277,10 @@ export interface RelationshipCard {
     networkDelta?: number;
     /** 生命體驗值增加 */
     lifeExpGain?: number;
-    /** 立即現金損失（正數代表扣錢）*/
+    /** 立即現金損失（正數代表扣錢）；若同時有 cashCostShare，則此值為上限 */
     cashCost?: number;
+    /** 依「目前現金 × 比例」扣款（搭配 cashCost 當上限），避免開局就被扣光 */
+    cashCostShare?: number;
     /** 永久月現金流變化（正數加、負數減）*/
     monthlyCashflowDelta?: number;
     /**
@@ -1367,9 +1369,9 @@ export const RELATIONSHIP_EVENTS: RelationshipCard[] = [
   {
     id: 'rel-008',
     title: '詐騙受害',
-    description: '熟識的人以投資名義詐騙你，錢財兩失，人脈信任也大受打擊。現金 -$120,000，NT -1。',
+    description: '熟識的人以投資名義詐騙你，錢財兩失，人脈信任也大受打擊。損失現金的 50%（最多 $120,000），NT -1。',
     eventCategory: 'negative',
-    effect: { cashCost: 120_000, networkDelta: -1 },
+    effect: { cashCost: 120_000, cashCostShare: 0.5, networkDelta: -1 },
   },
   // ── 機遇型事件（4 張）──
   {
@@ -1412,39 +1414,44 @@ export const RELATIONSHIP_EVENTS: RelationshipCard[] = [
  * 使年輕時遇輕症、年老時遇重症，反映真實人生風險曲線。
  */
 export const CRISIS_POOL_BY_STAGE: Readonly<Record<LifeStage, string[]>> = {
-  // 打拼期（20–34）：輕微意外 + 財產損失，不含死亡判定
+  // ⚠ 以下 ID 對應 CRISIS_EVENTS 的實際內容：
+  //   cr-001 心臟病突發 $750k（可死亡）  cr-002 重大疾病確診 $375k
+  //   cr-003 緊急手術住院 $225k          cr-004 住宅大火 $450k
+  //   cr-005 企業訴訟 $300k              cr-006 天然災害損失 $600k
+  //   cr-007 嚴重交通意外 $900k（可死亡） cr-008 罕見疾病 $675k（可死亡）
+  // 打拼期（20–34）：輕症 + 財產損失，不含死亡判定
   [LifeStage.Youth]: [
-    'cr-001', // 輕微車禍（醫療險）
-    'cr-004', // 機器設備故障（財產險）
-    'cr-005', // 商業訴訟（財產險）
+    'cr-003', // 緊急手術住院（醫療險）
+    'cr-004', // 住宅大火（財產險）
+    'cr-005', // 企業訴訟（財產險）
     'cr-006', // 天然災害損失（財產險）
   ],
   // 成家期（35–49）：增加中等疾病，仍無致死事件
   [LifeStage.Family]: [
-    'cr-001',
-    'cr-002', // 住院手術（醫療險）
+    'cr-002', // 重大疾病確診（醫療險）
+    'cr-003',
     'cr-004',
     'cr-005',
     'cr-006',
   ],
   // 轉型期（50–64）：重症加入，首次出現死亡判定
   [LifeStage.Transition]: [
+    'cr-001', // 心臟病突發（醫療險，可死亡）
     'cr-002',
-    'cr-003', // 重大疾病長期療養（醫療險，可死亡）
     'cr-005',
     'cr-006',
     'cr-007', // 嚴重交通意外（壽險，可死亡）
   ],
   // 退休期（65–79）：重症為主，輕症移除
   [LifeStage.Retirement]: [
-    'cr-003',
-    'cr-006',
+    'cr-001',
+    'cr-002',
     'cr-007',
     'cr-008', // 罕見疾病（壽險，可死亡）
   ],
   // 傳承期（80–100）：全為高危事件
   [LifeStage.Legacy]: [
-    'cr-003',
+    'cr-001',
     'cr-007',
     'cr-008',
   ],

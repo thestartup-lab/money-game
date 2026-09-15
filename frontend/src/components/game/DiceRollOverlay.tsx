@@ -19,7 +19,7 @@ interface Props {
   size?: 'large' | 'small';
 }
 
-const PLAYER_COLORS = ['#fbbf24', '#60a5fa', '#f472b6', '#34d399', '#a78bfa', '#fb923c'];
+import { PLAYER_COLORS } from './playerColors';
 
 // 骰子是全場共同觀看的遊戲演出，不計入玩家的決策時間。
 const TUMBLE_MS = 1_150;
@@ -63,7 +63,7 @@ export default function DiceRollOverlay({ data, onDone, size = 'large' }: Props)
   if (!data) return null;
 
   const facesToRender = phase === 'tumble' ? tumbleFaces : data.dice;
-  const color = PLAYER_COLORS[data.colorIndex % 6];
+  const color = PLAYER_COLORS[data.colorIndex % PLAYER_COLORS.length];
 
   return (
     <div

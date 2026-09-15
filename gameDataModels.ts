@@ -196,6 +196,8 @@ export interface DecisionPhaseState {
   startedAt: number;
   /** 提醒用倒數終點；歸零不會自動送出或結束，仍由主持人決定。 */
   reminderEndsAt: number;
+  /** 危機自救階段：本人可在此階段賣資產或申請應急借款，主持人確認後才判定生死。 */
+  rescue?: boolean;
 }
 
 export type FacilitatorSceneKind = 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family' | 'global_event' | 'second_life' | 'career';
@@ -390,6 +392,8 @@ export class Player {
   liabilities: Liability[];
   insurance: InsuranceState;
   numberOfChildren: number;
+  /** 收到的祝賀次數；每 5 次 NT +1 */
+  congratulationsReceived: number;
   /**
    * 累計發薪日次數。每次 triggerPayday 時遞增。
    * 每 12 個月觸發一次年度累進稅結算。
@@ -477,6 +481,14 @@ export class Player {
    */
   travelPenaltyRemaining: number;
   /**
+   * 人際關係卡等帶來的暫時薪資倍率（例如 1.2 升遷、0.9 減薪）。
+   * triggerPayday 每月套用一次並遞減 salaryMultiplierMonths；歸零後恢復。
+   */
+  salaryMultiplierPending: number;
+  salaryMultiplierMonths: number;
+  /** 決策回聲等給的永久月薪加成，triggerPayday 重算薪資時加回。 */
+  salaryBonus: number;
+  /**
    * 是否已進入 FastTrack（外圈）。
    * true 時 totalIncome 套用 FAST_TRACK_INCOME_MULTIPLIER（被動收入加倍）。
    */
@@ -554,6 +566,7 @@ export class Player {
     this.liabilities = [];
     this.insurance = { ...DEFAULT_INSURANCE_STATE };
     this.numberOfChildren = 0;
+    this.congratulationsReceived = 0;
     this.paydayCount = 0;
     this.stats = {
       financialIQ: 1,
@@ -583,6 +596,9 @@ export class Player {
     this.marriageType = undefined;
     this.isBedridden = false;
     this.travelPenaltyRemaining = 0;
+    this.salaryMultiplierPending = 1;
+    this.salaryMultiplierMonths = 0;
+    this.salaryBonus = 0;
     this.isInFastTrack = false;
     this.fastTrackPosition = 0;
     this.visitedDestinations = [];
@@ -686,6 +702,8 @@ export class GameState {
   pendingWorldEvent: { id: string; event: AdminGlobalEvent; source: 'manual' | 'automatic'; deferred: boolean } | null = null;
   worldEventHistory: { eventId: string; title: string; payday: number; round: number; source: string; major: boolean }[] = [];
   turnInProgress = false;
+  /** 落格說明自動放行毫秒數；預設 10 秒，0 = 每次都等主持人按「看完了，繼續」。 */
+  readingAutoContinueMs = 10_000;
   gameId: string;
   /** 以玩家 ID 為 key 的快速查詢表 */
   players: Map<string, Player>;
@@ -722,6 +740,7 @@ export class GameState {
     highestBid: number; highestBidderId?: string; highestBidderName?: string;
     minBid: number; triggeredBy: string; triggeredByName: string;
     cardInfo?: { name: string; monthlyCashflow: number; downPayment: number };
+    isSpecialAuction?: boolean;
   }>;
 
   // ── 回合年齡＋主持人活動倒數 ─────────────────────────────────

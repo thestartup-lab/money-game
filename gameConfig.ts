@@ -57,7 +57,10 @@ export const SECOND_LIFE_FINANCIAL_COVERAGE_RATIO = 1;
 export const SECOND_LIFE_BALANCED_COVERAGE_RATIO = 0.75;
 export const SECOND_LIFE_FINANCIAL_INDICATORS_REQUIRED = 1;
 export const SECOND_LIFE_BALANCED_INDICATORS_REQUIRED = 2;
-export const SECOND_LIFE_HEALTH_THRESHOLD = 50;
+/** 健康指標門檻要高於最低起始 HP（50），否則人人開局就達標。 */
+export const SECOND_LIFE_HEALTH_THRESHOLD = 70;
+/** 至少結算過一季（6 個月）才可評估第二人生資格。 */
+export const SECOND_LIFE_MIN_PAYDAYS = 6;
 export const SECOND_LIFE_SKILL_THRESHOLD = 60;
 export const SECOND_LIFE_RELATIONSHIP_THRESHOLD = 50;
 export const SECOND_LIFE_EXPERIENCE_THRESHOLD = 45;
@@ -806,8 +809,12 @@ export const LOAN_LIMIT_BY_TIER: { minScore: number; limit: number }[] = [
 
 /**
  * 依信用值查詢對應的借款月利率。
- * 投資槓桿借款享有八折優惠（呼叫方自行乘以 0.8）。
+ * 投資槓桿借款利率 = 應急利率 × LEVERAGE_RATE_MULTIPLIER（不扣信用，但比應急借款貴）。
  */
+export const LEVERAGE_RATE_MULTIPLIER = 1.25;
+/** 外圈致死疾病卡：無保險時費用改為淨值的比例，並有下限，避免固定金額對剛進外圈者必死、對富豪無感。 */
+export const FAST_TRACK_LETHAL_CRISIS_NET_WORTH_SHARE = 0.3;
+export const FAST_TRACK_LETHAL_CRISIS_MIN_COST = 900_000;
 export function getLoanRate(creditScore: number): number {
   for (const tier of LOAN_RATE_BY_TIER) {
     if (creditScore >= tier.minScore) return tier.rate;

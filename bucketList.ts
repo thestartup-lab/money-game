@@ -127,8 +127,10 @@ export function getBucketGoal(id: string): BucketListGoal | undefined {
  * 進入外圈時隨機抽 3 個夢想目標，覆寫 player.bucketList。
  * 重複進入（理論上不會）時會重新分配。
  */
-export function assignBucketList(player: Player, count = 3): void {
-  const pool = [...BUCKET_LIST_GOALS];
+export function assignBucketList(player: Player, gs?: GameState, count = 3): void {
+  // 已經達成的目標不該再抽到，否則下一次擲骰就白拿獎勵
+  const unmet = gs ? BUCKET_LIST_GOALS.filter((g) => !g.isAchieved(player, gs)) : [...BUCKET_LIST_GOALS];
+  const pool = unmet.length >= count ? unmet : [...BUCKET_LIST_GOALS];
   const picked: BucketListGoal[] = [];
   const n = Math.min(count, pool.length);
   for (let i = 0; i < n; i++) {

@@ -22,8 +22,8 @@ export default function FacilitatorSceneOverlay({ scene }: Props) {
   const isResult = scene.stage === 'result';
 
   return (
-    <main className={`flex flex-1 items-center justify-center overflow-y-auto bg-gradient-to-br ${theme.glow} via-gray-950 to-gray-950 p-6`}>
-      <section className={`w-full max-w-6xl rounded-[2.5rem] border-4 ${theme.border} bg-gray-950/95 px-10 py-6 text-center shadow-2xl`} aria-live="polite">
+    <main className={`flex flex-1 items-start justify-center overflow-y-auto bg-gradient-to-br ${theme.glow} via-gray-950 to-gray-950 p-6`}>
+      <section className={`my-auto w-full max-w-6xl rounded-[2.5rem] border-4 ${theme.border} bg-gray-950/95 px-10 py-6 text-center shadow-2xl`} aria-live="polite">
         <div className="text-6xl" aria-hidden="true">{isResult ? '✨' : theme.icon}</div>
         <p className="mt-2 text-xl font-black uppercase tracking-[0.24em] text-gray-300">
           {isResult ? '結果揭曉' : scene.kicker}

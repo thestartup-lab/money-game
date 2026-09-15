@@ -19,6 +19,7 @@ import {
   SECOND_LIFE_FINANCIAL_COVERAGE_RATIO,
   SECOND_LIFE_FINANCIAL_INDICATORS_REQUIRED,
   SECOND_LIFE_HEALTH_THRESHOLD,
+  SECOND_LIFE_MIN_PAYDAYS,
   SECOND_LIFE_RELATIONSHIP_THRESHOLD,
   SECOND_LIFE_SKILL_THRESHOLD,
   LIFE_EXP,
@@ -82,7 +83,8 @@ export function applyDoodadCard(player: Player, card: DoodadCard): DoodadResult 
   const result: DoodadResult = { card, cashDeducted: 0, monthlyExpenseIncrease: 0 };
 
   if (card.expenseType === 'OneTime') {
-    const deducted = Math.min(card.cost, player.cash);
+    // 現金已為負時不能再「扣負數」變成退款，最多扣到 0
+    const deducted = Math.min(card.cost, Math.max(0, player.cash));
     player.cash -= deducted;
     result.cashDeducted = deducted;
   } else {
@@ -145,6 +147,7 @@ export function applyMarketCard(gameState: GameState, card: MarketCard): MarketR
     const rate = card.dividendRate ?? 0;
     result.dividendsPaid = [];
     gameState.players.forEach((player) => {
+      if (!player.isAlive) return;
       const totalValue = player.assets
         .filter((a) => a.type === card.targetAssetType)
         .reduce((sum, a) => sum + (a.currentValue ?? a.cost), 0);
@@ -164,6 +167,7 @@ export function applyMarketCard(gameState: GameState, card: MarketCard): MarketR
   const multiplier = card.priceMultiplier ?? 1;
 
   gameState.players.forEach((player) => {
+    if (!player.isAlive) return;
     player.assets.forEach((asset) => {
       if (asset.type === card.targetAssetType) {
         const oldValue = asset.currentValue;
@@ -236,15 +240,25 @@ export function acceptDealCard(player: Player, card: DealCard, purchasePrice?: n
  * ⚠ 注意：薪資 0 或捐款金額為 0 時不應獲得獎勵骰，避免無底薪業務員等
  *   nt_driven 在 NT 過低時白嫖獎勵骰。
  */
+/**
+ * 慈善捐款金額：以「薪資」與「被動收入」較高者計算，
+ * 讓 B/I 象限（薪資 0）與 80 歲後（薪資倍率 0）的玩家也能參與慈善。
+ */
+export function getCharityDonationAmount(player: Player, card: CharityCard): number {
+  const base = Math.max(player.salary, player.totalPassiveIncome, 0);
+  return Math.round(base * card.donationPercentage);
+}
+
 export function applyCharityDonation(
   player: Player,
   card: CharityCard,
   donate: boolean
 ): void {
   if (!donate) return;
-  const donationAmount = Math.round(player.salary * card.donationPercentage);
+  const donationAmount = getCharityDonationAmount(player, card);
   if (donationAmount <= 0) return;
-  const actualPaid = Math.min(donationAmount, player.cash);
+  const actualPaid = Math.min(donationAmount, Math.max(0, player.cash));
+  if (actualPaid <= 0) return;
   player.cash -= actualPaid;
   player.charityTotal = (player.charityTotal ?? 0) + actualPaid;
   player.bonusDice = card.bonusDiceCount;
@@ -275,27 +289,31 @@ function calcHPModifier(hp: number): { costMultiplier: number; flatBonus: number
  * 死亡觸發條件：card.canCauseDeath && !wasInsured && player.cash < effectiveCost
  * 若死亡觸發，呼叫方須繼續呼叫 handlePlayerDeath。
  */
-export function applyCrisisCard(player: Player, card: CrisisCard): CrisisResult {
-  const hp = player.stats.health;
+/**
+ * 只計算危機卡對玩家的實際費用與死亡風險，不改動玩家狀態。
+ * 用於「自救階段」：死亡條件成立時先讓玩家賣資產或借款，主持人確認後再真正套用。
+ */
+export function previewCrisisCost(player: Player, card: CrisisCard): {
+  wasInsured: boolean; effectiveCost: number; baseTurns: number; deathRisk: boolean; shortfall: number;
+} {
   const wasInsured = player.insurance[card.requiredInsurance];
+  const hpMod = calcHPModifier(player.stats.health);
+  const effectiveCost = wasInsured
+    ? card.insuredCost
+    : Math.round(card.baseCost * hpMod.costMultiplier) + hpMod.flatBonus;
+  const baseTurns = wasInsured
+    ? card.turnsLostWithInsurance
+    : card.turnsLostWithoutInsurance + hpMod.extraTurns;
+  const deathRisk = card.canCauseDeath && !wasInsured && player.cash < effectiveCost;
+  return { wasInsured, effectiveCost, baseTurns, deathRisk, shortfall: Math.max(0, effectiveCost - player.cash) };
+}
 
-  const hpMod = calcHPModifier(hp);
-
-  let effectiveCost: number;
-  let baseTurns: number;
-
-  if (wasInsured) {
-    effectiveCost = card.insuredCost;
-    baseTurns = card.turnsLostWithInsurance;
-  } else {
-    effectiveCost = Math.round(card.baseCost * hpMod.costMultiplier) + hpMod.flatBonus;
-    baseTurns = card.turnsLostWithoutInsurance + hpMod.extraTurns;
-  }
-
-  const deathTriggered = card.canCauseDeath && !wasInsured && player.cash < effectiveCost;
+export function applyCrisisCard(player: Player, card: CrisisCard): CrisisResult {
+  const { wasInsured, effectiveCost, baseTurns, deathRisk } = previewCrisisCost(player, card);
+  const deathTriggered = deathRisk;
 
   if (!deathTriggered) {
-    player.cash -= Math.min(effectiveCost, player.cash);
+    player.cash -= Math.min(effectiveCost, Math.max(0, player.cash));
     player.turnsToSkip += baseTurns;
     addLifeExperience(player, LIFE_EXP.CRISIS_SURVIVED);
   }
@@ -365,7 +383,12 @@ export interface SecondLifeEligibility {
  */
 export function evaluateSecondLifeEligibility(player: Player): SecondLifeEligibility {
   const fqMultiplier = FQ_MULTIPLIERS[player.stats.financialIQ] ?? 1;
-  const effectivePassiveIncome = Math.round(player.totalPassiveIncome * fqMultiplier);
+  // 玩家間借貸的利息不是真正的被動收入（兩人互借就能互相湊資格），不計入覆蓋率
+  const p2pInterest = player.assets
+    .filter((asset) => asset.id.startsWith('p2p-'))
+    .reduce((sum, asset) => sum + Math.max(0, asset.monthlyCashflow), 0);
+  const rawPassiveIncome = Math.max(0, player.totalPassiveIncome - p2pInterest);
+  const effectivePassiveIncome = Math.round(rawPassiveIncome * fqMultiplier);
   const totalExpenses = player.totalExpenses;
   const coverageRatio = totalExpenses > 0
     ? effectivePassiveIncome / totalExpenses
@@ -404,10 +427,12 @@ export function evaluateSecondLifeEligibility(player: Player): SecondLifeEligibi
     },
   ];
   const achievedIndicatorCount = indicators.filter((indicator) => indicator.achieved).length;
-  const financialBreakthroughMet =
+  // 至少經歷一次季度結算才有資格：避免 B/I 職業開局第一圈就直接進外圈
+  const seasoned = player.paydayCount >= SECOND_LIFE_MIN_PAYDAYS;
+  const financialBreakthroughMet = seasoned &&
     coverageRatio >= SECOND_LIFE_FINANCIAL_COVERAGE_RATIO &&
     achievedIndicatorCount >= SECOND_LIFE_FINANCIAL_INDICATORS_REQUIRED;
-  const balancedLifeMet =
+  const balancedLifeMet = seasoned &&
     coverageRatio >= SECOND_LIFE_BALANCED_COVERAGE_RATIO &&
     achievedIndicatorCount >= SECOND_LIFE_BALANCED_INDICATORS_REQUIRED;
 
@@ -418,7 +443,7 @@ export function evaluateSecondLifeEligibility(player: Player): SecondLifeEligibi
       : balancedLifeMet
         ? 'balancedLife'
         : null,
-    rawPassiveIncome: player.totalPassiveIncome,
+    rawPassiveIncome,
     effectivePassiveIncome,
     totalExpenses,
     coverageRatio,
@@ -483,7 +508,9 @@ export function applyRelationshipCard(
 
   // 立即現金扣除
   if (e.cashCost) {
-    const actual = Math.min(e.cashCost, player.cash);
+    const available = Math.max(0, player.cash);
+    const proportional = e.cashCostShare ? Math.round(available * e.cashCostShare) : e.cashCost;
+    const actual = Math.min(e.cashCost, proportional, available);
     player.cash -= actual;
     cashChange  -= actual;
   }
@@ -515,7 +542,7 @@ export function applyRelationshipCard(
       // 成功：新增月被動收入（以新資產形式加入）
       // 啟動資金 = 失敗時會損失的現金；成功時亦扣除作為入股
       const investAmount = e.gambleSuccess.failureCashLoss;
-      const actualInvest = Math.min(investAmount, player.cash);
+      const actualInvest = Math.min(investAmount, Math.max(0, player.cash));
       player.cash -= actualInvest;
       cashChange  -= actualInvest;
       const newAsset: Asset = {
@@ -531,7 +558,7 @@ export function applyRelationshipCard(
       message = `${card.title}：擲出 ${roll}，創業成功！每月被動收入 +$${e.gambleSuccess.successCashflow}。`;
     } else {
       gambleOutcome = 'failure';
-      const loss = Math.min(e.gambleSuccess.failureCashLoss, player.cash);
+      const loss = Math.min(e.gambleSuccess.failureCashLoss, Math.max(0, player.cash));
       player.cash -= loss;
       cashChange  -= loss;
       message = `${card.title}：擲出 ${roll}，創業失敗！損失 $${loss}。`;

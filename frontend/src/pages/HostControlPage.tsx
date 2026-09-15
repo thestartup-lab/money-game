@@ -175,8 +175,10 @@ export default function HostControlPage() {
   const isStartable = phase === 'WaitingForPlayers' || phase === 'Pre20';
   const isRunning = phase === 'RatRace' || phase === 'FastTrack';
   const hasStarted = isRunning || phase === 'GameOver';
-  const notReadyPlayers = players.filter((player) => !player.pre20Done && !player.isDisconnected);
+  const notReadyPlayers = players.filter((player) => !player.pre20Done);
+  const manualPause = gameState?.isManuallyPaused ?? (gameState?.isPaused && !gameState?.decisionPhase && !gameState?.facilitatorScene) ?? false;
   const decisionPhase = gameState?.decisionPhase ?? null;
+  const canSkipTurn = isRunning && !decisionPhase && !gameState?.facilitatorScene && !gameState?.turnInProgress && !gameState?.globalPaydayInProgress && !gameState?.globalPaydayPending;
   const activePlayerId = decisionPhase?.playerId ?? gameState?.currentPlayerTurnId ?? '';
   const currentPlayer = gameState?.players.find((player) => player.id === activePlayerId) ?? null;
   const nextPlayer = gameState && currentPlayer ? getNextPlayer(gameState, currentPlayer.id) : null;
@@ -388,7 +390,7 @@ export default function HostControlPage() {
         <section className="host-card">
           <div className="host-section-heading">
             <div><p className="host-eyebrow">GAME FLOW</p><h2>遊戲控制</h2></div>
-            <span>{phase === 'GameOver' ? '復盤中' : gameState?.isPaused ? '已暫停' : isRunning ? '進行中' : '準備中'}</span>
+            <span>{phase === 'GameOver' ? '復盤中' : manualPause ? '已暫停' : isRunning ? '進行中' : '準備中'}</span>
           </div>
 
           {isStartable ? (
@@ -418,12 +420,21 @@ export default function HostControlPage() {
             </div>
           ) : null}
 
-          {isRunning && !decisionPhase ? (
-            gameState?.isPaused ? (
+          {isRunning && !decisionPhase && !gameState?.facilitatorScene ? (
+            manualPause ? (
               <button className="host-primary-button" onClick={() => emit('resumeGame')}>▶ 繼續遊戲</button>
             ) : (
               <button className="host-pause-button" onClick={() => emit('pauseGame', { reason: '主持人手機暫停' })}>⏸ 暫停遊戲</button>
             )
+          ) : null}
+          {canSkipTurn ? (
+            <button
+              className="host-secondary-button"
+              onClick={() => {
+                const current = players.find((player) => player.id === gameState?.currentPlayerTurnId);
+                if (window.confirm(`跳過 ${current?.name ?? '目前玩家'} 的這一回合？`)) emit('skipTurn', { playerId: current?.id });
+              }}
+            >⏭ 跳過目前玩家的回合</button>
           ) : null}
         </section>
 

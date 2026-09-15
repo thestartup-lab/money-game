@@ -59,8 +59,14 @@ test('資格保留雙路徑、財商乘數與人生指標，轉職後 SK 歸零�
   p.expenses = { taxes: 0, homeMortgagePayment: 0, carLoanPayment: 0, creditCardPayment: 0, otherExpenses: 10000 };
   p.liabilities = []; p.stats.financialIQ = 1;
   p.assets = [{ id: 'a', type: 'Other', name: '收入', cost: 1, monthlyCashflow: 7500 }];
-  p.stats.health = 50; p.stats.careerSkill = 60; p.relationshipPoints = 0; p.lifeExperience = 0;
+  p.stats.health = 70; p.stats.careerSkill = 60; p.relationshipPoints = 0; p.lifeExperience = 0;
+  p.paydayCount = 0;
+  assert.equal(evaluateSecondLifeEligibility(p).eligible, false, '尚未結算過一季不得進入第二人生');
+  p.paydayCount = 6;
   assert.equal(evaluateSecondLifeEligibility(p).route, 'balancedLife');
+  p.stats.health = 69;
+  assert.equal(evaluateSecondLifeEligibility(p).eligible, false, '健康門檻 70');
+  p.stats.health = 70;
   p.stats.careerSkill = 0;
   assert.equal(evaluateSecondLifeEligibility(p).eligible, false);
   p.assets[0].monthlyCashflow = 10000;
