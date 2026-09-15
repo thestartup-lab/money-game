@@ -187,6 +187,7 @@ export interface GameState {
     minBid: number; highestBid: number; highestBidderId?: string; endsAt: number;
     cardInfo?: { name: string; monthlyCashflow: number; downPayment: number };
     isSpecialAuction: boolean;
+    bids?: { bidderId: string; bidderName: string; amount: number; at: number }[];
   }>;
   currentAge: number;
   currentStage: LifeStage;

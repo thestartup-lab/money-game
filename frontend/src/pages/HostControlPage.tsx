@@ -374,6 +374,22 @@ export default function HostControlPage() {
               <button onClick={() => emit('setDecisionReminder', { phaseId: decisionPhase.id, addSeconds: 30 })}>+30 秒</button>
             </div>
             <p className="host-help">倒數歸零只會提醒，不會替玩家做決定。</p>
+            {decisionPhase.kind === 'auction' ? (
+              <div className="host-bid-list">
+                {(gameState?.activeAuctions ?? []).map((auction) => (
+                  <div key={auction.auctionId}>
+                    <p><strong>{auction.cardInfo?.name ?? '交易'}</strong> · 起標 ${auction.minBid.toLocaleString()}</p>
+                    {(auction.bids ?? []).length === 0 ? <p>尚無人出價</p> : (
+                      <ul>
+                        {[...(auction.bids ?? [])].reverse().map((bid, i) => (
+                          <li key={`${bid.bidderId}-${bid.at}`}>{bid.bidderName} 出價 ${bid.amount.toLocaleString()}{i === 0 ? '（目前最高）' : ''}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <button
               className="host-primary-button host-continue-button"
               onClick={() => emit('continueDecisionPhase', { phaseId: decisionPhase.id })}

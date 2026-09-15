@@ -1797,6 +1797,7 @@ function serializeGameState(gs: GameState): object {
       endsAt: a.endTime,
       cardInfo: a.cardInfo,
       isSpecialAuction: a.isSpecialAuction ?? false,
+      bids: a.bids ?? [],
     })),
     currentAge: Math.round(currentAge * 10) / 10,
     currentStage,
@@ -4200,6 +4201,7 @@ io.on('connection', (socket: Socket) => {
     auction.highestBid = payload.bidAmount;
     auction.highestBidderId = playerIdentity(socket);
     auction.highestBidderName = bidder.name;
+    (auction.bids ??= []).push({ bidderId: bidder.id, bidderName: bidder.name, amount: payload.bidAmount, at: Date.now() });
 
     emitToRoom(roomId, 'dealBidUpdated', {
       auctionId: payload.auctionId, bidderId: playerIdentity(socket), bidderName: bidder.name,

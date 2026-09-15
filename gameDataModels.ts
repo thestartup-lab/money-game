@@ -743,6 +743,8 @@ export class GameState {
     minBid: number; triggeredBy: string; triggeredByName: string;
     cardInfo?: { name: string; monthlyCashflow: number; downPayment: number };
     isSpecialAuction?: boolean;
+    /** 出價紀錄（公開喊價，主持人後台可看） */
+    bids?: { bidderId: string; bidderName: string; amount: number; at: number }[];
   }>;
 
   // ── 回合年齡＋主持人活動倒數 ─────────────────────────────────

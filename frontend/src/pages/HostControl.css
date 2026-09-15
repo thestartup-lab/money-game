@@ -459,3 +459,14 @@
 @media (prefers-reduced-motion: reduce) {
   .host-control * { scroll-behavior: auto !important; transition: none !important; }
 }
+
+.host-bid-list {
+  margin: 0.5rem 0;
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.75rem;
+  background: rgba(30, 58, 138, 0.35);
+  border: 1px solid rgba(96, 165, 250, 0.4);
+  font-size: 0.95rem;
+}
+.host-bid-list ul { margin: 0.25rem 0 0; padding-left: 1.1rem; }
+.host-bid-list li:first-child { color: #fde68a; font-weight: 700; }

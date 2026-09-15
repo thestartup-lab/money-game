@@ -541,6 +541,26 @@ export default function AdminPage() {
                     </div>
                   </div>
                 </div>
+                {decisionPhase.kind === 'auction' && (
+                  <div className="rounded-xl border border-blue-800 bg-blue-950/50 p-2 text-xs">
+                    {(gameState?.activeAuctions ?? []).map((auction) => (
+                      <div key={auction.auctionId}>
+                        <p className="font-bold text-blue-100">{auction.cardInfo?.name ?? '交易'} · 起標 ${auction.minBid.toLocaleString()}</p>
+                        {(auction.bids ?? []).length === 0 ? (
+                          <p className="text-gray-400">尚無人出價</p>
+                        ) : (
+                          <ul className="mt-1 space-y-0.5">
+                            {[...(auction.bids ?? [])].reverse().map((bid, i) => (
+                              <li key={`${bid.bidderId}-${bid.at}`} className={i === 0 ? 'font-bold text-yellow-200' : 'text-gray-300'}>
+                                {bid.bidderName} 出價 ${bid.amount.toLocaleString()}{i === 0 ? '（目前最高）' : ''}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="grid grid-cols-4 gap-2">
                   {[30, 60, 90].map((seconds) => (
                     <button
