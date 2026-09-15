@@ -187,3 +187,15 @@ test('慈善卡等落格說明結束、決策階段開始後才送到手機，�
   assert.ok(cardIdx > charityStart && charityStart >= 0, '卡片必須在慈善決策開始之後才送出：' + timeline.join(','));
   assert.equal(timeline.filter(x => x === 'card').length, 1);
 });
+
+test('玩家送出後自動揭曉，不必主持人按繼續；關閉後恢復手動', { timeout: 20000 }, async t => {
+  const { admin, a } = await fixture(t, 3238, false, 0, true, false, false, false, false, true);
+  const phase = await send(a, 'playerRoll', { diceCount: 1 }, 'gameStateUpdate', g => g.decisionPhase?.kind === 'charity');
+  assert.equal(phase.autoRevealOnSubmit, true);
+  const released = wait(admin, 'decisionPhaseEnded', p => p.phaseId === phase.decisionPhase.id, 6000);
+  a.emit('submitCardDecision', { phaseId: phase.decisionPhase.id, donate: false });
+  const ended = await released;
+  assert.equal(ended.submitted, true);
+  const off = await send(admin, 'setAutoRevealOnSubmit', { enabled: false }, 'gameStateUpdate', g => g.autoRevealOnSubmit === false);
+  assert.equal(off.autoRevealOnSubmit, false);
+});

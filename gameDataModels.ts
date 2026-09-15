@@ -704,6 +704,8 @@ export class GameState {
   turnInProgress = false;
   /** 落格說明自動放行毫秒數；預設 10 秒，0 = 每次都等主持人按「看完了，繼續」。 */
   readingAutoContinueMs = 10_000;
+  /** 玩家送出選擇後是否自動揭曉（不必等主持人按）；競標仍由主持人結束。 */
+  autoRevealOnSubmit = true;
   gameId: string;
   /** 以玩家 ID 為 key 的快速查詢表 */
   players: Map<string, Player>;

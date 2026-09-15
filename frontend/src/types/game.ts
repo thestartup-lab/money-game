@@ -180,6 +180,8 @@ export interface GameState {
   isManuallyPaused?: boolean;
   /** 落格說明自動放行毫秒數；0 = 每次等主持人 */
   readingAutoContinueMs?: number;
+  /** 玩家送出選擇後自動揭曉（預設開） */
+  autoRevealOnSubmit?: boolean;
   activeAuctions?: Array<{
     auctionId: string; dealCardId: string; triggeredBy: string; triggeredByName: string;
     minBid: number; highestBid: number; highestBidderId?: string; endsAt: number;

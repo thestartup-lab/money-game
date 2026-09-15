@@ -302,6 +302,8 @@ const socketRoomMap = new Map<string, string>();
 
 /** 每個房間同一時間只會有一個等待主持人收束的決策階段。 */
 const decisionReleaseWaiters = new Map<string, { phaseId: string; release: () => void }>();
+/** 玩家送出選擇後到自動揭曉的停留時間 */
+const AUTO_REVEAL_DELAY_MS = 1_500;
 
 interface CommunityChoiceCard {
   id: string;
@@ -1783,6 +1785,7 @@ function serializeGameState(gs: GameState): object {
     // 只有主持人手動暫停才為 true；決策階段與舞台事件的自動暫停不算
     isManuallyPaused: gs.pausedAt !== null && !gs.decisionPhase && !gs.facilitatorScene,
     readingAutoContinueMs: gs.readingAutoContinueMs,
+    autoRevealOnSubmit: gs.autoRevealOnSubmit,
     activeAuctions: Object.entries(gs.activeAuctions ?? {}).map(([auctionId, a]) => ({
       auctionId,
       dealCardId: a.dealCardId,
@@ -4315,6 +4318,18 @@ io.on('connection', (socket: Socket) => {
   });
 
   // ----------------------------------------------------------
+  // 送出後自動揭曉 (setAutoRevealOnSubmit)
+  // ----------------------------------------------------------
+  onSafe('setAutoRevealOnSubmit', (payload: { enabled: boolean }) => {
+    const gs = getRoomState(socket);
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    if (!isRoomAdmin(socket, gs)) { emitClient(socket, 'error', { message: '只有管理員可以調整揭曉方式。' }); return; }
+    gs.autoRevealOnSubmit = payload.enabled === true;
+    console.log(`[setAutoRevealOnSubmit] 房間 ${gs.gameId} 送出後自動揭曉：${gs.autoRevealOnSubmit ? '開' : '關'}`);
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
+  // ----------------------------------------------------------
   // 主持人跳過目前玩家的回合 (skipTurn) — 玩家離線、發呆或臥床時使用
   // ----------------------------------------------------------
   onSafe('skipTurn', (payload?: { playerId?: string }) => {
@@ -5624,6 +5639,13 @@ function waitForHostControlledDecision<T>(
         emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
       }
       emitClient(socket, 'decisionSubmitted', { phaseId: context.phaseId });
+      // 送出後自動揭曉：短暫停留讓大螢幕看到「已送出」，主持人若先按繼續則不重複放行
+      if (gs.autoRevealOnSubmit) {
+        setTimeout(() => {
+          const waiter = decisionReleaseWaiters.get(gs.gameId);
+          if (waiter?.phaseId === context.phaseId) waiter.release();
+        }, AUTO_REVEAL_DELAY_MS);
+      }
     };
 
     const release = () => {

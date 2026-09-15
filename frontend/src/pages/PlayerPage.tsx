@@ -1307,7 +1307,7 @@ export default function PlayerPage() {
             <div className="mx-4 mb-3 rounded-xl border border-indigo-700 bg-indigo-950/60 px-3 py-3 text-center">
               <p className="text-sm font-bold text-indigo-200">
                 {gameState.decisionPhase.kind === 'reading' ? '請抬頭看落格說明，等待主持人繼續' : gameState.decisionPhase.playerId === myId
-                  ? gameState.decisionPhase.submitted ? '選擇已送出，等待主持人揭曉' : '請在手機完成私人決策'
+                  ? gameState.decisionPhase.submitted ? (gameState.autoRevealOnSubmit !== false ? '選擇已送出，揭曉中…' : '選擇已送出，等待主持人揭曉') : '請在手機完成私人決策'
                   : `${gameState.decisionPhase.playerName} 正在決策`}
               </p>
               <p className="mt-1 text-xs text-gray-500">討論與局勢請看大螢幕</p>

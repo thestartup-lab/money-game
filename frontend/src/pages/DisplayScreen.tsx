@@ -884,7 +884,7 @@ export default function DisplayScreen() {
                     {gameState.decisionPhase.kind === 'auction'
                       ? '公開競標進行中，主持人決定結束時間'
                       : gameState.decisionPhase.submitted
-                        ? '選擇已送出，等待主持人揭曉'
+                        ? (gameState.autoRevealOnSubmit !== false ? '選擇已送出，揭曉中' : '選擇已送出，等待主持人揭曉')
                         : '思考與討論中'}
                   </div>
                   <p className="mt-5 text-sm text-gray-400">決策內容保密；由主持人掌握討論與揭曉時機</p>

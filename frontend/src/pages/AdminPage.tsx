@@ -588,7 +588,15 @@ export default function AdminPage() {
                     );
                   })}
                 </div>
-                <p className="mt-1 text-[11px] text-gray-500">只影響「走到了某格」這類說明；需要決策的卡片仍由你揭曉。</p>
+                <p className="mt-1 text-[11px] text-gray-500">只影響「走到了某格」這類說明。</p>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="font-bold text-gray-200">玩家送出後自動揭曉</span>
+                  <button
+                    className={`rounded-lg px-2 py-1 font-bold ${gameState?.autoRevealOnSubmit !== false ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+                    onClick={() => emit('setAutoRevealOnSubmit', { enabled: gameState?.autoRevealOnSubmit === false })}
+                  >{gameState?.autoRevealOnSubmit !== false ? '開啟中（點此改為手動揭曉）' : '關閉中（點此開啟）'}</button>
+                </div>
+                <p className="mt-1 text-[11px] text-gray-500">開啟時玩家一送出就在 1.5 秒後揭曉；競標仍由你按「結束競標」。</p>
               </div>
             )}
             {isRunning && !decisionPhase && !gameState?.facilitatorScene && (
