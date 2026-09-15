@@ -65,6 +65,7 @@ export default function PlayerPage() {
   const playerIdRef = useRef('');
   const sessionRef = useRef<{ playerName: string; roomCode: string; reconnectToken: string } | null>(null);
   const hadSessionRef = useRef(false);
+  const gameStateRef = useRef<GameState | null>(null);
   const myNetworkRef = useRef(0);
   const [connected, setConnected] = useState(false);
   const [disconnectNotice, setDisconnectNotice] = useState<string | null>(null);
@@ -225,6 +226,7 @@ export default function PlayerPage() {
     });
 
     s.on('gameStateUpdate', (gs: GameState) => {
+      gameStateRef.current = gs;
       setGameState(gs);
       const me = gs.players.find((p) => p.id === playerIdRef.current);
       if (me) myNetworkRef.current = me.stats?.network ?? 0;
@@ -417,7 +419,10 @@ export default function PlayerPage() {
       const saving = (p.taxCreditAmount ?? 0) > 0 ? `，稅務規劃省下 $${fmt(p.taxCreditAmount ?? 0)}` : '';
       addNotification(`📊 年度稅 $${fmt(p.taxAmount)}${saving}；稅後現金 $${fmt(p.cashAfterTax)}`);
     });
-    s.on('decisionPhaseEnded', () => {
+    s.on('decisionPhaseEnded', (p?: { phaseId?: string }) => {
+      // 落格說明（reading）結束不代表決策結束，卡片要留著；只有真正的決策階段結束才清
+      const ending = gameStateRef.current?.decisionPhase;
+      if (ending && (!p?.phaseId || p.phaseId === ending.id) && ending.kind === 'reading') return;
       // 只清掉「需要玩家選擇」的卡片；結果類卡片（意外支出、危機結果、創業結果…）留給玩家自己按確認
       setActiveEvent((current) => current && DECISION_EVENT_KINDS.has(current.kind) ? null : current);
       setPaydayForm(null);

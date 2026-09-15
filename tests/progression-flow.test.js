@@ -14,7 +14,7 @@ function send(s, event, payload, response, predicate) {
   const result = wait(s, response, predicate); s.emit(event, payload); return result;
 }
 
-async function fixture(t, port, passed, passive, autoReading = true, outer = false, deal = false, seasoned = false, crisis = false) {
+async function fixture(t, port, passed, passive, autoReading = true, outer = false, deal = false, seasoned = false, crisis = false, charity = false) {
   // Test-only deterministic state: exercise production Socket handlers without adding a production test endpoint.
   const boot = `
     Math.random=()=>0.4;
@@ -32,6 +32,7 @@ async function fixture(t, port, passed, passive, autoReading = true, outer = fal
     const cards=require('./dist/gameCards');
     cards.BOARD.forEach(cell=>cell.type=cards.SquareType.SecondLife);
     if (${deal}) cards.BOARD.forEach(cell=>{cell.type=cards.SquareType.SmallDeal;cell.label='小交易';});
+    if (${charity}) cards.BOARD.forEach(cell=>{cell.type=cards.SquareType.Charity;cell.label='慈善捐款';});
     if (${crisis}) { cards.BOARD.forEach(cell=>{cell.type=cards.SquareType.Crisis;cell.label='危機事件';}); cards.CRISIS_POOL_BY_STAGE.Youth.splice(0, cards.CRISIS_POOL_BY_STAGE.Youth.length, 'cr-001'); }
     if (${outer}) cards.FAST_TRACK_BOARD.forEach(cell=>{cell.type=cards.FastTrackSquareType.TaxPlanning;cell.label='稅務規劃';});
     require('./dist/socketServer');
@@ -164,4 +165,25 @@ test('致死危機先開自救階段：本人可借款，補不足才死亡', { 
   const after = await send(admin, 'continueDecisionPhase', { phaseId: rescue.decisionPhase.id }, 'gameStateUpdate', g => !g.decisionPhase && !g.turnInProgress);
   const me = after.players.find(p => p.id === sa.playerId);
   assert.equal(me.isAlive, false, '借款後仍不足應死亡');
+});
+
+test('慈善卡等落格說明結束、決策階段開始後才送到手機，且不會被落格結束事件清掉', { timeout: 15000 }, async t => {
+  const { admin, a } = await fixture(t, 3237, false, 0, false, false, false, false, false, true);
+  const timeline = [];
+  a.on('charityCardPending', () => timeline.push('card'));
+  a.on('decisionPhaseEnded', () => timeline.push('ended'));
+  a.on('decisionPhaseStarted', p => timeline.push('start:' + p.kind));
+  const reading = await send(a, 'playerRoll', { diceCount: 1 }, 'gameStateUpdate', g => g.decisionPhase?.kind === 'reading');
+  assert.deepEqual(timeline.filter(x => x === 'card'), [], '落格說明期間不應先送卡片');
+  let phase = await send(admin, 'continueDecisionPhase', { phaseId: reading.decisionPhase.id }, 'gameStateUpdate', g => g.decisionPhase && g.decisionPhase.id !== reading.decisionPhase.id);
+  while (phase.decisionPhase.kind === 'reading') {
+    const id = phase.decisionPhase.id;
+    phase = await send(admin, 'continueDecisionPhase', { phaseId: id }, 'gameStateUpdate', g => g.decisionPhase && g.decisionPhase.id !== id);
+  }
+  assert.equal(phase.decisionPhase.kind, 'charity');
+  await new Promise(r => setTimeout(r, 200));
+  const cardIdx = timeline.indexOf('card');
+  const charityStart = timeline.indexOf('start:charity');
+  assert.ok(cardIdx > charityStart && charityStart >= 0, '卡片必須在慈善決策開始之後才送出：' + timeline.join(','));
+  assert.equal(timeline.filter(x => x === 'card').length, 1);
 });

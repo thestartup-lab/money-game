@@ -5685,9 +5685,13 @@ async function waitForCardDecision(
   player: Player,
   kind: DecisionPhaseState['kind'],
   title: string,
+  prompt?: { event: string; payload: unknown },
 ): Promise<Record<string, unknown> | null> {
   await readBoardNotices(gs);
   const context = beginHostDecisionPhase(gs, player, kind, title);
+  // 卡片一定要等落格說明結束、決策階段開始後才送到手機；
+  // 否則落格說明結束時手機會把卡片當成「決策已結束」清掉，玩家就看不到選項。
+  if (prompt) emitClient(socket, prompt.event, prompt.payload);
   return waitForHostControlledDecision(socket, gs, context, 'submitCardDecision', null);
 }
 
@@ -5707,6 +5711,8 @@ async function applyCrisisWithRescue(
   if (preview.deathRisk) {
     emitCellEvent(socket, gs.gameId, player.name, label,
       `🆘 ${player.name} 的現金 $${player.cash.toLocaleString()} 付不起「${card.title}」$${preview.effectiveCost.toLocaleString()}（差 $${preview.shortfall.toLocaleString()}）。可先在手機賣資產或申請應急借款自救，主持人確認後才判定。`);
+    await readBoardNotices(gs);
+    const context = beginHostDecisionPhase(gs, player, 'crisis', `危機自救：${card.title}`, undefined, { rescue: true });
     emitClient(socket, 'crisisRescueRequired', {
       card,
       effectiveCost: preview.effectiveCost,
@@ -5715,8 +5721,6 @@ async function applyCrisisWithRescue(
       timeoutMs: 0,
       controlledByHost: true,
     });
-    await readBoardNotices(gs);
-    const context = beginHostDecisionPhase(gs, player, 'crisis', `危機自救：${card.title}`, undefined, { rescue: true });
     await waitForHostControlledDecision(socket, gs, context, 'submitCardDecision', null);
     const after = previewCrisisCost(player, card);
     emitCellEvent(socket, gs.gameId, player.name, label,
@@ -5781,15 +5785,14 @@ async function handleLandingSquare(
         const deal: DealCard = BIG_DEALS[Math.floor(Math.random() * BIG_DEALS.length)];
         emitCellEvent(socket, roomId, player.name, 'FT 大交易', `💼 外圈大型投資機會：${deal.title}！`);
         const _ftLoanAvailable = getAvailableLoan(player);
-        emitClient(socket, 'fastTrackDealCard', {
+        const ftDealDecision = await waitForCardDecision(socket, gs, player, 'deal', '外圈大型交易', { event: 'fastTrackDealCard', payload: {
           squareType: ftSqType,
           deal,
           isFastTrack: true,
           playerCash: player.cash,
           creditScore: player.creditScore,
           loanAvailable: _ftLoanAvailable,
-        });
-        const ftDealDecision = await waitForCardDecision(socket, gs, player, 'deal', '外圈大型交易');
+        } });
         const ftCost = deal.asset.downPayment ?? deal.asset.cost;
         if (ftDealDecision?.accepted === true || ftDealDecision?.accept === true) {
           // 先處理槓桿借款（現金不足→借差額；現金已足且選 leverage→主動槓桿借款留現金）
@@ -5844,8 +5847,7 @@ async function handleLandingSquare(
       case FastTrackSquareType.Charity: {
         const charityAmount = Math.round(player.monthlyCashflow * 0.1);
         if (player.cash >= charityAmount && charityAmount > 0) {
-          emitClient(socket, 'charityCardPending', { amount: charityAmount });
-          const charityDecision = await waitForCardDecision(socket, gs, player, 'charity', '外圈慈善選擇');
+          const charityDecision = await waitForCardDecision(socket, gs, player, 'charity', '外圈慈善選擇', { event: 'charityCardPending', payload: { amount: charityAmount } });
           if (charityDecision?.donate === true) {
             player.cash -= charityAmount;
             player.charityTotal = (player.charityTotal ?? 0) + charityAmount;
@@ -5878,13 +5880,12 @@ async function handleLandingSquare(
         const amounts = [300_000, 750_000, 1_500_000];
         const investmentAmount = amounts[Math.floor(Math.random() * amounts.length)];
         emitCellEvent(socket, roomId, player.name, 'FT 科技新創', `💡 科技新創機會！投入 $${investmentAmount.toLocaleString()} 擲骰決定成敗（≥4 成功）。`);
-        emitClient(socket, 'techStartupOffer', {
+        const startupDecision = await waitForCardDecision(socket, gs, player, 'startup', '科技新創投資', { event: 'techStartupOffer', payload: {
           playerId: player.id,
           playerName: player.name,
           investmentAmount,
           playerCash: player.cash,
-        });
-        const startupDecision = await waitForCardDecision(socket, gs, player, 'startup', '科技新創投資');
+        } });
         if (startupDecision?.invest === true && player.cash >= investmentAmount) {
           player.cash -= investmentAmount;
           const diceRoll = rollDice(1);
@@ -5938,10 +5939,9 @@ async function handleLandingSquare(
         const others = [...gs.players.values()].filter((p) => p.id !== player.id && p.isAlive);
         if (others.length > 0) {
           emitCellEvent(socket, roomId, player.name, 'FT 合夥機會', '🤝 合夥機會！先選擇邀請對象，再由對方決定是否合作。');
-          emitClient(socket, 'fastTrackPartnershipOptions', {
+          const partnerPick = await waitForCardDecision(socket, gs, player, 'relationship', '外圈合夥：選擇夥伴', { event: 'fastTrackPartnershipOptions', payload: {
             availablePartners: others.map((p) => ({ id: p.id, name: p.name })),
-          });
-          const partnerPick = await waitForCardDecision(socket, gs, player, 'relationship', '外圈合夥：選擇夥伴');
+          } });
           const targetId = typeof partnerPick?.targetPlayerId === 'string' ? partnerPick.targetPlayerId : null;
           const target = targetId ? gs.players.get(targetId) : undefined;
           const targetSocket = target ? getPlayerSocket(target.id) : undefined;
@@ -5951,12 +5951,11 @@ async function handleLandingSquare(
               3_000,
               Math.min(50_000, Math.round((player.totalPassiveIncome + target.totalPassiveIncome) * 0.03)),
             );
-            emitClient(targetSocket, 'fastTrackPartnershipInvitation', {
+            const response = await waitForCardDecision(targetSocket, gs, target, 'relationship', `回應 ${player.name} 的合夥邀請`, { event: 'fastTrackPartnershipInvitation', payload: {
               offerorId: player.id,
               offerorName: player.name,
               estimatedDividend,
-            });
-            const response = await waitForCardDecision(targetSocket, gs, target, 'relationship', `回應 ${player.name} 的合夥邀請`);
+            } });
             if (response?.accepted === true && player.isAlive && target.isAlive) {
               const dividend = applyPartnershipBenefits(gs, player, target);
               emitCellEvent(socket, roomId, player.name, 'FT 合夥成功', `🤝 ${player.name} 與 ${target.name} 合作成功，雙方各得生命體驗 +15、分紅 $${dividend.toLocaleString()}。`);
@@ -6006,11 +6005,10 @@ async function handleLandingSquare(
         const outerDests = (TRAVEL_DESTINATIONS as Array<{ id: string; name: string; tier: string; cost: number; lifeExpGained: number; region: string }>)
           .filter((d) => d.tier === 'outer' || d.tier === 'both');
         emitCellEvent(socket, roomId, player.name, 'FT 人生旅程', '✈️ 外圈人生旅程！可選擇更遠的旅遊目的地，獲得豐富的生命體驗。');
-        emitClient(socket, 'fastTrackTravelOptions', {
+        const travelDecision = await waitForCardDecision(socket, gs, player, 'relationship', '外圈生命歷練', { event: 'fastTrackTravelOptions', payload: {
           destinations: outerDests.map((d) => ({ id: d.id, name: d.name, region: d.region, cost: d.cost, lifeExpGained: d.lifeExpGained })),
           playerCash: player.cash,
-        });
-        const travelDecision = await waitForCardDecision(socket, gs, player, 'relationship', '外圈生命歷練');
+        } });
         if (typeof travelDecision?.destinationId === 'string') {
           executeTravelAction(socket, gs, player, travelDecision.destinationId);
         } else {
@@ -6262,16 +6260,18 @@ async function handleLandingSquare(
         }
         emitCellEvent(socket, roomId, player.name, dealTypeName, `📋 ${player.name} 現金與可借額度不足以承接（頭期款 $${cheapest.toLocaleString()}），直接開放全場競標。`);
       }
-      if (affordableByMe) {
-        emitClient(socket, 'dealCardsDrawn', {
-          cards: cardsForClient,
-          canPickTwo: drawCount > 1,
-          playerCash: player.cash,
-          creditScore: player.creditScore,
-          loanAvailable: _loanAvailable,
-        });
-      }
-      const decision = affordableByMe ? await waitForCardDecision(socket, gs, player, 'deal', dealTypeName) : null;
+      const decision = affordableByMe
+        ? await waitForCardDecision(socket, gs, player, 'deal', dealTypeName, {
+            event: 'dealCardsDrawn',
+            payload: {
+              cards: cardsForClient,
+              canPickTwo: drawCount > 1,
+              playerCash: player.cash,
+              creditScore: player.creditScore,
+              loanAvailable: _loanAvailable,
+            },
+          })
+        : null;
 
       if (decision && decision.accepted) {
         // 玩家A接受 → 正常交易流程
@@ -6419,8 +6419,7 @@ async function handleLandingSquare(
       const donationAmount = getCharityDonationAmount(player, card);
 
       emitCellEvent(socket, roomId, player.name, '慈善捐款', `❤️ 慈善格子！捐出 $${donationAmount.toLocaleString()} 可獲得生命體驗與傳承加成，是否參與？`);
-      emitClient(socket, 'charityCardPending', { amount: donationAmount });
-      const decision = await waitForCardDecision(socket, gs, player, 'charity', '慈善捐款');
+      const decision = await waitForCardDecision(socket, gs, player, 'charity', '慈善捐款', { event: 'charityCardPending', payload: { amount: donationAmount } });
       const donate = decision?.donate === true;
 
       applyCharityDonation(player, card, donate);
@@ -6467,8 +6466,7 @@ async function handleLandingSquare(
       emitCellEvent(socket, roomId, player.name, '危機事件', `⚠️ 危機來臨：${card.title}！`);
 
       if (player.stats.network >= 3 && !player.stats.networkCrisisSkipUsed) {
-        emitClient(socket, 'crisisNTSkipAvailable', { card, timeoutMs: 0, controlledByHost: true });
-        const decision = await waitForCardDecision(socket, gs, player, 'crisis', '危機應對');
+        const decision = await waitForCardDecision(socket, gs, player, 'crisis', '危機應對', { event: 'crisisNTSkipAvailable', payload: { card, timeoutMs: 0, controlledByHost: true } });
 
         if (decision?.useNTSkip === true) {
           player.stats.networkCrisisSkipUsed = true;
@@ -6520,13 +6518,12 @@ async function handleLandingSquare(
       // ── 機遇型事件：由主持人控制決策階段 ──
       if (relCard.eventCategory === 'opportunity') {
         emitCellEvent(socket, roomId, player.name, '人際關係', `🤝 ${relCard.title}：${player.name} 正在手機上決定是否接受。`);
-        emitClient(socket, 'relationshipCardDrawn', {
+        const relDecision = await waitForCardDecision(socket, gs, player, 'relationship', '人際關係決策', { event: 'relationshipCardDrawn', payload: {
           card: relCard,
           playerCash: player.cash,
           timeoutMs: 0,
           controlledByHost: true,
-        });
-        const relDecision = await waitForCardDecision(socket, gs, player, 'relationship', '人際關係決策');
+        } });
         // 主持人略過或玩家沒有送出時一律視為「婉拒」，避免賭注類卡在玩家不知情下自動執行。
         const accepted = relDecision?.accept === true;
 
@@ -6556,7 +6553,7 @@ async function handleLandingSquare(
         if (relResult.triggerSmallDeal) {
           const bonusDeal = gs.smallDealDeck.draw();
           if (bonusDeal) {
-            emitClient(socket, 'dealCardsDrawn', {
+            const dealDecision = await waitForCardDecision(socket, gs, player, 'deal', '同學會帶來的小交易', { event: 'dealCardsDrawn', payload: {
               cards: [{
                 id: bonusDeal.id,
                 name: bonusDeal.title,
@@ -6569,8 +6566,7 @@ async function handleLandingSquare(
               creditScore: player.creditScore,
               loanAvailable: 0,
               bonusDeal: true,
-            });
-            const dealDecision = await waitForCardDecision(socket, gs, player, 'deal', '同學會帶來的小交易');
+            } });
             const bonusDown = bonusDeal.asset.downPayment ?? bonusDeal.asset.cost ?? 0;
             if (dealDecision?.accepted === true && player.cash >= bonusDown) {
               const _bdCB = player.cash; const _bdFB = player.monthlyCashflow; const _bdNWB = calcNetWorth(player);
