@@ -912,10 +912,11 @@ function logPlayerEvent(
   cashBefore: number,
   cashflowBefore: number,
   netWorthBefore: number,
-  meta?: Record<string, unknown>
+  meta?: Record<string, unknown>,
+  ageOverride?: number,
 ): void {
   const event: PlayerEvent = {
-    age: Math.round(Math.max(player.startAge ?? 20, getCurrentAge(gs)) * 10) / 10,
+    age: ageOverride ?? Math.round(Math.max(player.startAge ?? 20, getCurrentAge(gs)) * 10) / 10,
     type,
     description,
     cashBefore,
@@ -2354,10 +2355,13 @@ function settleQuarterMonths(
   settlementMonths = MONTHS_PER_GLOBAL_PAYDAY,
   growthCycles = GROWTH_CYCLES_PER_GLOBAL_PAYDAY,
 ): void {
+  // 復盤用：每 12 個月記一筆發薪事件，年齡依「距上次發薪經過的輪數」往前推，讓時間軸每輪一點
+  const yearsCovered = Math.max(1, Math.round(settlementMonths / MONTHS_PER_ROUND));
+  const currentAgeNow = Math.max(player.startAge ?? 20, getCurrentAge(gs));
+  let yearCashBefore = player.cash;
+  let yearFlowBefore = player.monthlyCashflow;
+  let yearWorthBefore = calcNetWorth(player);
   for (let month = 1; month <= settlementMonths; month += 1) {
-    const cashBefore = player.cash;
-    const cashflowBefore = player.monthlyCashflow;
-    const netWorthBefore = calcNetWorth(player);
     const dcaAsset = player.assets.find((asset) => asset.id === 'stock-dca');
     let dcaDividend = 0;
 
@@ -2369,16 +2373,24 @@ function settleQuarterMonths(
 
     triggerPayday(player, gs, maintenanceCovered, month <= growthCycles);
     if (month <= growthCycles && player.retirementStatus === 'consultant' && player.salary > 0) applyHPChange(player, -CONSULTANT_HP_COST_PER_CYCLE);
-    logPlayerEvent(
-      player,
-      gs,
-      'payday',
-      `第 ${gs.globalPaydayNumber + 1} 次發薪・第 ${month}/${settlementMonths} 月結算（累計第 ${player.paydayCount} 月）`,
-      cashBefore,
-      cashflowBefore,
-      netWorthBefore,
-      { globalPaydayNumber: gs.globalPaydayNumber + 1, monthInQuarter: month },
-    );
+    if (month % MONTHS_PER_ROUND === 0 || month === settlementMonths) {
+      const yearIndex = Math.ceil(month / MONTHS_PER_ROUND);
+      const eventAge = Math.round(currentAgeNow - (yearsCovered - yearIndex) * YEARS_PER_COMPLETED_ROUND);
+      logPlayerEvent(
+        player,
+        gs,
+        'payday',
+        `第 ${gs.globalPaydayNumber + 1} 次發薪・第 ${yearIndex}/${yearsCovered} 年結算（12 個月，現金 ${player.cash - yearCashBefore >= 0 ? '+' : '-'}$${Math.abs(player.cash - yearCashBefore).toLocaleString()}）`,
+        yearCashBefore,
+        yearFlowBefore,
+        yearWorthBefore,
+        { globalPaydayNumber: gs.globalPaydayNumber + 1, yearIndex, yearsCovered, monthsSettled: month },
+        eventAge,
+      );
+      yearCashBefore = player.cash;
+      yearFlowBefore = player.monthlyCashflow;
+      yearWorthBefore = calcNetWorth(player);
+    }
 
     if (dcaAsset) {
       const previousValue = dcaAsset.currentValue ?? dcaAsset.cost;
