@@ -124,7 +124,7 @@ test('結算達標免再擲骰：既有舞台不被蓋住、兩位依序揭曉�
   assert.equal(end.isPaused, false); assert.equal(announced, 2);
 });
 
-test('第三輪發薪：六個月、公開選項、重複提交只購買一次、未路過不能進圈', { timeout: 20000 }, async t => {
+test('第三輪發薪：全體同時規劃、六個月、公開選項、重複提交只購買一次、全員送出自動結算', { timeout: 20000 }, async t => {
   const { admin, a, b, sa, sb } = await fixture(t, 3224, false, 0);
   await send(admin, 'setPlayerStats', { targetPlayerId: sa.playerId, stats: { hp: 100 } }, 'gameStateUpdate', g => g.players.find(p => p.id === sa.playerId).stats.health === 100);
   await send(admin, 'setPlayerStats', { targetPlayerId: sb.playerId, stats: { hp: 100 } }, 'gameStateUpdate', g => g.players.find(p => p.id === sb.playerId).stats.health === 100);
@@ -132,20 +132,21 @@ test('第三輪發薪：六個月、公開選項、重複提交只購買一次�
     await send(i % 2 ? b : a, 'playerRoll', { diceCount: 1 }, 'gameStateUpdate', g => g.currentPlayerTurnId === (i % 2 ? sa.playerId : sb.playerId) && !g.decisionPhase);
   }
   const dataPromise = wait(a, 'paydayPlanningRequired');
+  const dataPromiseB = wait(b, 'paydayPlanningRequired');
   const phase = await send(b, 'playerRoll', { diceCount: 1 }, 'gameStateUpdate', g => g.decisionPhase?.kind === 'payday');
-  const data = await dataPromise;
+  const data = await dataPromise; await dataPromiseB;
+  assert.equal(phase.decisionPhase.playerId, '__all_players__', '全體同時規劃');
   assert.equal(data.settlementMonths, 6); assert.equal(data.basicInvestments.length, 3);
   assert.equal(phase.basicInvestmentOffers.length, 3);
   const plan = { phaseId: phase.decisionPhase.id, basicInvestmentId: 'basic-business', stockDCAAmount: 0, buyInsuranceTypes: [] };
-  await send(a, 'submitPaydayPlan', plan, 'decisionSubmitted');
+  const oneDone = await send(a, 'submitPaydayPlan', plan, 'gameStateUpdate', g => (g.actionPhaseDone ?? []).includes(sa.playerId));
+  assert.equal(oneDone.decisionPhase?.kind, 'payday', '一人送出還不結算');
   a.emit('submitPaydayPlan', plan);
-  const next = await send(admin, 'continueDecisionPhase', { phaseId: plan.phaseId }, 'gameStateUpdate', g => g.decisionPhase?.playerId === sb.playerId);
-  const pa = next.players.find(p => p.id === sa.playerId);
+  const end = await send(b, 'submitPaydayPlan', { phaseId: phase.decisionPhase.id, stockDCAAmount: 0, buyInsuranceTypes: [] }, 'gameStateUpdate', g => g.globalPaydayNumber === 1 && !g.globalPaydayInProgress);
+  const pa = end.players.find(p => p.id === sa.playerId);
   assert.equal(pa.paydayCount, 6);
-  assert.equal(pa.assets.filter(x => x.id.startsWith('basic-')).length, 1);
+  assert.equal(pa.assets.filter(x => x.id.startsWith('basic-')).length, 1, '重複送出只買一份');
   assert.equal(pa.isInFastTrack, false);
-  await send(b, 'submitPaydayPlan', { phaseId: next.decisionPhase.id, stockDCAAmount: 0, buyInsuranceTypes: [] }, 'decisionSubmitted');
-  const end = await send(admin, 'continueDecisionPhase', { phaseId: next.decisionPhase.id }, 'gameStateUpdate', g => g.globalPaydayNumber === 1 && !g.globalPaydayInProgress);
   assert.equal(end.players.find(p => p.id === sb.playerId).paydayCount, 6);
 });
 

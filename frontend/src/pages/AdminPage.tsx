@@ -587,6 +587,8 @@ export default function AdminPage() {
                 >
                   {decisionPhase.kind === 'actions'
                     ? `結束行動時間，開始擲骰 ▶（已完成 ${(gameState?.actionPhaseDone ?? []).length}/${players.filter((p: Player) => p.isAlive && !p.isDisconnected).length}）`
+                    : decisionPhase.kind === 'payday' && decisionPhase.playerId === '__all_players__'
+                    ? `未送出者以空白方案結束並結算 ▶（已送出 ${(gameState?.actionPhaseDone ?? []).length}/${players.filter((p: Player) => p.isAlive && !p.isDisconnected).length}）`
                     : decisionPhase.kind === 'auction'
                     ? '結束競標並揭曉 ▶'
                     : decisionPhase.submitted

@@ -396,6 +396,8 @@ export default function HostControlPage() {
             >
               {decisionPhase.kind === 'actions'
                 ? `結束行動時間，開始擲骰（${(gameState?.actionPhaseDone ?? []).length}/${players.filter((player) => player.isAlive && !player.isDisconnected).length} 已完成）`
+                : decisionPhase.kind === 'payday' && decisionPhase.playerId === '__all_players__'
+                ? `以空白方案結束並結算（${(gameState?.actionPhaseDone ?? []).length}/${players.filter((player) => player.isAlive && !player.isDisconnected).length} 已送出）`
                 : decisionPhase.kind === 'auction'
                 ? '結束競標並揭曉'
                 : decisionPhase.submitted

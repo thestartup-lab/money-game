@@ -795,7 +795,15 @@ export default function DisplayScreen() {
           >
             {gameState.globalPaydayInProgress && gameState.decisionPhase?.kind === 'payday' && gameState.basicInvestmentOffers?.length ? (
               <section className="h-full w-full overflow-y-auto bg-gray-950 p-8 text-white" aria-label="公開基本投資機會">
-                <h2 className="text-4xl font-black text-amber-200">{gameState.decisionPhase.playerName} 的發薪規劃</h2>
+                <h2 className="text-4xl font-black text-amber-200">{gameState.decisionPhase.playerId === '__all_players__' ? gameState.decisionPhase.title : `${gameState.decisionPhase.playerName} 的發薪規劃`}</h2>
+                {gameState.decisionPhase.playerId === '__all_players__' && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {gameState.players.filter((p) => p.isAlive).map((p) => {
+                      const done = (gameState.actionPhaseDone ?? []).includes(p.id);
+                      return <span key={p.id} className={`rounded-full px-4 py-1 text-xl font-bold ${done ? 'bg-emerald-700 text-white' : 'bg-gray-700 text-gray-300'}`}>{done ? '✓ ' : ''}{p.name}</span>;
+                    })}
+                  </div>
+                )}
                 <p className="my-4 text-2xl">一次配置，結算六個月收支。每人本次最多購買一份基本投資，也可以不買。</p>
                 <div className="grid gap-5">
                   {gameState.basicInvestmentOffers.map(offer => (
@@ -874,7 +882,7 @@ export default function DisplayScreen() {
                 <div className="w-full max-w-2xl rounded-3xl border-2 border-indigo-400 bg-gradient-to-br from-indigo-950/95 to-gray-950/95 px-10 py-9 text-center shadow-2xl">
                   <p className="text-sm font-bold uppercase tracking-[0.3em] text-indigo-300">全場決策時間</p>
                   <p className="mt-3 text-5xl font-black text-white">{gameState.decisionPhase.title}</p>
-                  {gameState.decisionPhase.kind === 'actions' ? (
+                  {gameState.decisionPhase.playerId === '__all_players__' && (gameState.decisionPhase.kind === 'actions' || gameState.decisionPhase.kind === 'payday') ? (
                     <div className="mx-auto mt-4 flex max-w-3xl flex-wrap justify-center gap-2">
                       {gameState.players.filter((p) => p.isAlive).map((p) => {
                         const done = (gameState.actionPhaseDone ?? []).includes(p.id);
@@ -894,8 +902,8 @@ export default function DisplayScreen() {
                   />
                   <div className={`mx-auto mt-6 inline-flex items-center gap-2 rounded-full px-5 py-2 text-lg font-bold ${gameState.decisionPhase.submitted ? 'bg-emerald-700 text-emerald-100' : 'bg-amber-700 text-amber-100'}`}>
                     <span className={`h-3 w-3 rounded-full ${gameState.decisionPhase.submitted ? 'bg-emerald-200' : 'animate-pulse bg-amber-200'}`} />
-                    {gameState.decisionPhase.kind === 'actions'
-                      ? `大家同時在手機處理行動，已完成 ${(gameState.actionPhaseDone ?? []).length}/${gameState.players.filter((p) => p.isAlive && !p.isDisconnected).length}`
+                    {gameState.decisionPhase.playerId === '__all_players__' && (gameState.decisionPhase.kind === 'actions' || gameState.decisionPhase.kind === 'payday')
+                      ? `大家同時在手機${gameState.decisionPhase.kind === 'payday' ? '填寫發薪規劃' : '處理行動'}，已完成 ${(gameState.actionPhaseDone ?? []).length}/${gameState.players.filter((p) => p.isAlive && !p.isDisconnected).length}`
                       : gameState.decisionPhase.kind === 'auction'
                       ? '公開競標進行中，主持人決定結束時間'
                       : gameState.decisionPhase.submitted

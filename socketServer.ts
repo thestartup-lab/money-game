@@ -1843,7 +1843,7 @@ function serializeGameState(gs: GameState): object {
     isManuallyPaused: gs.pausedAt !== null && !gs.decisionPhase && !gs.facilitatorScene,
     readingAutoContinueMs: gs.readingAutoContinueMs,
     autoRevealOnSubmit: gs.autoRevealOnSubmit,
-    actionPhaseDone: gs.decisionPhase?.kind === 'actions' ? [...gs.actionPhaseDone] : [],
+    actionPhaseDone: gs.decisionPhase?.playerId === '__all_players__' && (gs.decisionPhase.kind === 'actions' || gs.decisionPhase.kind === 'payday') ? [...gs.actionPhaseDone] : [],
     actionPhaseEnabled: gs.actionPhaseEnabled,
     activeAuctions: Object.entries(gs.activeAuctions ?? {}).map(([auctionId, a]) => ({
       auctionId,
@@ -2042,11 +2042,13 @@ async function runActionPhase(gs: GameState): Promise<void> {
 
 /** 全體在線存活玩家都按了完成 → 自動結束行動時間。 */
 function maybeCompleteActionPhase(gs: GameState): void {
-  if (gs.decisionPhase?.kind !== 'actions') return;
+  const phase = gs.decisionPhase;
+  if (!phase || phase.playerId !== '__all_players__' || (phase.kind !== 'actions' && phase.kind !== 'payday')) return;
   const waiting = [...gs.players.values()].filter((p) => p.isAlive && !p.isDisconnected && !gs.actionPhaseDone.has(p.id));
   if (waiting.length > 0) return;
+  phase.submitted = true;
   const waiter = decisionReleaseWaiters.get(gs.gameId);
-  if (waiter?.phaseId === gs.decisionPhase.id) waiter.release();
+  if (waiter?.phaseId === phase.id) waiter.release();
 }
 
 function continueAfterTurnAdvance(gs: GameState): void {
@@ -2375,23 +2377,94 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
   });
   emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
 
+  const emptyPlan: PaydayPlanPayload = {
+    investInFQUpgrade: false,
+    investInHealthMaintenance: false,
+    investInHealthBoost: false,
+    investInSkillTraining: false,
+    investInNetwork: false,
+    stockDCAAmount: 0,
+    buyInsuranceTypes: [],
+    settlementMonths: MONTHS_PER_GLOBAL_PAYDAY,
+  };
+
+  // ── 全體同時規劃：一個決策階段，每人各自在手機送出；全員送出自動結算 ──
+  const plans = new Map<string, PaydayPlanPayload>();
+  const context = beginHostDecisionPhase(
+    gs,
+    { id: '__all_players__', name: '全體玩家' },
+    'payday',
+    `第 ${gs.globalPaydayNumber + 1} 季全體發薪規劃`,
+    '所有人同時在手機填寫本季規劃；全員送出後自動結算，主持人也可提前以空白方案結束。',
+  );
+  gs.actionPhaseDone = new Set();
+  emitToRoom(roomId, 'paydayPlanningStarted', {
+    paydayPosition: -1,
+    settlementCount: MONTHS_PER_GLOBAL_PAYDAY,
+    settlementMonths: MONTHS_PER_GLOBAL_PAYDAY,
+    globalPayday: true,
+    globalPaydayNumber: gs.globalPaydayNumber + 1,
+    playerCount: playerIds.length,
+    currentAge: Math.round(getCurrentAge(gs) * 10) / 10,
+    timeoutMs: 0,
+    controlledByHost: true,
+  });
   for (const [index, playerId] of playerIds.entries()) {
     const player = gs.players.get(playerId);
     if (!player?.isAlive) continue;
-
     const playerSocket = getPlayerSocket(player.id);
-    const emptyPlan: PaydayPlanPayload = {
-      investInFQUpgrade: false,
-      investInHealthMaintenance: false,
-      investInHealthBoost: false,
-      investInSkillTraining: false,
-      investInNetwork: false,
-      stockDCAAmount: 0,
-      buyInsuranceTypes: [],
+    if (!playerSocket || player.isDisconnected) {
+      plans.set(player.id, emptyPlan);
+      gs.actionPhaseDone.add(player.id);
+      continue;
+    }
+    player.paydayPlanningPending = true;
+    emitClient(playerSocket, 'paydayPlanningRequired', {
+      paydayPosition: -1,
+      paydayIndex: index + 1,
+      totalPaydays: playerIds.length,
+      combinedPlanning: true,
       settlementMonths: MONTHS_PER_GLOBAL_PAYDAY,
-    };
-    let plan = emptyPlan;
+      globalPayday: true,
+      globalPaydayNumber: gs.globalPaydayNumber + 1,
+      currentStats: player.stats,
+      currentCash: player.cash,
+      affordableOptions: buildAffordableOptions(player, MONTHS_PER_GLOBAL_PAYDAY),
+      basicInvestments: BASIC_INVESTMENTS,
+      currentInsurance: player.insurance,
+      stockDCAPortfolioValue: player.assets.find((asset) => asset.id === 'stock-dca')?.currentValue ?? 0,
+      travelDestinations: getQuarterTravelDestinations(player),
+      timeoutMs: 0,
+      controlledByHost: true,
+      marketTip: null,
+    });
+    pendingSubmissions.set(player.id, {
+      phaseId: context.phaseId,
+      event: 'submitPaydayPlan',
+      submit: (value) => {
+        if (plans.has(player.id)) return; // 重複送出只算第一次
+        plans.set(player.id, (value as PaydayPlanPayload) ?? emptyPlan);
+        gs.actionPhaseDone.add(player.id);
+        emitClient(playerSocket, 'decisionSubmitted', { phaseId: context.phaseId });
+        emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+        maybeCompleteActionPhase(gs);
+      },
+    });
+  }
+  emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+  await waitForHostRelease(gs, context);
+  for (const playerId of playerIds) {
+    if (pendingSubmissions.get(playerId)?.phaseId === context.phaseId) pendingSubmissions.delete(playerId);
+    privateReplay.delete(playerId);
+  }
+  gs.actionPhaseDone = new Set();
 
+  // ── 依順序逐位結算 ──
+  for (const [index, playerId] of playerIds.entries()) {
+    const player = gs.players.get(playerId);
+    if (!player?.isAlive) continue;
+    const playerSocket = getPlayerSocket(player.id);
+    const plan = plans.get(player.id) ?? emptyPlan;
     emitToRoom(roomId, 'globalPaydayPlayerTurn', {
       playerId: player.id,
       playerName: player.name,
@@ -2399,57 +2472,6 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
       playerCount: playerIds.length,
       globalPaydayNumber: gs.globalPaydayNumber + 1,
     });
-
-    if (playerSocket && !player.isDisconnected) {
-      const decisionContext = beginHostDecisionPhase(
-        gs,
-        player,
-        'payday',
-        `第 ${gs.globalPaydayNumber + 1} 季發薪規劃（${index + 1}/${playerIds.length}）`,
-      );
-      player.paydayPlanningPending = true;
-
-      emitToRoom(roomId, 'paydayPlanningStarted', {
-        paydayPosition: -1,
-        settlementCount: MONTHS_PER_GLOBAL_PAYDAY,
-        settlementMonths: MONTHS_PER_GLOBAL_PAYDAY,
-        globalPayday: true,
-        globalPaydayNumber: gs.globalPaydayNumber + 1,
-        currentPlayerId: player.id,
-        currentPlayerName: player.name,
-        currentAge: Math.round(getCurrentAge(gs) * 10) / 10,
-        timeoutMs: 0,
-        controlledByHost: true,
-      });
-
-      emitClient(playerSocket, 'paydayPlanningRequired', {
-        paydayPosition: -1,
-        paydayIndex: index + 1,
-        totalPaydays: playerIds.length,
-        combinedPlanning: true,
-        settlementMonths: MONTHS_PER_GLOBAL_PAYDAY,
-        globalPayday: true,
-        globalPaydayNumber: gs.globalPaydayNumber + 1,
-        currentStats: player.stats,
-        currentCash: player.cash,
-        affordableOptions: buildAffordableOptions(player, MONTHS_PER_GLOBAL_PAYDAY),
-        basicInvestments: BASIC_INVESTMENTS,
-        currentInsurance: player.insurance,
-        stockDCAPortfolioValue: player.assets.find((asset) => asset.id === 'stock-dca')?.currentValue ?? 0,
-        travelDestinations: getQuarterTravelDestinations(player),
-        timeoutMs: 0,
-        controlledByHost: true,
-        marketTip: null,
-      });
-
-      plan = await waitForHostControlledDecision(
-        playerSocket,
-        gs,
-        decisionContext,
-        'submitPaydayPlan',
-        emptyPlan,
-      );
-    }
 
     const quarterlyPlan = { ...plan, settlementMonths: MONTHS_PER_GLOBAL_PAYDAY };
     const planResult = applyPaydayPlan(player, quarterlyPlan);
@@ -5684,9 +5706,10 @@ io.on('connection', (socket: Socket) => {
       else if (entry[1].setupStep === 'career') emitClient(socket, 'growthStatsApplied', { stats: player.stats, availableProfessions: getAvailableProfessions(player), canContinueEducation: !player.hasContinuedEducation });
       else if (entry[1].setupStep === 'allocate') emitClient(socket, 'socialClassRolled', { socialClass: player.socialClass, label: SOCIAL_CLASS_CONFIG[player.socialClass].label, growthPoints: player.growthPointsRemaining, startingCashBonus: 0 });
     }
-    if (gs.decisionPhase?.playerId === player.id) {
-      for (const [event, args] of privateReplay.get(player.id) ?? []) socket.emit(event, ...args);
-      if (gs.decisionPhase.submitted) emitClient(socket, 'decisionSubmitted', { phaseId: gs.decisionPhase.id });
+    if (gs.decisionPhase?.playerId === player.id || gs.decisionPhase?.playerId === '__all_players__') {
+      const alreadyDone = gs.decisionPhase.playerId === '__all_players__' && gs.actionPhaseDone.has(player.id);
+      if (!alreadyDone) for (const [event, args] of privateReplay.get(player.id) ?? []) socket.emit(event, ...args);
+      if (gs.decisionPhase.submitted || alreadyDone) emitClient(socket, 'decisionSubmitted', { phaseId: gs.decisionPhase.id });
     }
   });
 });

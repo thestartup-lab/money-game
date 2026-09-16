@@ -1332,7 +1332,10 @@ export default function PlayerPage() {
           {gameState.decisionPhase && gameState.decisionPhase.kind !== 'actions' && !paydayForm && (
             <div className="mx-4 mb-3 rounded-xl border border-indigo-700 bg-indigo-950/60 px-3 py-3 text-center">
               <p className="text-sm font-bold text-indigo-200">
-                {gameState.decisionPhase.kind === 'reading' ? '請抬頭看落格說明，等待主持人繼續' : gameState.decisionPhase.playerId === myId
+                {gameState.decisionPhase.kind === 'reading' ? '請抬頭看落格說明，等待主持人繼續'
+                  : gameState.decisionPhase.playerId === '__all_players__' && gameState.decisionPhase.kind === 'payday'
+                    ? ((gameState.actionPhaseDone ?? []).includes(myId) ? `你的規劃已送出，等待其他人（${(gameState.actionPhaseDone ?? []).length}/${gameState.players.filter((p) => p.isAlive && !p.isDisconnected).length}）` : '請在手機填寫本季發薪規劃')
+                  : gameState.decisionPhase.playerId === myId
                   ? gameState.decisionPhase.submitted ? (gameState.autoRevealOnSubmit !== false ? '選擇已送出，揭曉中…' : '選擇已送出，等待主持人揭曉') : '請在手機完成私人決策'
                   : `${gameState.decisionPhase.playerName} 正在決策`}
               </p>
