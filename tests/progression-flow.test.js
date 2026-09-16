@@ -139,7 +139,7 @@ test('第三輪發薪：全體同時規劃、六個月、公開選項、重複�
   const phase = await send(b, 'playerRoll', { diceCount: 1 }, 'gameStateUpdate', g => g.decisionPhase?.kind === 'payday');
   const data = await dataPromise; await dataPromiseB;
   assert.equal(phase.decisionPhase.playerId, '__all_players__', '全體同時規劃');
-  assert.equal(data.settlementMonths, 36, '三輪 × 12 個月'); assert.equal(data.growthCycles, 3); assert.equal(data.basicInvestments.length, 3);
+  assert.equal(data.settlementMonths, 72, '三輪 × 24 個月'); assert.equal(data.growthCycles, 3); assert.equal(data.basicInvestments.length, 3);
   assert.equal(phase.basicInvestmentOffers.length, 3);
   const plan = { phaseId: phase.decisionPhase.id, basicInvestmentId: 'basic-business', stockDCAAmount: 0, buyInsuranceTypes: [] };
   const oneDone = await send(a, 'submitPaydayPlan', plan, 'gameStateUpdate', g => (g.actionPhaseDone ?? []).includes(sa.playerId));
@@ -147,10 +147,10 @@ test('第三輪發薪：全體同時規劃、六個月、公開選項、重複�
   a.emit('submitPaydayPlan', plan);
   const end = await send(b, 'submitPaydayPlan', { phaseId: phase.decisionPhase.id, stockDCAAmount: 0, buyInsuranceTypes: [] }, 'gameStateUpdate', g => g.globalPaydayNumber === 1 && !g.globalPaydayInProgress);
   const pa = end.players.find(p => p.id === sa.playerId);
-  assert.equal(pa.paydayCount, 36);
+  assert.equal(pa.paydayCount, 72);
   assert.equal(pa.assets.filter(x => x.id.startsWith('basic-')).length, 1, '重複送出只買一份');
   assert.equal(pa.isInFastTrack, false);
-  assert.equal(end.players.find(p => p.id === sb.playerId).paydayCount, 36);
+  assert.equal(end.players.find(p => p.id === sb.playerId).paydayCount, 72);
 });
 
 test('致死危機先開自救階段：本人可借款，補不足才死亡', { timeout: 20000 }, async t => {
@@ -221,18 +221,18 @@ test('每輪開始的全體行動時間：擲骰被擋、財務操作開放、�
   assert.ok(rolled);
 });
 
-test('計時發薪：主持人立即發薪要等一輪完成、排在行動結束後、結算月數＝經過輪數×12', { timeout: 20000 }, async t => {
+test('計時發薪：主持人立即發薪要等一輪完成、排在行動結束後、結算月數＝經過輪數×24', { timeout: 20000 }, async t => {
   const { admin, a, b, sa, sb } = await fixture(t, 3240, false, 0);
   await send(admin, 'setPaydayTimer', { minutes: 10, enabled: true }, 'gameStateUpdate', g => g.paydayTimer?.enabled === true);
   assert.match((await send(admin, 'triggerPaydayNow', undefined, 'error')).message, /一輪/);
   await send(a, 'playerRoll', { diceCount: 1 }, 'gameStateUpdate', g => g.currentPlayerTurnId === sb.playerId && !g.decisionPhase && !g.turnInProgress);
   await send(b, 'playerRoll', { diceCount: 1 }, 'gameStateUpdate', g => g.currentPlayerTurnId === sa.playerId && !g.decisionPhase && !g.turnInProgress && g.turnNumber === 1);
   const phase = await send(admin, 'triggerPaydayNow', undefined, 'gameStateUpdate', g => g.decisionPhase?.kind === 'payday');
-  assert.equal(phase.paydayTimer.settlementMonths, 12);
-  assert.match(phase.decisionPhase.title, /1 年/);
+  assert.equal(phase.paydayTimer.settlementMonths, 24);
+  assert.match(phase.decisionPhase.title, /1 輪 × 24 個月/);
   await send(a, 'submitPaydayPlan', { phaseId: phase.decisionPhase.id, stockDCAAmount: 0, buyInsuranceTypes: [] }, 'decisionSubmitted');
   const end = await send(b, 'submitPaydayPlan', { phaseId: phase.decisionPhase.id, stockDCAAmount: 0, buyInsuranceTypes: [] }, 'gameStateUpdate', g => g.globalPaydayNumber === 1 && !g.globalPaydayInProgress);
-  assert.equal(end.players.find(p => p.id === sa.playerId).paydayCount, 12);
+  assert.equal(end.players.find(p => p.id === sa.playerId).paydayCount, 24);
   assert.equal(end.paydayTimer.roundsSince, 0);
 });
 

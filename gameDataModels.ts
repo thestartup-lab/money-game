@@ -20,7 +20,11 @@ import {
 } from './gameConstants';
 import { Deck, DealCard, DoodadCard, CrisisCard, MarketCard, SMALL_DEALS, BIG_DEALS, DOODADS, CRISIS_EVENTS, MARKET_CARDS } from './gameCards';
 import type { AdminGlobalEvent, GlobalEventEffect } from './adminEvents';
-import { SENIOR_MEDICAL_HP, SENIOR_MEDICAL_EXPENSE, SENIOR_CARE_HP, SENIOR_CARE_EXPENSE } from './gameConfig';
+import {
+  SENIOR_MEDICAL_HP, SENIOR_MEDICAL_EXPENSE, SENIOR_CARE_HP, SENIOR_CARE_EXPENSE, MONTHS_PER_ROUND,
+  CHILD_EXPENSE_BY_AGE, SOCIAL_INSURANCE_RATE, PREMIUM_MULT_BY_STAGE, LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS,
+} from './gameConfig';
+import type { Lifestyle, HealthHabit } from './gameConfig';
 
 // ============================================================
 // ENUMS — 定義於 gameConstants.ts，此處透過 re-export 保留向後相容性
@@ -137,6 +141,8 @@ export interface Asset {
   currentValue: number;
   /** 對應的負債 ID，例如房貸 Liability 的 id */
   linkedLiabilityId?: string;
+  /** 自住房：不算被動收入、不配息、出售免資本利得稅 */
+  isResidence?: boolean;
 }
 
 /** 負債 */
@@ -166,6 +172,8 @@ export interface InsuranceState {
  */
 export interface Expenses {
   taxes: number;
+  /** 租屋月租（買房後歸零） */
+  rent: number;
   homeMortgagePayment: number;
   carLoanPayment: number;
   creditCardPayment: number;
@@ -290,6 +298,10 @@ export interface PaydayPlanPayload {
   stockDCAAmount: number;
   /** 本次購買的保險類型（已持有的將被跳過）*/
   buyInsuranceTypes: Array<'medical' | 'life' | 'property'>;
+  /** 生活方式（節儉／普通／享受），送出後持續到下次更改 */
+  lifestyle?: Lifestyle;
+  /** 健康習慣（規律運動／普通／熬夜加班） */
+  healthHabit?: HealthHabit;
   /** 發薪日同步選擇的生活行動；由主持人收束決策後才執行。 */
   lifeChoice?:
     | { type: 'none' }
@@ -310,6 +322,7 @@ const DEFAULT_INSURANCE_STATE: InsuranceState = {
 const DEFAULT_EXPENSES: Expenses = {
   taxes: 0,
   homeMortgagePayment: 0,
+  rent: 0,
   carLoanPayment: 0,
   creditCardPayment: 0,
   otherExpenses: 0,
@@ -565,6 +578,28 @@ export class Player {
    */
   milestonesPassed: { age40: boolean; age60: boolean; age80: boolean };
 
+  // --- 真實人生擬真 ---
+  /** 伺服器每輪同步的個人年齡（支出分段、保費倍率用） */
+  currentAge: number;
+  /** 累積薪資成長倍率（每輪依階段成長；升遷永久加薪） */
+  salaryGrowthMultiplier: number;
+  /** 生活成本上漲倍率（其他支出、房租） */
+  livingCostMultiplier: number;
+  /** 每個孩子出生時的本人年齡 */
+  childBirthAges: number[];
+  /** 生活方式 */
+  lifestyle: Lifestyle;
+  /** 健康習慣 */
+  healthHabit: HealthHabit;
+  /** 配偶（含收入與失業狀態）；未婚為 null */
+  spouse: { income: number; unemployedMonthsLeft: number; retired: boolean } | null;
+  /** 住房：租屋或自有 */
+  housing: 'rent' | 'own';
+  /** 奉養父母／長照等暫時性月支出 */
+  recurringExpenses: { id: string; label: string; monthly: number; monthsLeft: number }[];
+  /** 已被裁員總月數（復盤用） */
+  layoffMonthsTotal: number;
+
   constructor(id: string, name: string, profession: Profession) {
     this.id = id;
     this.name = name;
@@ -577,7 +612,9 @@ export class Player {
     this.expenses = {
       ...DEFAULT_EXPENSES,
       taxes: profession.startingTaxes,
-      homeMortgagePayment: profession.startingHomeMortgage,
+      // 開局租屋：職業設定的「房貸」數字改為月租；買房後才有房貸
+      rent: profession.startingHomeMortgage,
+      homeMortgagePayment: 0,
       carLoanPayment: profession.startingCarLoan,
       creditCardPayment: profession.startingCreditCard,
       otherExpenses: profession.startingOtherExpenses,
@@ -641,11 +678,88 @@ export class Player {
     this.charityTotal = 0;
     this.bucketList = [];
     this.milestonesPassed = { age40: false, age60: false, age80: false };
+
+    this.currentAge = 20;
+    this.salaryGrowthMultiplier = 1;
+    this.livingCostMultiplier = 1;
+    this.childBirthAges = [];
+    this.lifestyle = 'normal';
+    this.healthHabit = 'normal';
+    this.spouse = null;
+    this.housing = 'rent';
+    this.recurringExpenses = [];
+    this.layoffMonthsTotal = 0;
+  }
+
+  /** 目前人生階段（依 currentAge） */
+  get lifeStage(): LifeStage {
+    const age = this.currentAge;
+    if (age < 35) return LifeStage.Youth;
+    if (age < 50) return LifeStage.Family;
+    if (age < 65) return LifeStage.Transition;
+    if (age < 80) return LifeStage.Retirement;
+    return LifeStage.Legacy;
+  }
+
+  /** 子女支出：依每個孩子目前年齡分段，成年後為 0 */
+  get childExpenses(): number {
+    return this.childBirthAges.reduce((sum, bornAt) => {
+      const childAge = this.currentAge - bornAt;
+      const tier = CHILD_EXPENSE_BY_AGE.find((t) => childAge <= t.maxAge);
+      return sum + (tier ? tier.monthly : 0);
+    }, 0);
+  }
+
+  /** 尚未成年的子女數（節稅扶養用） */
+  get dependentChildren(): number {
+    const lastTier = CHILD_EXPENSE_BY_AGE[CHILD_EXPENSE_BY_AGE.length - 1];
+    return this.childBirthAges.filter((bornAt) => this.currentAge - bornAt <= lastTier.maxAge).length;
+  }
+
+  /** 勞健保：有薪工作者薪資 × 5%（退休金、顧問不算） */
+  get socialInsurance(): number {
+    if (this.retirementStatus !== 'working' || this.salary <= 0) return 0;
+    return Math.round(this.salary * SOCIAL_INSURANCE_RATE);
+  }
+
+  /** 保費（隨年齡上升） */
+  get insurancePremiums(): number {
+    const mult = PREMIUM_MULT_BY_STAGE[this.lifeStage] ?? 1;
+    const base =
+      (this.insurance.hasMedicalInsurance ? MEDICAL_INSURANCE_PREMIUM : 0) +
+      (this.insurance.hasLifeInsurance ? LIFE_INSURANCE_PREMIUM : 0) +
+      (this.insurance.hasPropertyInsurance ? PROPERTY_INSURANCE_PREMIUM : 0);
+    return Math.round(base * mult);
+  }
+
+  /** 生活支出（其他支出 × 生活方式 × 生活成本上漲）＋ 健康習慣附帶支出 */
+  get livingExpenses(): number {
+    const style = LIFESTYLE_OPTIONS[this.lifestyle] ?? LIFESTYLE_OPTIONS.normal;
+    const habit = HEALTH_HABIT_OPTIONS[this.healthHabit] ?? HEALTH_HABIT_OPTIONS.normal;
+    return Math.round(this.expenses.otherExpenses * style.expenseMultiplier * this.livingCostMultiplier) + habit.monthlyCost;
+  }
+
+  /** 房租（隨生活成本上漲；買房後為 0） */
+  get rentExpense(): number {
+    if (this.housing === 'own') return 0;
+    return Math.round((this.expenses.rent ?? 0) * this.livingCostMultiplier);
+  }
+
+  /** 配偶收入（失業中為 0） */
+  get spouseIncome(): number {
+    if (!this.spouse) return 0;
+    return this.spouse.unemployedMonthsLeft > 0 ? 0 : this.spouse.income;
+  }
+
+  /** 暫時性月支出（奉養父母等）加總 */
+  get recurringExpenseTotal(): number {
+    return this.recurringExpenses.reduce((sum, r) => sum + (r.monthsLeft > 0 ? r.monthly : 0), 0);
   }
 
   /** 所有資產的每月現金流總和 */
   get totalPassiveIncome(): number {
     return this.assets.reduce((sum, asset) => {
+      if (asset.isResidence) return sum;
       const multiplier = this.worldEffects.reduce((factor, entry) =>
         entry.effect.type === 'CashflowChange' && entry.effect.targetAssetType === asset.type
           ? factor * (entry.effect.multiplier ?? 1) : factor, 1);
@@ -680,7 +794,7 @@ export class Player {
   get totalIncome(): number {
     const fqMultiplier = FQ_MULTIPLIERS[this.stats.financialIQ] ?? 1.0;
     const ftMultiplier = this.isInFastTrack ? FAST_TRACK_INCOME_MULTIPLIER : 1.0;
-    return this.salary + Math.round(this.totalPassiveIncome * fqMultiplier * ftMultiplier) + this.marriageBonus;
+    return this.salary + Math.round(this.totalPassiveIncome * fqMultiplier * ftMultiplier) + this.marriageBonus + this.spouseIncome;
   }
 
   /**
@@ -692,35 +806,26 @@ export class Player {
    */
   get totalExpenses(): number {
     const e = this.expenses;
-
-    const insurancePremiums =
-      (this.insurance.hasMedicalInsurance ? MEDICAL_INSURANCE_PREMIUM : 0) +
-      (this.insurance.hasLifeInsurance ? LIFE_INSURANCE_PREMIUM : 0) +
-      (this.insurance.hasPropertyInsurance ? PROPERTY_INSURANCE_PREMIUM : 0);
-
-    const childExpenses = this.numberOfChildren * PER_CHILD_EXPENSE;
-
-    // 找出「有擔保的負債 id」（資產綁定）
     const securedLiabilityIds = new Set(
-      this.assets
-        .map((a) => a.linkedLiabilityId)
-        .filter((id): id is string => Boolean(id))
+      this.assets.map((a) => a.linkedLiabilityId).filter((id): id is string => Boolean(id))
     );
-    // 無擔保負債的月付加總
     const unsecuredLoanPayments = this.liabilities
       .filter((l) => !securedLiabilityIds.has(l.id))
       .reduce((sum, l) => sum + (l.monthlyPayment ?? 0), 0);
 
     return (
       e.taxes +
+      this.socialInsurance +
       this.seniorCareExpense +
+      this.rentExpense +
       e.homeMortgagePayment +
       e.carLoanPayment +
       e.creditCardPayment +
-      e.otherExpenses +
+      this.livingExpenses +
       this.worldExpenseAdjustment +
-      insurancePremiums +
-      childExpenses +
+      this.insurancePremiums +
+      this.childExpenses +
+      this.recurringExpenseTotal +
       unsecuredLoanPayments
     );
   }
@@ -754,6 +859,8 @@ export class GameState {
   retirementQueue: string[] = [];
   /** 主持人自訂結婚禮金（null = 用預設表 + 隨機浮動） */
   marriageGiftOverride: number | null = null;
+  /** 每輪結算月數（12／24／48） */
+  monthsPerRound = MONTHS_PER_ROUND;
   /** 計時發薪：開關、間隔、上次發薪時的「有效經過時間」與輪數 */
   paydayTimerEnabled = true;
   paydayIntervalMs = 10 * 60 * 1000;

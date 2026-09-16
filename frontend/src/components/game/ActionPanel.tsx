@@ -70,6 +70,7 @@ interface Props {
   onLoanOffer: (targetId: string, amount: number, monthlyRate: number) => void;
   onLoanRequest: (targetId: string, amount: number, monthlyRate: number) => void;
   onSellAsset: (assetId: string) => void;
+  onBuyHome?: (optionId: string) => void;
   onRequestAnalysis: () => void;
   isGameOver: boolean;
   careerChangeData?: {
@@ -102,6 +103,7 @@ export default function ActionPanel({
   onLoanOffer,
   onLoanRequest,
   onSellAsset,
+  onBuyHome,
   onRequestAnalysis,
   isGameOver,
   careerChangeData,
@@ -116,6 +118,8 @@ export default function ActionPanel({
   const [leverageAssetName, setLeverageAssetName] = useState('');
   const [showDCAPanel, setShowDCAPanel] = useState(false);
   const [showP2PPanel, setShowP2PPanel] = useState(false);
+  const [homeConfirmId, setHomeConfirmId] = useState<string | null>(null);
+  const [showHomePanel, setShowHomePanel] = useState(false);
   const [p2pMode, setP2pMode] = useState<'lend' | 'borrow'>('lend');
   const [p2pTarget, setP2pTarget] = useState('');
   const [p2pAmount, setP2pAmount] = useState(75_000);
@@ -245,6 +249,50 @@ export default function ActionPanel({
                 </button>
                 {socialReason && <p className="text-[11px] leading-snug text-orange-300">{socialReason}</p>}
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── 住房：租屋 vs 買房 ───────────── */}
+      {!isGameOver && onBuyHome && (
+        <div className="card">
+          <div className="flex justify-between items-center mb-2">
+            <p className="text-xs text-gray-400">住房</p>
+            <span className={`text-xs px-2 py-0.5 rounded-full ${player.housing === 'own' ? 'bg-emerald-900 text-emerald-300' : 'bg-gray-700 text-gray-300'}`}>
+              {player.housing === 'own' ? `🏠 自有（房貸 $${fmt(player.expenses.homeMortgagePayment)}/月）` : `🔑 租屋 $${fmt(player.expenses.rent ?? 0)}/月`}
+            </span>
+          </div>
+          {player.housing === 'own' ? (
+            <p className="text-sm text-gray-300">房子在「持有資產」清單可以出售（市價 − 剩餘房貸 − 3% 稅費），賣掉後回到租屋。房貸可用「提前還款」降低月付。</p>
+          ) : !showHomePanel ? (
+            <button className="btn-secondary w-full text-sm" onClick={() => setShowHomePanel(true)}>🏠 看看買房選項（頭期款 20%、30 年房貸年利 2.4%）</button>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-gray-300">房租會隨物價上漲；買房後不付房租，房價隨房市漲跌，出售免資本利得稅。</p>
+                <button className="text-xs text-gray-400 underline shrink-0" onClick={() => { setShowHomePanel(false); setHomeConfirmId(null); }}>收起</button>
+              </div>
+              {(player.homeOffers ?? []).map((o) => (
+                <div key={o.id} className={`rounded-xl border p-3 ${o.affordable ? 'border-gray-600 bg-gray-800' : 'border-gray-700 bg-gray-800/60'}`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-bold text-white">{o.name}</span>
+                    <span className="text-sm text-gray-200">${fmt(o.price)}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-300">頭期款 ${fmt(o.downPayment)} ＋ 稅費 ${fmt(o.transactionCost)}；房貸 ${fmt(o.loan)}，每月 ${fmt(o.monthlyPayment)}
+                    <span className={o.monthlyDelta >= 0 ? ' text-emerald-300' : ' text-amber-300'}>（比房租{o.monthlyDelta >= 0 ? '省' : '多'} ${fmt(Math.abs(o.monthlyDelta))}/月）</span></p>
+                  {!o.affordable && <p className="mt-1 text-xs text-red-300">✗ {o.reason}</p>}
+                  {o.affordable && homeConfirmId !== o.id && (
+                    <button className="btn-primary mt-2 w-full text-sm" onClick={() => setHomeConfirmId(o.id)}>買下 {o.name}</button>
+                  )}
+                  {homeConfirmId === o.id && (
+                    <div className="mt-2 flex gap-2">
+                      <button className="btn-primary flex-1 text-sm" onClick={() => { onBuyHome(o.id); setHomeConfirmId(null); setShowHomePanel(false); }}>確認付 ${fmt(o.cashNeeded)}</button>
+                      <button className="btn-secondary text-sm" onClick={() => setHomeConfirmId(null)}>取消</button>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -666,7 +714,7 @@ export default function ActionPanel({
         <div className="card">
           <p className="text-xs text-gray-400 mb-2">持有資產</p>
           <div className="space-y-2">
-            {player.assets.filter((asset) => !asset.id.startsWith('home-') && !asset.id.startsWith('car-')).map((asset) => {
+            {player.assets.filter((asset) => !asset.id.startsWith('car-')).map((asset) => {
               const isSellConfirming = sellConfirmId === asset.id;
               const netChange = (asset.currentValue ?? asset.cost) - (asset.linkedLiabilityId
                 ? (player.liabilities?.find((l) => l.id === asset.linkedLiabilityId)?.totalDebt ?? 0)

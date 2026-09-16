@@ -29,6 +29,13 @@ import { FAST_TRACK_BOARD, FAST_TRACK_PAYDAY_LOCATIONS } from './gameCards';
 import { AdminGlobalEvent } from './adminEvents';
 import { applyAnnualTax, AnnualTaxResult } from './taxSystem';
 import { applyHPDecay, applyNTAutoGrowth } from './statsSystem';
+import {
+  SALARY_GROWTH_BY_STAGE, SALARY_GROWTH_SKILL_THRESHOLD, SALARY_GROWTH_SKILL_BONUS,
+  LIVING_COST_GROWTH_PER_ROUND, LIVING_COST_GROWTH_STOP_AGE, LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS,
+  LAYOFF_MONTHS_BY_STAGE, SPOUSE_INCOME_RATIO_MIN, SPOUSE_INCOME_RATIO_MAX, SPOUSE_INCOME_MIN, SPOUSE_INCOME_MAX, SPOUSE_RETIRED_RATIO,
+  CAPITAL_GAINS_TAX_RATE, NATURAL_DEATH_MIN_AGE, NATURAL_DEATH_BASE_PROBABILITY, NATURAL_DEATH_HP_FACTOR,
+} from './gameConfig';
+import { sellHome } from './householdLoans';
 import { applyHouseholdRepayment, isHouseholdAsset } from './householdLoans';
 
 // ============================================================
@@ -179,14 +186,15 @@ export function triggerPayday(player: Player, gameState: GameState, maintenanceD
   const salaryMult = SALARY_MULT_BY_STAGE[stage];
 
   // 裁員期間薪資計為 0，每次發薪遞減剩餘裁員發薪日
+  const habit = HEALTH_HABIT_OPTIONS[player.healthHabit] ?? HEALTH_HABIT_OPTIONS.normal;
   if (player.downsizingTurnsLeft > 0) {
     player.salary = 0;
     player.downsizingTurnsLeft -= 1;
   } else if (player.profession.salaryType !== 'fixed') {
-    player.salary = Math.round(calculateCurrentSalary(player) * salaryMult);
+    player.salary = Math.round(calculateCurrentSalary(player) * salaryMult * player.salaryGrowthMultiplier * habit.salaryMultiplier);
   } else {
-    // fixed 薪資也套用倍率（退休/傳承期減半或歸零）
-    player.salary = Math.round(player.profession.startingSalary * salaryMult);
+    // fixed 薪資：起薪 × 年資成長 × 健康習慣（熬夜加班 +5%）
+    player.salary = Math.round(player.profession.startingSalary * salaryMult * player.salaryGrowthMultiplier * habit.salaryMultiplier);
   }
 
   // 永久月薪加成（決策回聲等）
@@ -222,6 +230,12 @@ export function triggerPayday(player: Player, gameState: GameState, maintenanceD
     player.salaryTotalEarned += player.salary;
   }
 
+  // 65 歲後配偶也退休：收入改為 40%
+  if (player.isSenior && player.spouse && !player.spouse.retired) {
+    player.spouse.income = Math.round(player.spouse.income * SPOUSE_RETIRED_RATIO);
+    player.spouse.retired = true;
+  }
+
   player.cash += player.monthlyCashflow;
   player.paydayCount += 1;
 
@@ -229,13 +243,81 @@ export function triggerPayday(player: Player, gameState: GameState, maintenanceD
     adjustCreditScore(player, CREDIT_CHANGE_NEGATIVE_CF);
   }
 
+  // 暫時性狀態逐月遞減：配偶失業、奉養父母等
+  if (player.spouse && player.spouse.unemployedMonthsLeft > 0) player.spouse.unemployedMonthsLeft -= 1;
+  for (const r of player.recurringExpenses) if (r.monthsLeft > 0) r.monthsLeft -= 1;
+  player.recurringExpenses = player.recurringExpenses.filter((r) => r.monthsLeft > 0);
+
   if (growthCycle) {
     player.growthPaydayCount += 1;
-    applyHPDecay(player, maintenanceDone, stage);
+    applyHPDecay(player, maintenanceDone, stage, habit.decayMultiplier);
     applyNTAutoGrowth(player, player.growthPaydayCount);
+    applyRoundGrowth(player, stage);
   }
 
   return player;
+}
+
+/**
+ * 每輪一次的「真實人生」成長：薪資年資成長、生活成本上漲、生活方式效果。
+ * 由 triggerPayday 在成長週期呼叫（每輪一次）。
+ */
+export function applyRoundGrowth(player: Player, stage: LifeStage): void {
+  const personalAge = player.currentAge;
+  // 薪資實質成長（只有在職者；退休／顧問／創業者沒有）
+  if (player.retirementStatus === 'working' && player.profession.startingSalary + (player.profession.salaryBase ?? 0) + (player.profession.maxSalary ?? 0) > 0) {
+    let growth = SALARY_GROWTH_BY_STAGE[stage] ?? 0;
+    if (growth > 0 && player.stats.careerSkill >= SALARY_GROWTH_SKILL_THRESHOLD) growth += SALARY_GROWTH_SKILL_BONUS;
+    if (growth > 0) {
+      player.salaryGrowthMultiplier = Math.round(player.salaryGrowthMultiplier * (1 + growth) * 1000) / 1000;
+      if (player.spouse && !player.spouse.retired) player.spouse.income = Math.round(player.spouse.income * (1 + growth));
+    }
+  }
+  // 生活成本上漲（通膨＋生活水準），65 歲後停止
+  if (personalAge < LIVING_COST_GROWTH_STOP_AGE) {
+    player.livingCostMultiplier = Math.round(player.livingCostMultiplier * (1 + LIVING_COST_GROWTH_PER_ROUND) * 1000) / 1000;
+  }
+  // 生活方式：節儉 HP −2／輪、享受 體驗 +5／輪
+  const style = LIFESTYLE_OPTIONS[player.lifestyle] ?? LIFESTYLE_OPTIONS.normal;
+  if (style.hpPerRound) player.stats.health = Math.max(0, Math.min(100, player.stats.health + style.hpPerRound));
+  if (style.lifeExpPerRound) addLifeExperience(player, style.lifeExpPerRound);
+}
+
+/** 每輪同步所有玩家的個人年齡（支出分段、保費倍率、自然壽命用） */
+export function syncPlayerAges(gameState: GameState): void {
+  const age = getCurrentAge(gameState);
+  for (const player of gameState.players.values()) {
+    player.currentAge = Math.max(player.startAge ?? 20, age);
+  }
+}
+
+/** 裁員月數：依人生階段，SK ≥ 60 減半（無條件進位） */
+export function getLayoffMonths(player: Player): number {
+  const base = LAYOFF_MONTHS_BY_STAGE[player.lifeStage] ?? 0;
+  if (base <= 0) return 0;
+  return player.stats.careerSkill >= SALARY_GROWTH_SKILL_THRESHOLD ? Math.ceil(base / 2) : base;
+}
+
+/** 結婚時建立配偶：收入 = 本人薪資 × 隨機 0.5–0.9，夾在 $20,000–$120,000 */
+export function createSpouse(player: Player, ratioScale = 1): { income: number; unemployedMonthsLeft: number; retired: boolean } {
+  const ratio = SPOUSE_INCOME_RATIO_MIN + Math.random() * (SPOUSE_INCOME_RATIO_MAX - SPOUSE_INCOME_RATIO_MIN);
+  const base = Math.max(player.salary, player.profession.startingSalary, SPOUSE_INCOME_MIN);
+  const income = Math.round(Math.min(SPOUSE_INCOME_MAX, Math.max(SPOUSE_INCOME_MIN, base * ratio * ratioScale)) / 100) * 100;
+  const spouse = { income, unemployedMonthsLeft: 0, retired: player.isSenior };
+  if (player.isSenior) spouse.income = Math.round(income * SPOUSE_RETIRED_RATIO);
+  player.spouse = spouse;
+  return spouse;
+}
+
+/** 80 歲起每輪自然壽命判定機率 */
+export function naturalDeathProbability(player: Player): number {
+  if (player.currentAge < NATURAL_DEATH_MIN_AGE) return 0;
+  return Math.min(0.6, NATURAL_DEATH_BASE_PROBABILITY + (100 - Math.max(0, player.stats.health)) * NATURAL_DEATH_HP_FACTOR);
+}
+
+export function checkNaturalDeath(player: Player): boolean {
+  const p = naturalDeathProbability(player);
+  return p > 0 && Math.random() < p;
 }
 
 /**
@@ -470,6 +552,8 @@ export function adjustCreditScore(player: Player, delta: number): void {
 // ── 出售資產 ──────────────────────────────────────────────
 
 export interface SellAssetResult {
+  /** 資本利得稅（自住房為 0） */
+  capitalGainsTax?: number;
   success: boolean;
   message?: string;
   assetId?: string;
@@ -487,7 +571,12 @@ export interface SellAssetResult {
  */
 export function sellAsset(player: Player, assetId: string): SellAssetResult {
   if (assetId.startsWith('p2p-')) return { success: false, message: '玩家借貸債權不能直接出售，須由借款人還款結清。' };
-  if (isHouseholdAsset(assetId)) return { success: false, message: '自住房與自用車不能出售；想降低月付請用「提前還款」。' };
+  if (assetId.startsWith('home-')) {
+    const home = sellHome(player);
+    if (!home.success) return { success: false, message: home.message };
+    return { success: true, assetId, proceeds: home.proceeds, debtSettled: home.debtSettled, netCashChange: home.netCashChange, capitalGainsTax: 0, message: home.message };
+  }
+  if (isHouseholdAsset(assetId)) return { success: false, message: '自用車不能出售；想降低月付請用「提前還款」。' };
   const assetIndex = player.assets.findIndex((a) => a.id === assetId);
   if (assetIndex === -1) {
     return { success: false, message: `找不到資產 ID：${assetId}` };
@@ -505,11 +594,14 @@ export function sellAsset(player: Player, assetId: string): SellAssetResult {
     }
   }
 
-  const netCashChange = proceeds - debtSettled;
+  // 資本利得稅：賣價高於成本的部分課 20%（自住房免稅，由 sellHome 處理）
+  const gain = Math.max(0, proceeds - (asset.cost ?? proceeds));
+  const capitalGainsTax = Math.round(gain * CAPITAL_GAINS_TAX_RATE);
+  const netCashChange = proceeds - debtSettled - capitalGainsTax;
   player.cash += netCashChange;
   player.assets.splice(assetIndex, 1);
 
-  return { success: true, assetId, proceeds, debtSettled, netCashChange };
+  return { success: true, assetId, proceeds, debtSettled, netCashChange, capitalGainsTax };
 }
 
 // ── 保險購買 / 取消 ──────────────────────────────────────
@@ -1345,6 +1437,7 @@ export function confirmMarriage(
   player.marriageBonus = bonus;
   player.lifeExperience += lifeExp;
   player.relationshipActive = false;  // 路徑完成
+  createSpouse(player);
 
   return {
     success: true,
@@ -1391,6 +1484,7 @@ export function buyArrangedMarriage(player: Player, currentAge: number): Confirm
   player.marriageType = 'arranged';
   player.marriageBonus = bonus;
   player.lifeExperience += LIFE_EXP.MARRIAGE_ARRANGED;
+  createSpouse(player, 0.8);
 
   return {
     success: true,

@@ -6,6 +6,9 @@ import { repayRoomLoan, validatePlayerLoan } from './playerLoans';
 import { GameState, Player, PaydayPlanPayload, GamePhase, PlayerEvent, PlayerEventType, DecisionPhaseState, FacilitatorSceneState, AssetType } from './gameDataModels';
 import { previewCareerChange } from './careerStage';
 import { BASIC_INVESTMENTS, buyBasicInvestment } from './basicInvestments';
+import { getHomeOffers, buyHome } from './householdLoans';
+import { syncPlayerAges, getLayoffMonths, createSpouse, checkNaturalDeath, naturalDeathProbability } from './gameLogic';
+import { LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS, MONTHS_PER_ROUND_OPTIONS, CHILD_EXPENSE_BY_AGE, SOCIAL_INSURANCE_RATE, PREMIUM_MULT_BY_STAGE } from './gameConfig';
 import {
   createPlayer,
   applyGlobalEvent,
@@ -724,7 +727,10 @@ function autoCompletePre20(player: Player, gs: GameState, roomId: string): void 
       player.profession = chosen;
       player.salary = chosen.startingSalary;
       player.expenses.taxes = chosen.startingTaxes;
-      player.expenses.homeMortgagePayment = chosen.startingHomeMortgage;
+      // 開局租屋：職業的房貸數字是月租；買房後才有房貸
+      player.expenses.rent = chosen.startingHomeMortgage;
+      player.expenses.homeMortgagePayment = 0;
+      player.housing = 'rent';
       player.expenses.carLoanPayment = chosen.startingCarLoan;
       player.expenses.creditCardPayment = chosen.startingCreditCard;
       player.expenses.otherExpenses = chosen.startingOtherExpenses;
@@ -1111,7 +1117,7 @@ function applyMarriageScene(gs: GameState, player: Player, context: Record<strin
     player.isMarried = true;
     player.marriageType = 'love';
     player.marriageBonus = card.monthlyBonus;
-    marriageBonus = card.monthlyBonus;
+    marriageBonus = card.monthlyBonus + createSpouse(player).income;
     lifeExpGained = card.lifeExpGain;
     addLifeExperience(player, lifeExpGained);
     marriageGift = gs.marriageGiftOverride ?? (MARRIAGE_GIFT.window + Math.round(Math.random() * MARRIAGE_GIFT_RANDOM_BONUS));
@@ -1125,7 +1131,7 @@ function applyMarriageScene(gs: GameState, player: Player, context: Record<strin
   } else if (route === 'love' || route === 'matchmaker') {
     const result = confirmMarriage(player, route);
     if (!result.success) return null;
-    marriageBonus = result.marriageBonus ?? 0;
+    marriageBonus = (result.marriageBonus ?? 0) + (player.spouse?.income ?? 0);
     lifeExpGained = result.lifeExpGained ?? 0;
     marriageGift = gs.marriageGiftOverride ?? (MARRIAGE_GIFT[route] + Math.round(Math.random() * MARRIAGE_GIFT_RANDOM_BONUS));
     player.cash += marriageGift;
@@ -1556,6 +1562,10 @@ function buildSecondLifeReview(player: Player): object {
  * 統一完成玩家死亡結算。玩家仍保留在房間資料中，讓本人與全場在終局復盤時
  * 都能看到完整人生軌跡；advanceToNextTurn 會自動略過 isAlive=false 的玩家。
  */
+function deathAgeLabel(player: Player): string {
+  return player.currentAge >= 90 ? '高壽' : '';
+}
+
 function eliminatePlayer(
   player: Player,
   gs: GameState,
@@ -1740,11 +1750,9 @@ function serializePlayer(p: Player, gs: GameState): object {
   const personalAge = Math.round(Math.max(p.startAge ?? 20, getCurrentAge(gs)) * 10) / 10;
 
   // 計算保費與孩子支出（後端 Player.totalExpenses getter 內的細項，補給前端報表使用）
-  const insurancePremiums =
-    (p.insurance.hasMedicalInsurance ? MEDICAL_INSURANCE_PREMIUM : 0) +
-    (p.insurance.hasLifeInsurance ? LIFE_INSURANCE_PREMIUM : 0) +
-    (p.insurance.hasPropertyInsurance ? PROPERTY_INSURANCE_PREMIUM : 0);
-  const childExpenses = p.numberOfChildren * PER_CHILD_EXPENSE;
+  const insurancePremiums = p.insurancePremiums;
+  const childExpenses = p.childExpenses;
+  const premiumMult = PREMIUM_MULT_BY_STAGE[p.lifeStage] ?? 1;
 
   // 無擔保負債月付加總（與 Player.totalExpenses getter 同邏輯）
   const _securedIds = new Set(
@@ -1775,19 +1783,38 @@ function serializePlayer(p: Player, gs: GameState): object {
       amount: Math.round(p.totalPassiveIncome * passiveMultiplier) - Math.max(0, p.totalPassiveIncome), note: '以被動收入總額乘算後的差額' });
   }
   if (p.marriageBonus) incomeItems.push({ label: '婚姻加成', amount: p.marriageBonus });
+  if (p.spouse) incomeItems.push({ label: '配偶收入', amount: p.spouseIncome,
+    note: p.spouse.unemployedMonthsLeft > 0 ? `配偶失業中，剩 ${p.spouse.unemployedMonthsLeft} 個月` : p.spouse.retired ? '配偶已退休（40%）' : undefined });
   const expenseItems: { label: string; amount: number; note?: string }[] = [];
   const pushExpense = (label: string, amount: number, note?: string) => { if (amount) expenseItems.push({ label, amount, note }); };
   pushExpense('稅', p.expenses.taxes);
+  pushExpense('勞健保', p.socialInsurance, `薪資 × ${Math.round(SOCIAL_INSURANCE_RATE * 100)}%`);
   pushExpense('高齡醫療／長照', p.seniorCareExpense, p.stats.health < 30 ? 'HP < 30：醫療 + 長照' : 'HP < 60：醫療');
+  pushExpense('房租', p.rentExpense, p.livingCostMultiplier > 1 ? `隨物價 ×${p.livingCostMultiplier.toFixed(2)}；買房後不用付` : '買房後不用付');
   pushExpense('房貸月付', p.expenses.homeMortgagePayment, '可用「提前還款」降低');
   pushExpense('車貸月付', p.expenses.carLoanPayment, '可用「提前還款」降低');
   pushExpense('信用卡', p.expenses.creditCardPayment);
-  pushExpense('生活支出', p.expenses.otherExpenses);
+  {
+    const style = LIFESTYLE_OPTIONS[p.lifestyle] ?? LIFESTYLE_OPTIONS.normal;
+    const habit = HEALTH_HABIT_OPTIONS[p.healthHabit] ?? HEALTH_HABIT_OPTIONS.normal;
+    const notes: string[] = [];
+    if (style.expenseMultiplier !== 1) notes.push(`${style.label} ×${style.expenseMultiplier}`);
+    if (p.livingCostMultiplier > 1) notes.push(`物價 ×${p.livingCostMultiplier.toFixed(2)}`);
+    pushExpense('生活支出', p.livingExpenses - habit.monthlyCost, notes.length ? `基準 $${p.expenses.otherExpenses.toLocaleString()}，${notes.join('、')}` : undefined);
+    if (habit.monthlyCost) pushExpense(`健康習慣：${habit.label}`, habit.monthlyCost);
+  }
   pushExpense('世界事件調整', p.worldExpenseAdjustment);
-  if (p.insurance.hasMedicalInsurance) pushExpense('醫療險保費', MEDICAL_INSURANCE_PREMIUM);
-  if (p.insurance.hasLifeInsurance) pushExpense('壽險保費', LIFE_INSURANCE_PREMIUM);
-  if (p.insurance.hasPropertyInsurance) pushExpense('財產險保費', PROPERTY_INSURANCE_PREMIUM);
-  pushExpense(`子女支出（${p.numberOfChildren} 人）`, childExpenses);
+  const premiumNote = premiumMult !== 1 ? `年齡倍率 ×${premiumMult}` : undefined;
+  if (p.insurance.hasMedicalInsurance) pushExpense('醫療險保費', Math.round(MEDICAL_INSURANCE_PREMIUM * premiumMult), premiumNote);
+  if (p.insurance.hasLifeInsurance) pushExpense('壽險保費', Math.round(LIFE_INSURANCE_PREMIUM * premiumMult), premiumNote);
+  if (p.insurance.hasPropertyInsurance) pushExpense('財產險保費', Math.round(PROPERTY_INSURANCE_PREMIUM * premiumMult), premiumNote);
+  {
+    const kids = p.childBirthAges.map((b) => p.currentAge - b);
+    const grown = kids.filter((a) => a > CHILD_EXPENSE_BY_AGE[CHILD_EXPENSE_BY_AGE.length - 1].maxAge).length;
+    pushExpense(`子女支出（${p.numberOfChildren} 人）`, childExpenses,
+      kids.length ? `孩子 ${kids.map((a) => `${Math.max(0, Math.round(a))} 歲`).join('、')}${grown ? `，${grown} 人已獨立` : ''}` : undefined);
+  }
+  for (const r of p.recurringExpenses) pushExpense(r.label, r.monthly, `還剩 ${r.monthsLeft} 個月`);
   for (const l of p.liabilities) {
     if (_securedIds.has(l.id)) continue;
     pushExpense(`${l.name} 月付`, l.monthlyPayment ?? 0, `餘額 $${l.totalDebt.toLocaleString()}`);
@@ -1821,7 +1848,20 @@ function serializePlayer(p: Player, gs: GameState): object {
     isAlive: p.isAlive,
     cash: p.cash,
     salary: p.salary,
-    expenses: { ...p.expenses, otherExpenses: p.expenses.otherExpenses + p.worldExpenseAdjustment, insurancePremiums, childExpenses, unsecuredLoanPayments },
+    expenses: { ...p.expenses, rent: p.rentExpense, otherExpenses: p.livingExpenses + p.worldExpenseAdjustment, insurancePremiums, childExpenses, unsecuredLoanPayments, socialInsurance: p.socialInsurance, recurringExpenses: p.recurringExpenseTotal },
+    currentAge: p.currentAge,
+    housing: p.housing,
+    homeOffers: p.isAlive && !p.isBedridden ? getHomeOffers(p) : [],
+    spouse: p.spouse,
+    spouseIncome: p.spouseIncome,
+    lifestyle: p.lifestyle,
+    healthHabit: p.healthHabit,
+    childBirthAges: p.childBirthAges,
+    salaryGrowthMultiplier: p.salaryGrowthMultiplier,
+    livingCostMultiplier: p.livingCostMultiplier,
+    recurringExpenses: p.recurringExpenses,
+    layoffMonthsTotal: p.layoffMonthsTotal,
+    naturalDeathProbability: naturalDeathProbability(p),
     assets: p.assets.map((asset) => ({ ...asset, monthlyCashflow: asset.monthlyCashflow > 0
       ? Math.round(asset.monthlyCashflow * p.worldEffects.reduce((factor, entry) =>
         entry.effect.type === 'CashflowChange' && entry.effect.targetAssetType === asset.type
@@ -1904,6 +1944,7 @@ function serializeGameState(gs: GameState): object {
     isManuallyPaused: gs.pausedAt !== null && !gs.decisionPhase && !gs.facilitatorScene,
     readingAutoContinueMs: gs.readingAutoContinueMs,
     marriageGiftOverride: gs.marriageGiftOverride,
+    monthsPerRound: gs.monthsPerRound || MONTHS_PER_ROUND,
     autoRevealOnSubmit: gs.autoRevealOnSubmit,
     actionPhaseDone: gs.decisionPhase?.playerId === '__all_players__' && (gs.decisionPhase.kind === 'actions' || gs.decisionPhase.kind === 'payday') ? [...gs.actionPhaseDone] : [],
     actionPhaseEnabled: gs.actionPhaseEnabled,
@@ -2220,6 +2261,7 @@ function continueAfterTurnAdvance(gs: GameState): void {
 function advanceTurn(gs: GameState): void {
   if (gs.gamePhase === GamePhase.GameOver) return;
   gs.advanceToNextTurn();
+  syncPlayerAges(gs);
   schedulePaydayIfDue(gs);
   skipCurrentEducationTurns(gs);
   continueAfterTurnAdvance(gs);
@@ -2405,7 +2447,8 @@ function settleQuarterMonths(
   growthCycles = GROWTH_CYCLES_PER_GLOBAL_PAYDAY,
 ): void {
   // 復盤用：每 12 個月記一筆發薪事件，年齡依「距上次發薪經過的輪數」往前推，讓時間軸每輪一點
-  const yearsCovered = Math.max(1, Math.round(settlementMonths / MONTHS_PER_ROUND));
+  const monthsPerRound = gs.monthsPerRound || MONTHS_PER_ROUND;
+  const yearsCovered = Math.max(1, Math.round(settlementMonths / monthsPerRound));
   const currentAgeNow = Math.max(player.startAge ?? 20, getCurrentAge(gs));
   let yearCashBefore = player.cash;
   let yearFlowBefore = player.monthlyCashflow;
@@ -2422,14 +2465,14 @@ function settleQuarterMonths(
 
     triggerPayday(player, gs, maintenanceCovered, month <= growthCycles);
     if (month <= growthCycles && player.retirementStatus === 'consultant' && player.salary > 0) applyHPChange(player, -CONSULTANT_HP_COST_PER_CYCLE);
-    if (month % MONTHS_PER_ROUND === 0 || month === settlementMonths) {
-      const yearIndex = Math.ceil(month / MONTHS_PER_ROUND);
+    if (month % monthsPerRound === 0 || month === settlementMonths) {
+      const yearIndex = Math.ceil(month / monthsPerRound);
       const eventAge = Math.round(currentAgeNow - (yearsCovered - yearIndex) * YEARS_PER_COMPLETED_ROUND);
       logPlayerEvent(
         player,
         gs,
         'payday',
-        `第 ${gs.globalPaydayNumber + 1} 次發薪・第 ${yearIndex}/${yearsCovered} 年結算（12 個月，現金 ${player.cash - yearCashBefore >= 0 ? '+' : '-'}$${Math.abs(player.cash - yearCashBefore).toLocaleString()}）`,
+        `第 ${gs.globalPaydayNumber + 1} 次發薪・第 ${yearIndex}/${yearsCovered} 輪結算（${monthsPerRound} 個月，現金 ${player.cash - yearCashBefore >= 0 ? '+' : '-'}$${Math.abs(player.cash - yearCashBefore).toLocaleString()}）`,
         yearCashBefore,
         yearFlowBefore,
         yearWorthBefore,
@@ -2508,7 +2551,7 @@ function roundsSinceLastPayday(gs: GameState): number {
 
 /** 本次（或下一次）發薪要結算的月數 = 經過輪數 × 12。 */
 function paydaySettlementMonths(gs: GameState): number {
-  return roundsSinceLastPayday(gs) * MONTHS_PER_ROUND;
+  return roundsSinceLastPayday(gs) * (gs.monthsPerRound || MONTHS_PER_ROUND);
 }
 
 /** 計時發薪的剩餘毫秒數（時鐘暫停時凍結）。 */
@@ -2588,7 +2631,7 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
     gs,
     { id: '__all_players__', name: '全體玩家' },
     'payday',
-    `第 ${gs.globalPaydayNumber + 1} 次全體發薪規劃（結算 ${settlementMonths / MONTHS_PER_ROUND} 年）`,
+    `第 ${gs.globalPaydayNumber + 1} 次全體發薪規劃（結算 ${growthCycles} 輪 × ${gs.monthsPerRound || MONTHS_PER_ROUND} 個月）`,
     '所有人同時在手機填寫這段期間的規劃；全員送出後自動結算，主持人也可提前以空白方案結束。',
     { publicLines: [
       `💰 結算 ${settlementMonths} 個月薪資與支出；每人可配置：財商升級、健康投資、專長培訓、人脈投資、保險、股票定期定額`,
@@ -2632,6 +2675,11 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
       affordableOptions: buildAffordableOptions(player, growthCycles),
       basicInvestments: BASIC_INVESTMENTS,
       currentInsurance: player.insurance,
+      currentLifestyle: player.lifestyle,
+      currentHealthHabit: player.healthHabit,
+      lifestyleOptions: LIFESTYLE_OPTIONS,
+      healthHabitOptions: HEALTH_HABIT_OPTIONS,
+      livingExpensesBase: player.expenses.otherExpenses,
       stockDCAPortfolioValue: player.assets.find((asset) => asset.id === 'stock-dca')?.currentValue ?? 0,
       travelDestinations: getQuarterTravelDestinations(player),
       timeoutMs: 0,
@@ -2674,6 +2722,8 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
     });
 
     const quarterlyPlan = { ...plan, settlementMonths, growthCycles };
+    if (quarterlyPlan.lifestyle && LIFESTYLE_OPTIONS[quarterlyPlan.lifestyle]) player.lifestyle = quarterlyPlan.lifestyle;
+    if (quarterlyPlan.healthHabit && HEALTH_HABIT_OPTIONS[quarterlyPlan.healthHabit]) player.healthHabit = quarterlyPlan.healthHabit;
     const planResult = applyPaydayPlan(player, quarterlyPlan);
     const maintenanceCovered =
       planResult.investments.healthBoost.executed ||
@@ -3195,6 +3245,17 @@ io.on('connection', (socket: Socket) => {
         return;
       }
 
+      // --- 1b2. 80 歲起的自然壽命判定（依 HP） ---
+      if (player.currentAge >= 80 && checkNaturalDeath(player)) {
+        const { deathAge, finalScore } = eliminatePlayer(player, gs, 'natural', `${deathAgeLabel(player)}安詳離世`);
+        console.log(`[natural] ${player.name} 自然離世（${deathAge} 歲，HP ${player.stats.health}），人生評分：${finalScore.total} 分`);
+        emitToRoom(roomId, 'notification', { message: `🕯️ ${player.name} 在 ${deathAge} 歲安詳離世（HP ${player.stats.health}）。人生評分 ${finalScore.total} 分。` });
+        emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+        advanceTurn(gs);
+        emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+        return;
+      }
+
       // --- 1c. turnsToSkip 跳回合檢查 ---
       if (player.turnsToSkip > 0) {
         player.turnsToSkip -= 1;
@@ -3524,13 +3585,15 @@ io.on('connection', (socket: Socket) => {
       emitClient(socket, 'error', { message: result.message });
       return;
     }
-    logPlayerEvent(player, gs, 'asset_sell', `出售資產，淨收益 $${(result.netCashChange ?? 0).toLocaleString()}`, _saCB, _saFB, _saNWB, { assetId: result.assetId, proceeds: result.proceeds, debtSettled: result.debtSettled });
+    logPlayerEvent(player, gs, 'asset_sell', result.message ?? `出售資產，淨收益 $${(result.netCashChange ?? 0).toLocaleString()}${result.capitalGainsTax ? `（資本利得稅 $${result.capitalGainsTax.toLocaleString()}）` : ''}`, _saCB, _saFB, _saNWB, { assetId: result.assetId, proceeds: result.proceeds, debtSettled: result.debtSettled, capitalGainsTax: result.capitalGainsTax });
 
     emitClient(socket, 'assetSold', {
       assetId: result.assetId,
       proceeds: result.proceeds,
       debtSettled: result.debtSettled,
       netCashChange: result.netCashChange,
+      capitalGainsTax: result.capitalGainsTax ?? 0,
+      message: result.message,
     });
 
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
@@ -3627,6 +3690,26 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 股票定期定額投資 (investStockDCA)
   // ----------------------------------------------------------
+  // ----------------------------------------------------------
+  // 買自住房 (buyHome)：租屋 → 自有；頭期款 20%、30 年房貸
+  // ----------------------------------------------------------
+  onSafe('buyHome', (payload: { optionId: string }) => {
+    const gs = getRoomState(socket);
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    const player = gs.players.get(playerIdentity(socket));
+    if (!player || !player.isAlive) { emitClient(socket, 'error', { message: '玩家不存在或已出局。' }); return; }
+    if (gs.decisionPhase && gs.decisionPhase.kind !== 'actions' && !(gs.decisionPhase.rescue && gs.decisionPhase.playerId === player.id)) {
+      emitClient(socket, 'error', { message: '決策進行中，請等這個決策結束再買房。' }); return;
+    }
+    const _bhCB = player.cash; const _bhFB = player.monthlyCashflow; const _bhNWB = calcNetWorth(player);
+    const result = buyHome(player, payload.optionId);
+    if (!result.success) { emitClient(socket, 'error', { message: result.message }); return; }
+    logPlayerEvent(player, gs, 'asset_buy', result.message, _bhCB, _bhFB, _bhNWB, { source: 'home', optionId: payload.optionId, price: result.price, monthlyPayment: result.monthlyPayment });
+    emitClient(socket, 'homeBought', result);
+    emitToRoom(gs.gameId, 'notification', { message: `🏠 ${player.name} 買了房子：${result.message}` });
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
   onSafe('investStockDCA', (payload: { amount: number }) => {
     const gs = getRoomState(socket);
     if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
@@ -4075,7 +4158,9 @@ io.on('connection', (socket: Socket) => {
     player.profession = chosen;
     player.salary = chosen.startingSalary;
     player.expenses.taxes = chosen.startingTaxes;
-    player.expenses.homeMortgagePayment = chosen.startingHomeMortgage;
+    player.expenses.rent = chosen.startingHomeMortgage;
+    player.expenses.homeMortgagePayment = 0;
+    player.housing = 'rent';
     player.expenses.carLoanPayment = chosen.startingCarLoan;
     player.expenses.creditCardPayment = chosen.startingCreditCard;
     player.expenses.otherExpenses = chosen.startingOtherExpenses;
@@ -4790,6 +4875,7 @@ io.on('connection', (socket: Socket) => {
 
     gs.gameDurationMs = durationMs;
     gs.gamePhase = GamePhase.RatRace;
+    syncPlayerAges(gs);
     gs.turnNumber = 0;
     gs.roundsSinceGlobalPayday = 0;
     gs.roundsAtLastPayday = 0;
@@ -4880,6 +4966,19 @@ io.on('connection', (socket: Socket) => {
     if (!Number.isFinite(amount) || amount < 0 || amount > 5_000_000) { emitClient(socket, 'error', { message: '禮金需介於 0 到 $5,000,000。' }); return; }
     gs.marriageGiftOverride = amount > 0 ? Math.round(amount) : null;
     console.log(`[setMarriageGift] 房間 ${gs.gameId} 結婚禮金：${gs.marriageGiftOverride ?? '預設'}`);
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
+  // 每輪結算月數 (setMonthsPerRound)：12／24／48
+  onSafe('setMonthsPerRound', (payload: { months: number }) => {
+    const gs = getRoomState(socket);
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    if (!isRoomAdmin(socket, gs)) { emitClient(socket, 'error', { message: '只有管理員可以調整結算月數。' }); return; }
+    const months = Number(payload?.months);
+    if (!(MONTHS_PER_ROUND_OPTIONS as readonly number[]).includes(months)) { emitClient(socket, 'error', { message: `結算月數只能是 ${MONTHS_PER_ROUND_OPTIONS.join('／')}。` }); return; }
+    if (gs.globalPaydayInProgress) { emitClient(socket, 'error', { message: '發薪進行中，稍後再調整。' }); return; }
+    gs.monthsPerRound = months;
+    console.log(`[setMonthsPerRound] 房間 ${gs.gameId} 每輪結算 ${months} 個月`);
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 
@@ -6281,7 +6380,7 @@ async function applyCrisisWithRescue(
 
 /** 外圈致死疾病卡：無保險時費用改為淨值的 30%，下限 $900,000。 */
 function scaleFastTrackCrisis(player: Player, card: CrisisCard): CrisisCard {
-  if (!card.canCauseDeath || player.insurance[card.requiredInsurance]) return card;
+  if (!card.canCauseDeath || card.requiredInsurance === 'none' || player.insurance[card.requiredInsurance]) return card;
   const scaled = Math.max(FAST_TRACK_LETHAL_CRISIS_MIN_COST, Math.round(calcNetWorth(player) * FAST_TRACK_LETHAL_CRISIS_NET_WORTH_SHARE));
   return { ...card, baseCost: scaled };
 }
@@ -6686,13 +6785,15 @@ async function handleLandingSquare(
         emitToRoom(roomId, 'cardApplied', { playerId: player.id, playerName: player.name, squareType, effect: { type: 'retireeGig', cashGain: gig } });
         break;
       }
+      const layoffMonths = Math.max(1, getLayoffMonths(player));
       applyDownsizingCard(player, {
         id: 'ds-default',
         title: '裁員',
-        description: '公司裁員，下一個發薪日薪資暫停發放。',
-        turnsWithoutSalary: 1,
+        description: `公司裁員，接下來 ${layoffMonths} 個月沒有薪水。`,
+        turnsWithoutSalary: layoffMonths,
       });
-      emitCellEvent(socket, roomId, player.name, '裁員', '⚠️ 公司裁員！下一個發薪日薪資暫停發放。');
+      player.layoffMonthsTotal += layoffMonths;
+      emitCellEvent(socket, roomId, player.name, '裁員', `⚠️ 公司裁員！${player.name} 接下來 ${layoffMonths} 個月沒有薪水${player.stats.careerSkill >= 60 ? '（第二專長 ≥ 60，找工作時間減半）' : player.currentAge >= 50 ? '（50 歲後再就業更難）' : ''}。`);
       emitToRoom(roomId, 'cardApplied', {
         playerId: player.id,
         squareType,

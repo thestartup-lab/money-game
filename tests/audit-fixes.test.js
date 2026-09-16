@@ -5,7 +5,7 @@ const { GameState } = require('../dist/gameDataModels');
 const { CRISIS_POOL_BY_STAGE, CRISIS_EVENTS, DOODADS, RELATIONSHIP_EVENTS, CHARITY_CARD, MARKET_CARDS } = require('../dist/gameCards');
 const { applyDoodadCard, applyCrisisCard, applyCharityDonation, applyRelationshipCard, applyMarketCard, getCharityDonationAmount, evaluateSecondLifeEligibility, previewCrisisCost } = require('../dist/cardSystem');
 const { takeLeverageLoan, sellAsset } = require('../dist/gameLogic');
-const { syncHouseholdLoans, HOME_LOAN_MONTHS } = require('../dist/householdLoans');
+const { syncHouseholdLoans, getHomeOffers, buyHome, homeLoanPayment } = require('../dist/householdLoans');
 const { BIG_DEALS } = require('../dist/gameCards');
 const { LEVERAGE_RATE_MULTIPLIER, getLoanRate } = require('../dist/gameConfig');
 const { validateSocketPayload } = require('../dist/socketValidation');
@@ -57,11 +57,14 @@ test('薪資倍率卡透過 triggerPayday 持續生效，升遷是加薪不是�
   const r = applyRelationshipCard(p, promo);
   p.salaryMultiplierPending = r.salaryMultiplier;
   p.salaryMultiplierMonths = r.turnsAffected;
-  triggerPayday(p, game);
-  assert.equal(p.salary, Math.round(base * promo.effect.salaryMultiplier));
-  for (let i = 1; i < promo.effect.turnsAffected; i++) triggerPayday(p, game);
-  triggerPayday(p, game);
-  assert.equal(p.salary, base, '倍率到期後恢復原薪');
+  const growthBefore = p.salaryGrowthMultiplier;
+  assert.equal(growthBefore, Math.round(1.08 * (1 + promo.effect.permanentRaise) * 1000) / 1000, '升遷永久加薪 10%');
+  triggerPayday(p, game, false, false);
+  assert.equal(p.salary, Math.round(p.profession.startingSalary * p.salaryGrowthMultiplier * promo.effect.salaryMultiplier));
+  for (let i = 1; i < promo.effect.turnsAffected; i++) triggerPayday(p, game, false, false);
+  triggerPayday(p, game, false, false);
+  assert.equal(p.salary, Math.round(p.profession.startingSalary * p.salaryGrowthMultiplier), '倍率到期後恢復（含年資與升遷加薪）');
+  assert.ok(p.salary > base, '升遷後薪水比原本高');
   assert.equal(p.salaryMultiplierMonths, 0);
 });
 
@@ -85,7 +88,7 @@ test('還款信用加分依比例計算，還 $1 不能刷信用；學貸不占�
 test('第二人生排除玩家間借貸利息；市場卡不影響已故玩家', () => {
   const p = createPlayer('p', '玩家');
   p.paydayCount = 6;
-  p.expenses = { taxes: 0, homeMortgagePayment: 0, carLoanPayment: 0, creditCardPayment: 0, otherExpenses: 10000 };
+  p.expenses = { taxes: 0, rent: 0, homeMortgagePayment: 0, carLoanPayment: 0, creditCardPayment: 0, otherExpenses: 10000 };
   p.liabilities = [];
   p.stats.health = 70; p.stats.careerSkill = 60;
   p.assets = [{ id: 'p2p-1', type: 'Other', name: '借出款項', cost: 1, currentValue: 1, monthlyCashflow: 10000 }];
@@ -156,26 +159,57 @@ test('危機費用預覽不改狀態；詐騙依現金比例扣款；槓桿利�
   assert.equal(first.asset.monthlyCashflow, 28800);
 });
 
-test('房貸車貸具象成資產＋負債，可提前還款且月付等比例下降，不占信用額度，不可出售', () => {
+test('開局租屋；買房後房租歸零、30 年房貸可提前還款且月付等比例下降；賣房回到租屋', () => {
   const p = createPlayer('h', '房貸族', 'teacher');
   p.cash = 5000000;
   syncHouseholdLoans(p);
+  assert.equal(p.housing, 'rent');
+  assert.equal(p.expenses.homeMortgagePayment, 0, '開局沒有房貸');
+  assert.equal(p.rentExpense, p.profession.startingHomeMortgage, '職業的房貸數字變成月租');
+  assert.ok(!p.liabilities.some((l) => l.id === 'home-loan-h'));
+  assert.ok(p.liabilities.some((l) => l.id === 'car-loan-h'), '車貸照舊');
+  const offers = getHomeOffers(p);
+  assert.equal(offers.length, 3);
+  assert.ok(offers.every((o) => o.affordable));
+  const offer = offers[1];
+  const cashBefore = p.cash;
+  const r0 = buyHome(p, offer.id);
+  assert.equal(r0.success, true, r0.message);
+  assert.equal(p.housing, 'own');
+  assert.equal(p.rentExpense, 0, '買房後不付房租');
+  assert.equal(p.cash, cashBefore - offer.downPayment - offer.transactionCost);
   const home = p.liabilities.find((l) => l.id === 'home-loan-h');
-  assert.ok(home, '應有房貸負債');
+  assert.equal(home.totalDebt, offer.loan);
   const payment = p.expenses.homeMortgagePayment;
-  assert.equal(home.totalDebt, payment * HOME_LOAN_MONTHS);
+  assert.equal(payment, homeLoanPayment(offer.loan));
   const asset = p.assets.find((a) => a.id === 'home-h');
-  assert.equal(asset.currentValue, home.totalDebt, '資產與負債同額，淨值不變');
+  assert.equal(asset.isResidence, true);
+  assert.equal(p.totalPassiveIncome, 0, '自住房不算被動收入');
   assert.equal(getAvailableLoan(p), getAvailableLoan(createPlayer('x', '對照', 'teacher')), '房貸不占信用額度');
+  assert.equal(getHomeOffers(p)[0].affordable, false, '已有房不能再買');
   const half = Math.round(home.totalDebt / 2);
   const r = repayLoan(p, 'home-loan-h', half);
   assert.equal(r.success, true);
   assert.equal(p.expenses.homeMortgagePayment, Math.round(payment / 2), '還一半本金，月付減半');
-  repayLoan(p, 'home-loan-h', home.totalDebt);
-  assert.equal(p.expenses.homeMortgagePayment, 0, '還清後月付歸零');
+  const sold = sellAsset(p, 'home-h');
+  assert.equal(sold.success, true, '自住房可以出售');
+  assert.equal(p.housing, 'rent');
+  assert.equal(p.rentExpense, p.profession.startingHomeMortgage, '賣房後回到租屋');
+  assert.equal(sold.capitalGainsTax, 0, '自住房免資本利得稅');
   assert.ok(!p.liabilities.some((l) => l.id === 'home-loan-h'));
-  assert.ok(p.assets.some((a) => a.id === 'home-h'), '房子保留');
-  assert.equal(sellAsset(p, 'home-h').success, false, '自住房不可出售');
+});
+
+test('出售一般資產課 20% 資本利得稅；虧損不課', () => {
+  const p = createPlayer('c', '投資人', 'teacher');
+  p.cash = 0;
+  p.assets = [{ id: 'a1', type: 'Stock', name: '股', cost: 100000, currentValue: 150000, monthlyCashflow: 0 },
+    { id: 'a2', type: 'Stock', name: '虧', cost: 100000, currentValue: 80000, monthlyCashflow: 0 }];
+  const gain = sellAsset(p, 'a1');
+  assert.equal(gain.capitalGainsTax, 10000);
+  assert.equal(p.cash, 140000);
+  const loss = sellAsset(p, 'a2');
+  assert.equal(loss.capitalGainsTax, 0);
+  assert.equal(p.cash, 220000);
 });
 
 test('65 歲轉折：退休金依象限替代率、顧問收入依專長人脈、高齡支出依 HP', () => {
@@ -195,9 +229,9 @@ test('65 歲轉折：退休金依象限替代率、顧問收入依專長人脈�
   assert.equal(computeConsultantIncome({ ...p, stats: { ...p.stats, health: 49 } }), 0, 'HP 不足接不到案');
   const before = p.totalExpenses;
   p.isSenior = true; p.stats.health = 55;
-  assert.equal(p.totalExpenses, before + 3000);
+  assert.equal(p.totalExpenses, before + 5000, '65 歲後 HP < 60 醫療 +5,000');
   p.stats.health = 25;
-  assert.equal(p.totalExpenses, before + 12000);
+  assert.equal(p.totalExpenses, before + 30000, 'HP < 30 再加長照 +25,000');
   const investor = createPlayer('i', '投資人', 'angel_investor');
   assert.equal(computePension(investor), 0, 'I 象限沒有退休金');
 });

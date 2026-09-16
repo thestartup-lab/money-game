@@ -28,7 +28,7 @@ export const FAST_TRACK_TRACK_SIZE = 17;
 export const FAST_TRACK_PAYDAY_BONUS_RATE = 0.01;
 
 /** 股票定期定額每發薪日複利增長率（模擬指數基金長期報酬）*/
-export const STOCK_DCA_MONTHLY_RETURN_RATE = 0.009;
+export const STOCK_DCA_MONTHLY_RETURN_RATE = 0.006;
 
 /**
  * 股票定期定額每月配息率（模擬台股約 3% 年化殖利率）。
@@ -36,7 +36,7 @@ export const STOCK_DCA_MONTHLY_RETURN_RATE = 0.009;
  * 配息反映在 monthlyCashflow（每次 payday 動態更新），
  * 讓股票資產對 totalPassiveIncome 有實質貢獻、且受 FQ 乘數加成。
  */
-export const STOCK_DCA_MONTHLY_DIVIDEND_RATE = 0.004;
+export const STOCK_DCA_MONTHLY_DIVIDEND_RATE = 0.003;
 
 /** 股票定期定額可選投入金額選項 */
 export const STOCK_DCA_AMOUNTS = [15_000, 30_000, 75_000, 150_000, 300_000, 750_000] as const;
@@ -72,7 +72,9 @@ export const ROUNDS_PER_GLOBAL_PAYDAY = 3;
 /** 舊常數：保留給舊測試與說明；實際結算月數 = 經過輪數 × MONTHS_PER_ROUND。 */
 export const MONTHS_PER_GLOBAL_PAYDAY = 6;
 /** 每個完整輪視為一年薪資：結算月數 = 經過輪數 × 12（至少一輪）。 */
-export const MONTHS_PER_ROUND = 12;
+export const MONTHS_PER_ROUND = 24;
+/** 主持人可選的每輪結算月數（1 結算月 ≈ 4/24×12 個真實月） */
+export const MONTHS_PER_ROUND_OPTIONS = [12, 24, 48] as const;
 /** 計時發薪預設間隔（主持人可調 5–20 分鐘）；到期後排在目前玩家行動結束時執行，且至少要經過一輪。 */
 export const PAYDAY_TIMER_DEFAULT_MS = 10 * 60 * 1000;
 /** 健康與自然人脈仍維持原本每次發薪三個成長週期，不隨財務月份加倍。 */
@@ -1079,9 +1081,9 @@ export const RETIREMENT_DEFER_HP_COST = 10;
 export const RETIREMENT_MAX_DEFERRALS = 1;
 /** 65 歲後的醫療與長照支出：HP < 60 每月 +3,000；HP < 30 再 +9,000 */
 export const SENIOR_MEDICAL_HP = 60;
-export const SENIOR_MEDICAL_EXPENSE = 3_000;
+export const SENIOR_MEDICAL_EXPENSE = 5_000;
 export const SENIOR_CARE_HP = 30;
-export const SENIOR_CARE_EXPENSE = 9_000;
+export const SENIOR_CARE_EXPENSE = 25_000;
 
 // ============================================================
 // 百歲人生：人生事件機率視窗（依年齡區間調整）
@@ -1491,3 +1493,105 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     description: '走訪創業聖地，可能觸發創業者機會事件。',
   },
 ];
+
+
+// ============================================================
+// 真實人生擬真（2026-09-16 第四階段）
+// ============================================================
+
+/** 每輪（4 年）薪資實質成長率，依人生階段；SK ≥ 60 另加 SALARY_GROWTH_SKILL_BONUS */
+export const SALARY_GROWTH_BY_STAGE: Readonly<Record<LifeStage, number>> = {
+  [LifeStage.Youth]:      0.08,
+  [LifeStage.Family]:     0.05,
+  [LifeStage.Transition]: 0.01,
+  [LifeStage.Retirement]: 0,
+  [LifeStage.Legacy]:     0,
+};
+export const SALARY_GROWTH_SKILL_THRESHOLD = 60;
+export const SALARY_GROWTH_SKILL_BONUS = 0.02;
+/** 升遷卡：除了暫時 ×1.2，另永久加薪 10% */
+export const PROMOTION_PERMANENT_RAISE = 0.10;
+
+/** 生活成本上漲（通膨＋生活水準）：每輪 3%，65 歲後停止 */
+export const LIVING_COST_GROWTH_PER_ROUND = 0.03;
+export const LIVING_COST_GROWTH_STOP_AGE = 65;
+
+/** 子女支出依孩子年齡分段；超過最後一段即成年獨立（0） */
+export const CHILD_EXPENSE_BY_AGE: ReadonlyArray<{ maxAge: number; monthly: number; label: string }> = [
+  { maxAge: 6,  monthly: 6_000,  label: '幼兒' },
+  { maxAge: 17, monthly: 7_500,  label: '學齡' },
+  { maxAge: 22, monthly: 12_000, label: '大學' },
+];
+export const CHILD_INDEPENDENT_AGE = 23;
+
+/** 勞健保：有薪工作者薪資的 5% */
+export const SOCIAL_INSURANCE_RATE = 0.05;
+
+/** 保費隨年齡上升的倍率 */
+export const PREMIUM_MULT_BY_STAGE: Readonly<Record<LifeStage, number>> = {
+  [LifeStage.Youth]:      1.0,
+  [LifeStage.Family]:     1.3,
+  [LifeStage.Transition]: 1.7,
+  [LifeStage.Retirement]: 2.2,
+  [LifeStage.Legacy]:     3.0,
+};
+
+/** 生活方式：其他支出倍率與每輪效果 */
+export type Lifestyle = 'frugal' | 'normal' | 'lavish';
+export const LIFESTYLE_OPTIONS: Readonly<Record<Lifestyle, { label: string; expenseMultiplier: number; hpPerRound: number; lifeExpPerRound: number; desc: string }>> = {
+  frugal: { label: '節儉', expenseMultiplier: 0.85, hpPerRound: -2, lifeExpPerRound: 0, desc: '生活支出 −15%，每輪 HP −2（省吃儉用）' },
+  normal: { label: '普通', expenseMultiplier: 1.0,  hpPerRound: 0,  lifeExpPerRound: 0, desc: '維持現狀' },
+  lavish: { label: '享受', expenseMultiplier: 1.3,  hpPerRound: 0,  lifeExpPerRound: 5, desc: '生活支出 +30%，每輪體驗 +5' },
+};
+
+/** 健康習慣：HP 衰退倍率、附帶支出／薪資效果 */
+export type HealthHabit = 'active' | 'normal' | 'overwork';
+export const HEALTH_HABIT_OPTIONS: Readonly<Record<HealthHabit, { label: string; decayMultiplier: number; monthlyCost: number; salaryMultiplier: number; desc: string }>> = {
+  active:   { label: '規律運動', decayMultiplier: 0.5, monthlyCost: 1_500, salaryMultiplier: 1.0,  desc: 'HP 自然衰退減半，每月 +$1,500（健身、飲食）' },
+  normal:   { label: '普通',     decayMultiplier: 1.0, monthlyCost: 0,     salaryMultiplier: 1.0,  desc: '維持現狀' },
+  overwork: { label: '熬夜加班', decayMultiplier: 1.5, monthlyCost: 0,     salaryMultiplier: 1.05, desc: '薪資 +5%，HP 衰退 ×1.5' },
+};
+
+/** 裁員月數依人生階段；SK ≥ 60 減半（無條件進位） */
+export const LAYOFF_MONTHS_BY_STAGE: Readonly<Record<LifeStage, number>> = {
+  [LifeStage.Youth]:      2,
+  [LifeStage.Family]:     4,
+  [LifeStage.Transition]: 8,
+  [LifeStage.Retirement]: 0,
+  [LifeStage.Legacy]:     0,
+};
+
+/** 配偶：結婚時配偶月收入 = 本人薪資 × 隨機 0.5–0.9（下限 $20,000、上限 $120,000）；65 歲後改領 40% */
+export const SPOUSE_INCOME_RATIO_MIN = 0.5;
+export const SPOUSE_INCOME_RATIO_MAX = 0.9;
+export const SPOUSE_INCOME_MIN = 20_000;
+export const SPOUSE_INCOME_MAX = 120_000;
+export const SPOUSE_RETIRED_RATIO = 0.4;
+export const SPOUSE_UNEMPLOYMENT_MONTHS = 6;
+/** 離婚：現金分割比例、HP 影響 */
+export const DIVORCE_CASH_SHARE = 0.25;
+export const DIVORCE_HP_COST = 10;
+
+/** 自住房：租屋 vs 買房 */
+export const HOME_DOWN_PAYMENT_RATIO = 0.2;
+export const HOME_LOAN_MONTHLY_RATE = 0.002;   // 年利約 2.4%
+export const HOME_LOAN_TERM_MONTHS = 360;      // 30 年
+export const HOME_OPTIONS: ReadonlyArray<{ id: string; name: string; price: number; desc: string }> = [
+  { id: 'home-small', name: '小宅（一房）',   price: 1_500_000, desc: '頭期款 $300,000' },
+  { id: 'home-mid',   name: '三房公寓',       price: 3_000_000, desc: '頭期款 $600,000' },
+  { id: 'home-large', name: '大坪數（透天）', price: 6_000_000, desc: '頭期款 $1,200,000' },
+];
+/** 房屋交易成本（仲介、稅費）＝ 成交價 × 3% */
+export const HOME_TRANSACTION_COST_RATE = 0.03;
+
+/** 出售資產的資本利得稅（自住房免稅） */
+export const CAPITAL_GAINS_TAX_RATE = 0.2;
+
+/** 80 歲起每輪自然壽命判定：基礎 4% + (100 − HP) × 0.25% */
+export const NATURAL_DEATH_MIN_AGE = 80;
+export const NATURAL_DEATH_BASE_PROBABILITY = 0.04;
+export const NATURAL_DEATH_HP_FACTOR = 0.0025;
+
+/** 奉養父母：成家／轉型期危機池的父母事件 */
+export const PARENT_CARE_MONTHS = 24;
+export const PARENT_CARE_FAMILY_SUPPORT_NT = 5;

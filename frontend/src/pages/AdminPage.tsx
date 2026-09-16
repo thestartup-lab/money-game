@@ -682,7 +682,17 @@ export default function AdminPage() {
                     <button className="rounded-lg bg-amber-700 px-2 py-1 font-bold text-white hover:bg-amber-600"
                       onClick={() => { if (window.confirm('立即安排發薪？會在目前玩家行動結束後開始。')) emit('triggerPaydayNow'); }}>立即發薪</button>
                   </div>
-                  <p className="mt-1 text-[11px] text-gray-500">時間到就排在目前玩家行動結束後發薪；結算月數 = 距上次發薪經過的輪數 × 12。舞台、決策與暫停時計時停止。已累積 {gameState?.paydayTimer?.roundsSince ?? 0} 輪。</p>
+                  <p className="mt-1 text-[11px] text-gray-500">時間到就排在目前玩家行動結束後發薪；結算月數 = 距上次發薪經過的輪數 × {gameState?.monthsPerRound ?? 24}。舞台、決策與暫停時計時停止。已累積 {gameState?.paydayTimer?.roundsSince ?? 0} 輪。</p>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="font-bold text-gray-200">每輪結算月數</span>
+                    <div className="flex gap-1">
+                      {[12, 24, 48].map((m) => (
+                        <button key={m} className={`rounded-lg px-2 py-1 font-bold ${(gameState?.monthsPerRound ?? 24) === m ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+                          onClick={() => emit('setMonthsPerRound', { months: m })}>{m}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <p className="mt-1 text-[11px] text-gray-500">一輪 = 4 歲。24 個月時 1 結算月 ≈ 2 個真實月（預設）；48 個月最貼近真實但金額很大；12 個月為舊節奏。</p>
                 </div>
               </div>
             )}

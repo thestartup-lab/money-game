@@ -21,7 +21,8 @@ test('六個財務月保留三個健康／人脈週期，保費照月扣，十�
     for (let month = 1; month <= MONTHS_PER_GLOBAL_PAYDAY; month++) {
       const before = now.cash;
       triggerPayday(now, game, false, month <= GROWTH_CYCLES_PER_GLOBAL_PAYDAY);
-      assert.equal(now.cash - before, now.monthlyCashflow);
+      // 成長週期會在入帳後調整生活成本，所以只在非成長月比對
+      if (month > GROWTH_CYCLES_PER_GLOBAL_PAYDAY) assert.equal(now.cash - before, now.monthlyCashflow);
       if (checkAndApplyAnnualTax(now).triggered) taxTriggers++;
     }
   }
@@ -43,7 +44,7 @@ test('基本投資一人一期一份、可放棄、不能偽造價格、不能�
   assert.equal(p.cash, 100000);
   assert.equal(buyBasicInvestment(p, 'basic-dividend', 1).success, true);
   assert.equal(p.cash, 70000);
-  assert.equal(p.assets.at(-1).monthlyCashflow, 360);
+  assert.equal(p.assets.at(-1).monthlyCashflow, 200);
   assert.equal(buyBasicInvestment(p, 'basic-deposit', 1).success, false);
   p.assets = [];
   assert.equal(buyBasicInvestment(p, 'basic-deposit', 1).success, false);
@@ -56,7 +57,7 @@ test('基本投資一人一期一份、可放棄、不能偽造價格、不能�
 
 test('資格保留雙路徑、財商乘數與人生指標，轉職後 SK 歸零會改變資格', () => {
   const p = createPlayer('p', '玩家');
-  p.expenses = { taxes: 0, homeMortgagePayment: 0, carLoanPayment: 0, creditCardPayment: 0, otherExpenses: 10000 };
+  p.expenses = { taxes: 0, rent: 0, homeMortgagePayment: 0, carLoanPayment: 0, creditCardPayment: 0, otherExpenses: 10000 };
   p.liabilities = []; p.stats.financialIQ = 1;
   p.assets = [{ id: 'a', type: 'Other', name: '收入', cost: 1, monthlyCashflow: 7500 }];
   p.stats.health = 70; p.stats.careerSkill = 60; p.relationshipPoints = 0; p.lifeExperience = 0;

@@ -110,7 +110,8 @@ export function calculateAnnualTax(player: Player): AnnualTaxResult {
   const annualIncome = player.totalIncome * 12;
 
   // 計算各項扣除額
-  const dependentDeduction = player.numberOfChildren * DEPENDENT_DEDUCTION_PER_CHILD;
+  // 只有未成年（≤ 22 歲）子女算扶養
+  const dependentDeduction = player.dependentChildren * DEPENDENT_DEDUCTION_PER_CHILD;
   const medicalInsuranceDeduction = player.insurance.hasMedicalInsurance
     ? MEDICAL_INSURANCE_DEDUCTION
     : 0;

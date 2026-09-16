@@ -291,10 +291,11 @@ export function applyPaydayPlan(player: Player, plan: PaydayPlanPayload): Payday
 export function applyHPDecay(
   player: Player,
   maintenanceDone: boolean,
-  currentStage: LifeStage
+  currentStage: LifeStage,
+  decayMultiplier = 1,
 ): void {
   if (maintenanceDone) return;
-  const decay = HP_DECAY_BY_STAGE[currentStage];
+  const decay = Math.round(HP_DECAY_BY_STAGE[currentStage] * decayMultiplier);
   player.stats.health = Math.max(0, player.stats.health - decay);
 }
 

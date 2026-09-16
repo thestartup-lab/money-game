@@ -13,10 +13,10 @@ const required: Record<string, string[]> = {
   triggerRelationship: ['targetPlayerId'], setPlayerStats: ['targetPlayerId', 'stats'], goTravel: ['destinationId'],
   submitCardDecision: ['phaseId'], submitPaydayPlan: ['phaseId'],
   startCareerScene: ['requestId'], cancelCareerRequest: ['requestId'],
-  confirmCareerScene: ['sceneId', 'accepted'],
+  confirmCareerScene: ['sceneId', 'accepted'], buyHome: ['optionId'], setMonthsPerRound: ['months'],
 };
 const numeric = new Set(['amount', 'monthlyRate', 'bidAmount', 'academic', 'health', 'social', 'resource',
-  'seconds', 'addSeconds', 'durationMinutes', 'diceCount', 'cash', 'hp', 'mp', 'fq', 'creditScore', 'basicInvestmentQuantity', 'minutes', 'startupAmount']);
+  'seconds', 'addSeconds', 'durationMinutes', 'diceCount', 'cash', 'hp', 'mp', 'fq', 'creditScore', 'basicInvestmentQuantity', 'minutes', 'startupAmount', 'months']);
 const boolean = new Set(['accepted', 'accept', 'rescued', 'enabled', 'force', 'useLeverage', 'donate', 'investInFQUpgrade',
   'investInHealthMaintenance', 'investInHealthBoost', 'investInSkillTraining', 'investInNetwork']);
 
@@ -55,6 +55,8 @@ export function validateSocketPayload(event: string, payload: unknown): boolean 
     if ('stockDCAAmount' in data && (!Number.isSafeInteger(data.stockDCAAmount) || (data.stockDCAAmount as number) < 0)) return false;
     if ('basicInvestmentQuantity' in data && (!Number.isSafeInteger(data.basicInvestmentQuantity) || (data.basicInvestmentQuantity as number) < 1 || (data.basicInvestmentQuantity as number) > 10)) return false;
     if ('buyInsuranceTypes' in data && (!Array.isArray(data.buyInsuranceTypes) || data.buyInsuranceTypes.some(t => !['medical', 'life', 'property'].includes(t)))) return false;
+    if ('lifestyle' in data && !['frugal', 'normal', 'lavish'].includes(String(data.lifestyle))) return false;
+    if ('healthHabit' in data && !['active', 'normal', 'overwork'].includes(String(data.healthHabit))) return false;
     if ('lifeChoice' in data) {
       const choice = data.lifeChoice as Record<string, unknown> | null;
       if (!choice || typeof choice !== 'object' || !['none', 'travel', 'social'].includes(String(choice.type))) return false;

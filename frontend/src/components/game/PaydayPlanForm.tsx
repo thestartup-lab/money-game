@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { PaydayFormData, PaydayPlanPayload, LifeChoice } from '../../types/game';
+import type { Lifestyle, HealthHabit, PaydayFormData, PaydayPlanPayload, LifeChoice } from '../../types/game';
 import DecisionCountdown from './DecisionCountdown';
 
 interface PaydayPlanFormProps {
@@ -30,6 +30,8 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
   const [basicQty, setBasicQty] = useState(1);
   const [buyIns, setBuyIns] = useState<Array<'medical' | 'life' | 'property'>>([]);
   const [lifeChoice, setLifeChoice] = useState<LifeChoice>({ type: 'none' });
+  const [lifestyle, setLifestyle] = useState<Lifestyle>(data.currentLifestyle ?? 'normal');
+  const [healthHabit, setHealthHabit] = useState<HealthHabit>(data.currentHealthHabit ?? 'normal');
   const [showTravelList, setShowTravelList] = useState(false);
   const totalCost = (() => {
     let cost = 0;
@@ -75,6 +77,8 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
       investInNetwork: checks.networkInvest,
       stockDCAAmount: dcaAmount,
       buyInsuranceTypes: buyIns,
+      lifestyle,
+      healthHabit,
       ...(basicInvestmentId ? { basicInvestmentId, basicInvestmentQuantity: basicQty } : {}),
     };
     onSubmit(plan, lifeChoice);
@@ -95,7 +99,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
           </div>
           {data.globalPayday ? (
             <div className="text-xs font-semibold text-emerald-300">
-              本次涵蓋 {data.settlementMonths ?? 12} 個月收支（{Math.round((data.settlementMonths ?? 12) / 12)} 年），只配置一次
+              本次涵蓋 {data.settlementMonths ?? 12} 個月收支（{data.growthCycles ?? Math.max(1, Math.round((data.settlementMonths ?? 12) / 24))} 輪），只配置一次
             </div>
           ) : data.combinedPlanning ? (
             <div className="text-xs font-semibold text-emerald-300">只需規劃一次，薪資將依序結算</div>
@@ -161,7 +165,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
             {[
               { key: 'fqUpgrade' as const,     label: `財商升級 FQ ${data.currentStats.financialIQ}→${data.currentStats.financialIQ + 1}`, opt: data.affordableOptions.fqUpgrade,     icon: '📈' },
               { key: 'healthBoost' as const,    label: `積極健康 HP +20（現 ${data.currentStats.health}${data.globalPayday ? '，含整季維護' : ''}）`, opt: data.affordableOptions.healthBoost, icon: '💪' },
-              { key: 'healthMaint' as const,    label: data.globalPayday ? '本次健康維護（防 3 次成長週期衰退）' : '健康維護（防 HP 衰退）', opt: data.affordableOptions.healthMaintenance, icon: '🛡' },
+              { key: 'healthMaint' as const,    label: data.globalPayday ? `本次健康維護（防 ${data.growthCycles ?? 1} 輪自然衰退）` : '健康維護（防 HP 衰退）', opt: data.affordableOptions.healthMaintenance, icon: '🛡' },
               { key: 'skillTraining' as const,  label: `進修培訓 SK +20（現 ${data.currentStats.careerSkill}）`,                              opt: data.affordableOptions.skillTraining, icon: '📚' },
               { key: 'networkInvest' as const,  label: `人脈拓展 NT +1（現 ${data.currentStats.network}）`,                                   opt: data.affordableOptions.networkInvest, icon: '🤝' },
             ].map(({ key, label, opt, icon }) => {
@@ -315,6 +319,29 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
         </section>
 
         {/* ─── D. 生活體驗 ─── */}
+        <section>
+          <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">生活方式與健康習慣（持續到下次更改）</h3>
+          <p className="mb-2 text-sm text-gray-300">生活方式決定每月生活支出（基準 ${(data.livingExpensesBase ?? 0).toLocaleString()}）；健康習慣決定 HP 衰退速度。</p>
+          <div className="grid grid-cols-3 gap-1">
+            {(Object.entries(data.lifestyleOptions ?? {}) as [Lifestyle, { label: string; desc: string; expenseMultiplier: number }][]).map(([key, opt]) => (
+              <button key={key} type="button" onClick={() => setLifestyle(key)}
+                className={`min-h-16 rounded-xl border p-2 text-left ${lifestyle === key ? 'border-amber-400 bg-amber-900/40' : 'border-gray-600 bg-gray-800'}`}>
+                <div className="text-base font-bold text-white">{key === 'frugal' ? '🍚' : key === 'lavish' ? '🍷' : '🙂'} {opt.label}</div>
+                <div className="text-[11px] leading-tight text-gray-300">{opt.desc}</div>
+              </button>
+            ))}
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-1">
+            {(Object.entries(data.healthHabitOptions ?? {}) as [HealthHabit, { label: string; desc: string }][]).map(([key, opt]) => (
+              <button key={key} type="button" onClick={() => setHealthHabit(key)}
+                className={`min-h-16 rounded-xl border p-2 text-left ${healthHabit === key ? 'border-emerald-400 bg-emerald-900/40' : 'border-gray-600 bg-gray-800'}`}>
+                <div className="text-base font-bold text-white">{key === 'active' ? '🏃' : key === 'overwork' ? '🌙' : '🙂'} {opt.label}</div>
+                <div className="text-[11px] leading-tight text-gray-300">{opt.desc}</div>
+              </button>
+            ))}
+          </div>
+        </section>
+
         <section>
           <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">生活體驗</h3>
           <div className="space-y-2">

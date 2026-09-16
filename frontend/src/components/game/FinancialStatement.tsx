@@ -29,7 +29,7 @@ export default function FinancialStatement({ player, onShowCash, onShowFlow }: P
         <div className="card text-center">
           <p className="text-xs text-gray-400">月總收入</p>
           <p className="text-xl font-semibold positive">${fmt(player.totalIncome)}</p>
-          <p className="text-xs text-gray-500">{player.retirementStatus === 'retired' ? '退休金' : player.retirementStatus === 'consultant' ? '顧問' : '薪資'} ${fmt(player.salary)} + 被動 ${fmt(player.totalPassiveIncome)}</p>
+          <p className="text-xs text-gray-500">{player.retirementStatus === 'retired' ? '退休金' : player.retirementStatus === 'consultant' ? '顧問' : '薪資'} ${fmt(player.salary)} + 被動 ${fmt(player.totalPassiveIncome)}{(player.spouseIncome ?? 0) > 0 ? ` + 配偶 ${fmt(player.spouseIncome ?? 0)}` : ''}</p>
         </div>
         <div className="card text-center">
           <p className="text-xs text-gray-400">月總支出</p>
@@ -78,12 +78,15 @@ export default function FinancialStatement({ player, onShowCash, onShowFlow }: P
         <p className="text-sm text-gray-400 mb-2">支出細項</p>
         <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
           {player.expenses.taxes > 0 && <><span className="text-gray-400">稅金</span><span className="negative text-right">{fmt(player.expenses.taxes)}</span></>}
+          {(player.expenses.socialInsurance ?? 0) > 0 && <><span className="text-gray-400">勞健保</span><span className="negative text-right">{fmt(player.expenses.socialInsurance ?? 0)}</span></>}
+          {(player.expenses.rent ?? 0) > 0 && <><span className="text-gray-400">房租</span><span className="negative text-right">{fmt(player.expenses.rent ?? 0)}</span></>}
           {player.expenses.homeMortgagePayment > 0 && <><span className="text-gray-400">房貸</span><span className="negative text-right">{fmt(player.expenses.homeMortgagePayment)}</span></>}
           {player.expenses.carLoanPayment > 0 && <><span className="text-gray-400">車貸</span><span className="negative text-right">{fmt(player.expenses.carLoanPayment)}</span></>}
           {player.expenses.childExpenses > 0 && <><span className="text-gray-400">子女</span><span className="negative text-right">{fmt(player.expenses.childExpenses)}</span></>}
           {player.expenses.insurancePremiums > 0 && <><span className="text-gray-400">保費</span><span className="negative text-right">{fmt(player.expenses.insurancePremiums)}</span></>}
           {(player.expenses.unsecuredLoanPayments ?? 0) > 0 && <><span className="text-gray-400" title="應急借款、進修貸款、P2P、投資槓桿借款等月付">借款月付</span><span className="negative text-right">{fmt(player.expenses.unsecuredLoanPayments ?? 0)}</span></>}
-          {player.expenses.otherExpenses > 0 && <><span className="text-gray-400">其他</span><span className="negative text-right">{fmt(player.expenses.otherExpenses)}</span></>}
+          {(player.expenses.recurringExpenses ?? 0) > 0 && <><span className="text-gray-400">奉養／照護</span><span className="negative text-right">{fmt(player.expenses.recurringExpenses ?? 0)}</span></>}
+          {player.expenses.otherExpenses > 0 && <><span className="text-gray-400">生活</span><span className="negative text-right">{fmt(player.expenses.otherExpenses)}</span></>}
         </div>
       </div>
 
@@ -117,8 +120,20 @@ export default function FinancialStatement({ player, onShowCash, onShowFlow }: P
             {player.isMarried ? '💑 已婚' : '單身'}
           </span>
           <span className="px-2 py-1 rounded-full bg-blue-900 text-blue-200">
-            👶 {player.numberOfChildren} 子女
+            👶 {player.numberOfChildren} 子女{(player.childBirthAges ?? []).length > 0 && player.currentAge !== undefined ? `（${(player.childBirthAges ?? []).map((b) => `${Math.max(0, Math.round((player.currentAge ?? 0) - b))}歲`).join('、')}）` : ''}
           </span>
+          <span className={`px-2 py-1 rounded-full ${player.housing === 'own' ? 'bg-emerald-900 text-emerald-200' : 'bg-gray-800 text-gray-300'}`}>
+            {player.housing === 'own' ? '🏠 自有住房' : '🔑 租屋'}
+          </span>
+          {player.lifestyle && player.lifestyle !== 'normal' && (
+            <span className="px-2 py-1 rounded-full bg-amber-900 text-amber-200">{player.lifestyle === 'frugal' ? '🍚 節儉' : '🍷 享受'}</span>
+          )}
+          {player.healthHabit && player.healthHabit !== 'normal' && (
+            <span className="px-2 py-1 rounded-full bg-teal-900 text-teal-200">{player.healthHabit === 'active' ? '🏃 規律運動' : '🌙 熬夜加班'}</span>
+          )}
+          {(player.salaryGrowthMultiplier ?? 1) > 1 && (
+            <span className="px-2 py-1 rounded-full bg-indigo-900 text-indigo-200">📈 年資加薪 ×{(player.salaryGrowthMultiplier ?? 1).toFixed(2)}</span>
+          )}
           <span className="px-2 py-1 rounded-full bg-amber-900 text-amber-200">
             ✨ 體驗值 {player.lifeExperience}
           </span>

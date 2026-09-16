@@ -1,4 +1,5 @@
 import { Player, AssetType } from './gameDataModels';
+import { HOME_OPTIONS, HOME_DOWN_PAYMENT_RATIO, HOME_LOAN_MONTHLY_RATE, HOME_LOAN_TERM_MONTHS, HOME_TRANSACTION_COST_RATE } from './gameConfig';
 
 /**
  * 職業自帶的房貸與車貸原本只是「每月支出」，沒有本金，玩家無法提前還款。
@@ -90,4 +91,79 @@ export function applyHouseholdRepayment(player: Player, liabilityId: string, deb
   player.expenses[field] = Math.max(0, newPayment);
   const liability = player.liabilities.find((l) => l.id === liabilityId);
   if (liability) liability.monthlyPayment = player.expenses[field];
+}
+
+/** 房貸月付（本息平均攤還） */
+export function homeLoanPayment(principal: number, monthlyRate = HOME_LOAN_MONTHLY_RATE, months = HOME_LOAN_TERM_MONTHS): number {
+  if (principal <= 0) return 0;
+  if (monthlyRate <= 0) return Math.ceil(principal / months);
+  return Math.round(principal * monthlyRate / (1 - Math.pow(1 + monthlyRate, -months)));
+}
+
+export interface HomeOfferView {
+  id: string; name: string; price: number; downPayment: number; loan: number; monthlyPayment: number;
+  transactionCost: number; cashNeeded: number; affordable: boolean; reason?: string;
+  monthlyDelta: number;
+}
+
+/** 手機「買房」清單：每個選項的頭期款、月付與買不起的原因 */
+export function getHomeOffers(player: Player): HomeOfferView[] {
+  return HOME_OPTIONS.map((o) => {
+    const downPayment = Math.round(o.price * HOME_DOWN_PAYMENT_RATIO);
+    const loan = o.price - downPayment;
+    const monthlyPayment = homeLoanPayment(loan);
+    const transactionCost = Math.round(o.price * HOME_TRANSACTION_COST_RATE);
+    const cashNeeded = downPayment + transactionCost;
+    let reason: string | undefined;
+    if (player.housing === 'own') reason = '已經有自住房；想換屋請先出售';
+    else if (player.cash < cashNeeded) reason = `現金不足：需要 $${cashNeeded.toLocaleString()}（頭期款 + 交易稅費）`;
+    else if (player.isBedridden) reason = '臥床中無法辦理';
+    return { id: o.id, name: o.name, price: o.price, downPayment, loan, monthlyPayment, transactionCost, cashNeeded,
+      affordable: !reason, reason, monthlyDelta: player.rentExpense - monthlyPayment };
+  });
+}
+
+export interface BuyHomeResult { success: boolean; message: string; price?: number; downPayment?: number; monthlyPayment?: number; rentSaved?: number }
+
+/** 買自住房：付頭期款＋交易稅費，房租歸零，改繳 30 年房貸；房子是資產（隨房市漲跌） */
+export function buyHome(player: Player, optionId: string): BuyHomeResult {
+  const offer = getHomeOffers(player).find((o) => o.id === optionId);
+  if (!offer) return { success: false, message: '沒有這個房型。' };
+  if (!offer.affordable) return { success: false, message: offer.reason ?? '目前無法購買。' };
+  const rentSaved = player.rentExpense;
+  player.cash -= offer.cashNeeded;
+  player.housing = 'own';
+  player.expenses.homeMortgagePayment = offer.monthlyPayment;
+  const liabilityId = homeLoanId(player.id);
+  const assetId = homeAssetId(player.id);
+  player.liabilities = player.liabilities.filter((l) => l.id !== liabilityId);
+  player.assets = player.assets.filter((a) => a.id !== assetId);
+  player.liabilities.push({ id: liabilityId, name: '房貸（自住房）', totalDebt: offer.loan, monthlyPayment: offer.monthlyPayment });
+  player.assets.push({ id: assetId, name: `自住房：${offer.name}`, type: AssetType.RealEstate, cost: offer.price, currentValue: offer.price,
+    downPayment: offer.downPayment, monthlyCashflow: 0, linkedLiabilityId: liabilityId, isResidence: true });
+  return { success: true, message: `買下${offer.name}：頭期款 $${offer.downPayment.toLocaleString()}、稅費 $${offer.transactionCost.toLocaleString()}；每月房貸 $${offer.monthlyPayment.toLocaleString()}，不再付房租 $${rentSaved.toLocaleString()}。`,
+    price: offer.price, downPayment: offer.downPayment, monthlyPayment: offer.monthlyPayment, rentSaved };
+}
+
+export interface SellHomeResult { success: boolean; message: string; proceeds?: number; debtSettled?: number; transactionCost?: number; netCashChange?: number }
+
+/** 賣自住房：市價 − 剩餘房貸 − 交易稅費；之後回到租屋（月租依職業設定） */
+export function sellHome(player: Player): SellHomeResult {
+  const assetId = homeAssetId(player.id);
+  const asset = player.assets.find((a) => a.id === assetId);
+  if (!asset || player.housing !== 'own') return { success: false, message: '目前沒有自住房可出售。' };
+  const liabilityId = homeLoanId(player.id);
+  const liability = player.liabilities.find((l) => l.id === liabilityId);
+  const proceeds = asset.currentValue;
+  const debtSettled = liability?.totalDebt ?? 0;
+  const transactionCost = Math.round(proceeds * HOME_TRANSACTION_COST_RATE);
+  const netCashChange = proceeds - debtSettled - transactionCost;
+  player.cash += netCashChange;
+  player.assets = player.assets.filter((a) => a.id !== assetId);
+  player.liabilities = player.liabilities.filter((l) => l.id !== liabilityId);
+  player.expenses.homeMortgagePayment = 0;
+  player.housing = 'rent';
+  if (player.expenses.rent <= 0) player.expenses.rent = player.profession.startingHomeMortgage;
+  return { success: true, message: `賣出自住房：市價 $${proceeds.toLocaleString()}，清償房貸 $${debtSettled.toLocaleString()}，稅費 $${transactionCost.toLocaleString()}，淨入帳 ${netCashChange >= 0 ? '+' : '-'}$${Math.abs(netCashChange).toLocaleString()}；之後改租屋，每月 $${player.rentExpense.toLocaleString()}。`,
+    proceeds, debtSettled, transactionCost, netCashChange };
 }

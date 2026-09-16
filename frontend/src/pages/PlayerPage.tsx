@@ -576,10 +576,11 @@ export default function PlayerPage() {
       setActiveEvent({ kind: 'disease_crisis', title: p.crisis.title, description: p.crisis.description, effectiveCost: p.result.effectiveCost, turnsLost: p.result.turnsLost, hpBefore: p.hpBefore, hpAfter: p.hpAfter, wasInsured: p.result.wasInsured });
     });
 
-    s.on('assetSold', (p: { assetId: string; proceeds: number; debtSettled: number; netCashChange: number }) => {
+    s.on('assetSold', (p: { assetId: string; proceeds: number; debtSettled: number; netCashChange: number; capitalGainsTax?: number; message?: string }) => {
       const sign = p.netCashChange >= 0 ? '+' : '';
-      addNotification(`💹 資產出售！淨收益 ${sign}$${p.netCashChange.toLocaleString()}（賣價 $${p.proceeds.toLocaleString()}${p.debtSettled > 0 ? `，清償負債 $${p.debtSettled.toLocaleString()}` : ''}）`);
+      addNotification(p.message ? `💹 ${p.message}` : `💹 資產出售！淨收益 ${sign}$${p.netCashChange.toLocaleString()}（賣價 $${p.proceeds.toLocaleString()}${p.debtSettled > 0 ? `，清償負債 $${p.debtSettled.toLocaleString()}` : ''}${p.capitalGainsTax ? `，資本利得稅 $${p.capitalGainsTax.toLocaleString()}` : ''}）`);
     });
+    s.on('homeBought', (p: { message: string }) => { addNotification(`🏠 ${p.message}`); });
 
     // 發薪日結果在主持人收束決策後才公開。
     s.on('paydayPlanResult', (p: { playerId: string; planResult?: { stockDCA?: { executed: boolean; amount: number; newPortfolioValue: number } } }) => {
@@ -1458,6 +1459,7 @@ export default function PlayerPage() {
                 onLoanOffer={(targetId, amount, monthlyRate) => emit('loanOffer', { targetPlayerId: targetId, amount, monthlyRate })}
                 onLoanRequest={(targetId, amount, monthlyRate) => emit('loanRequest', { targetPlayerId: targetId, amount, monthlyRate })}
                 onSellAsset={(assetId) => emit('sellAsset', { assetId })}
+                onBuyHome={(optionId) => emit('buyHome', { optionId })}
                 onRequestAnalysis={() => { emit('requestPlayerAnalysis'); }}
                 isGameOver={isGameOver}
               />

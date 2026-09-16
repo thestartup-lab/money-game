@@ -1,3 +1,4 @@
+import { PARENT_CARE_FAMILY_SUPPORT_NT, SPOUSE_UNEMPLOYMENT_MONTHS, DIVORCE_CASH_SHARE, DIVORCE_HP_COST } from './gameConfig';
 import { Player, GameState, Asset, Liability, AssetType } from './gameDataModels';
 import {
   DealCard,
@@ -101,6 +102,8 @@ export function applyDoodadCard(player: Player, card: DoodadCard): DoodadResult 
  */
 export function applyBabyCard(player: Player): void {
   player.numberOfChildren += 1;
+  // 記錄出生時的本人年齡：子女支出依孩子年齡分段，成年後不再是支出
+  player.childBirthAges.push(player.currentAge);
 }
 
 /**
@@ -296,6 +299,12 @@ function calcHPModifier(hp: number): { costMultiplier: number; flatBonus: number
 export function previewCrisisCost(player: Player, card: CrisisCard): {
   wasInsured: boolean; effectiveCost: number; baseTurns: number; deathRisk: boolean; shortfall: number;
 } {
+  // 家庭責任類事件（父母醫療等）沒有保險可抵，也不受本人 HP 影響；人脈 ≥ 5 親友分攤減半
+  if (card.requiredInsurance === 'none') {
+    const support = card.familySupportHalvesCost && player.stats.network >= PARENT_CARE_FAMILY_SUPPORT_NT;
+    const effectiveCost = Math.round(card.baseCost * (support ? 0.5 : 1));
+    return { wasInsured: false, effectiveCost, baseTurns: card.turnsLostWithoutInsurance, deathRisk: false, shortfall: Math.max(0, effectiveCost - player.cash) };
+  }
   const wasInsured = player.insurance[card.requiredInsurance];
   const hpMod = calcHPModifier(player.stats.health);
   const effectiveCost = wasInsured
@@ -316,6 +325,15 @@ export function applyCrisisCard(player: Player, card: CrisisCard): CrisisResult 
     player.cash -= Math.min(effectiveCost, Math.max(0, player.cash));
     player.turnsToSkip += baseTurns;
     addLifeExperience(player, LIFE_EXP.CRISIS_SURVIVED);
+    if (card.recurringExpense) {
+      const support = card.familySupportHalvesCost && player.stats.network >= PARENT_CARE_FAMILY_SUPPORT_NT;
+      player.recurringExpenses.push({
+        id: `${card.id}-${Date.now()}`,
+        label: card.recurringExpense.label,
+        monthly: Math.round(card.recurringExpense.monthly * (support ? 0.5 : 1)),
+        monthsLeft: card.recurringExpense.months,
+      });
+    }
   }
 
   return {
@@ -472,6 +490,10 @@ export interface RelationshipResult {
   lifeExpGain: number;
   /** 現金變化量（負數=扣錢）*/
   cashChange: number;
+  /** 配偶事件（已婚時） */
+  spouseEvent?: 'unemployed' | 'divorce';
+  /** 升遷永久加薪比例 */
+  permanentRaise?: number;
   /** 月現金流變化量（永久）*/
   monthlyCashflowDelta: number;
   /** 薪資倍率（僅暫時效果時才有值）*/
@@ -498,13 +520,44 @@ export function applyRelationshipCard(
   card: RelationshipCard,
   diceResult?: number,
 ): RelationshipResult {
-  const e = card.effect;
+  // 配偶事件：未婚時改套用替代效果
+  const useFallback = Boolean(card.effect.spouseEvent && !player.isMarried && card.effect.unmarriedFallback);
+  const fb = card.effect.unmarriedFallback;
+  const e = useFallback && fb
+    ? { networkDelta: fb.networkDelta, lifeExpGain: fb.lifeExpGain, cashCost: fb.cashCost }
+    : card.effect;
   let cashChange         = 0;
   let networkDelta       = e.networkDelta       ?? 0;
   let lifeExpGain        = e.lifeExpGain        ?? 0;
   let monthlyCashflowDelta = e.monthlyCashflowDelta ?? 0;
   let gambleOutcome: 'success' | 'failure' | undefined;
-  let message            = card.description;
+  let message            = useFallback && fb ? `${fb.title}：${fb.description}` : card.description;
+  let spouseEvent: 'unemployed' | 'divorce' | undefined;
+
+  // 升遷：永久加薪（年資倍率直接乘上去）
+  if (!useFallback && card.effect.permanentRaise) {
+    player.salaryGrowthMultiplier = Math.round(player.salaryGrowthMultiplier * (1 + card.effect.permanentRaise) * 1000) / 1000;
+  }
+
+  if (!useFallback && e.spouseEvent && player.isMarried) {
+    spouseEvent = e.spouseEvent;
+    if (e.spouseEvent === 'unemployed') {
+      if (player.spouse) player.spouse.unemployedMonthsLeft = SPOUSE_UNEMPLOYMENT_MONTHS;
+      message = `${card.title}：配偶接下來 ${SPOUSE_UNEMPLOYMENT_MONTHS} 個月沒有收入（−$${(player.spouse?.income ?? 0).toLocaleString()}／月）。`;
+    } else {
+      const split = Math.round(Math.max(0, player.cash) * DIVORCE_CASH_SHARE);
+      player.cash -= split;
+      cashChange -= split;
+      const lostIncome = (player.spouse?.income ?? 0) + player.marriageBonus;
+      player.spouse = null;
+      player.isMarried = false;
+      player.marriageBonus = 0;
+      player.marriageType = undefined;
+      player.relationshipPoints = 0;
+      player.stats.health = Math.max(0, player.stats.health - DIVORCE_HP_COST);
+      message = `${card.title}：財產分割 −$${split.toLocaleString()}，每月少了 $${lostIncome.toLocaleString()} 家庭收入，HP −${DIVORCE_HP_COST}。`;
+    }
+  }
 
   // 立即現金扣除
   if (e.cashCost) {
@@ -571,8 +624,10 @@ export function applyRelationshipCard(
     lifeExpGain,
     cashChange,
     monthlyCashflowDelta,
-    salaryMultiplier:  e.salaryMultiplier,
-    turnsAffected:     e.turnsAffected,
+    spouseEvent,
+    permanentRaise: useFallback ? undefined : card.effect.permanentRaise,
+    salaryMultiplier:  useFallback ? undefined : card.effect.salaryMultiplier,
+    turnsAffected:     useFallback ? undefined : card.effect.turnsAffected,
     triggerMarriageWindow: !!(e.triggerMarriageWindow && !player.isMarried && player.stats.health >= 30),
     triggerSmallDeal:  !!(e.triggerSmallDeal),
     gambleOutcome,

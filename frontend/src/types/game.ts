@@ -53,6 +53,12 @@ export interface PlayerStats {
 
 export interface Expenses {
   taxes: number;
+  /** 租屋月租（買房後 0） */
+  rent?: number;
+  /** 勞健保 */
+  socialInsurance?: number;
+  /** 奉養父母等暫時性支出 */
+  recurringExpenses?: number;
   homeMortgagePayment: number;
   carLoanPayment: number;
   creditCardPayment: number;
@@ -75,6 +81,15 @@ export interface Profession {
   quadrant: string;
   salaryType: string;
   startingSalary: number;
+}
+
+export type Lifestyle = 'frugal' | 'normal' | 'lavish';
+export type HealthHabit = 'active' | 'normal' | 'overwork';
+export interface LifestyleOption { label: string; expenseMultiplier: number; hpPerRound: number; lifeExpPerRound: number; desc: string }
+export interface HealthHabitOption { label: string; decayMultiplier: number; monthlyCost: number; salaryMultiplier: number; desc: string }
+export interface HomeOffer {
+  id: string; name: string; price: number; downPayment: number; loan: number; monthlyPayment: number;
+  transactionCost: number; cashNeeded: number; affordable: boolean; reason?: string; monthlyDelta: number;
 }
 
 export interface SecondLifeRouteProgress {
@@ -164,6 +179,20 @@ export interface Player {
   hasPassedSecondLife: boolean;
   /** 脫離內圈還差多少（已在外圈為 null） */
   secondLifeProgress?: SecondLifeProgress | null;
+  // ── 真實人生擬真 ──
+  currentAge?: number;
+  housing?: 'rent' | 'own';
+  homeOffers?: HomeOffer[];
+  spouse?: { income: number; unemployedMonthsLeft: number; retired: boolean } | null;
+  spouseIncome?: number;
+  lifestyle?: Lifestyle;
+  healthHabit?: HealthHabit;
+  childBirthAges?: number[];
+  salaryGrowthMultiplier?: number;
+  livingCostMultiplier?: number;
+  recurringExpenses?: { id: string; label: string; monthly: number; monthsLeft: number }[];
+  layoffMonthsTotal?: number;
+  naturalDeathProbability?: number;
   fastTrackPosition: number;
   visitedDestinations: string[];
   legacyBonusPoints: number;
@@ -225,6 +254,8 @@ export interface GameState {
   readingAutoContinueMs?: number;
   /** 主持人自訂結婚禮金；null 為預設 */
   marriageGiftOverride?: number | null;
+  /** 每輪結算月數（12／24／48） */
+  monthsPerRound?: number;
   /** 玩家送出選擇後自動揭曉（預設開） */
   autoRevealOnSubmit?: boolean;
   /** 全體行動時間已按完成的玩家 */
@@ -523,6 +554,8 @@ export interface PaydayFormData {
   combinedPlanning?: boolean;
   /** 這次規劃涵蓋的月數；季度發薪時為 3。 */
   settlementMonths?: number;
+  /** 本次涵蓋的輪數（成長週期數） */
+  growthCycles?: number;
   globalPayday?: boolean;
   globalPaydayNumber?: number;
   currentCash: number;
@@ -530,6 +563,11 @@ export interface PaydayFormData {
   affordableOptions: AffordableOptions;
   basicInvestments?: Array<{ id: string; name: string; cost: number; monthlyCashflow: number; description: string }>;
   currentInsurance: { hasMedicalInsurance: boolean; hasLifeInsurance: boolean; hasPropertyInsurance: boolean };
+  currentLifestyle?: Lifestyle;
+  currentHealthHabit?: HealthHabit;
+  lifestyleOptions?: Record<Lifestyle, LifestyleOption>;
+  healthHabitOptions?: Record<HealthHabit, HealthHabitOption>;
+  livingExpensesBase?: number;
   stockDCAPortfolioValue: number;
   timeoutMs: number;
   controlledByHost?: boolean;
@@ -551,6 +589,8 @@ export interface PaydayPlanPayload {
   settlementMonths?: number;
   basicInvestmentId?: string;
   basicInvestmentQuantity?: number;
+  lifestyle?: Lifestyle;
+  healthHabit?: HealthHabit;
   investInFQUpgrade: boolean;
   investInHealthMaintenance: boolean;
   investInHealthBoost: boolean;

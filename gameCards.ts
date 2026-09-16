@@ -93,7 +93,9 @@ export interface DealCard {
 export type CrisisInsuranceType =
   | 'hasMedicalInsurance'
   | 'hasPropertyInsurance'
-  | 'hasLifeInsurance';
+  | 'hasLifeInsurance'
+  /** 沒有保險能抵免（例如父母的醫療） */
+  | 'none';
 
 export interface CrisisCard {
   id: string;
@@ -113,6 +115,10 @@ export interface CrisisCard {
    * 若為 true：玩家無保險且現金不足以支付 baseCost 時觸發死亡判定。
    */
   canCauseDeath: boolean;
+  /** 之後持續數月的固定支出（奉養父母、長照） */
+  recurringExpense?: { label: string; monthly: number; months: number };
+  /** 人脈 ≥ 5（手足親友分攤）時費用減半 */
+  familySupportHalvesCost?: boolean;
 }
 
 /** 意外支出卡（日常生活花費） */
@@ -1075,6 +1081,32 @@ export const CRISIS_EVENTS: CrisisCard[] = [
     turnsLostWithInsurance: 0,
     canCauseDeath: true,
   },
+  // --- 家庭責任類（沒有保險能抵免；人脈 ≥ 5 親友分攤減半）---
+  {
+    id: 'cr-009',
+    title: '父母重病住院',
+    description: '父母突然重病住院，醫療與看護費用 $150,000 由你負擔。人脈 ≥ 5 有手足親友分攤，只需一半。',
+    requiredInsurance: 'none',
+    baseCost: 150_000,
+    insuredCost: 150_000,
+    turnsLostWithoutInsurance: 0,
+    turnsLostWithInsurance: 0,
+    canCauseDeath: false,
+    familySupportHalvesCost: true,
+  },
+  {
+    id: 'cr-010',
+    title: '父母需要長期照護',
+    description: '父母失能需要長照，未來 24 個月每月多 $12,000 照護費，另付 $60,000 安置費用。人脈 ≥ 5 親友分攤減半。',
+    requiredInsurance: 'none',
+    baseCost: 60_000,
+    insuredCost: 60_000,
+    turnsLostWithoutInsurance: 0,
+    turnsLostWithInsurance: 0,
+    canCauseDeath: false,
+    familySupportHalvesCost: true,
+    recurringExpense: { label: '父母長期照護', monthly: 12_000, months: 24 },
+  }
 ];
 
 // ============================================================
@@ -1305,6 +1337,12 @@ export interface RelationshipCard {
       /** 失敗時扣除的現金（$）*/
       failureCashLoss: number;
     };
+    /** 配偶事件（僅已婚適用）：配偶失業 6 個月／離婚 */
+    spouseEvent?: 'unemployed' | 'divorce';
+    /** 未婚時改套用的效果與說明 */
+    unmarriedFallback?: { title: string; description: string; networkDelta?: number; lifeExpGain?: number; cashCost?: number };
+    /** 升遷：永久加薪比例（例如 0.1） */
+    permanentRaise?: number;
   };
 }
 
@@ -1384,9 +1422,9 @@ export const RELATIONSHIP_EVENTS: RelationshipCard[] = [
   {
     id: 'rel-010',
     title: '職場升遷機會',
-    description: '因人脈介紹獲得一份薪水更高的跳槽邀約。可選擇接受：薪資 +20%（下一個發薪日生效），體驗值 +10。',
+    description: '因人脈介紹獲得一份薪水更高的跳槽邀約。可選擇接受：下個月薪資 +20%，之後永久加薪 10%，體驗值 +10。',
     eventCategory: 'opportunity',
-    effect: { salaryMultiplier: 1.2, turnsAffected: 1, lifeExpGain: 10 },
+    effect: { salaryMultiplier: 1.2, turnsAffected: 1, lifeExpGain: 10, permanentRaise: 0.1 },
   },
   {
     id: 'rel-011',
@@ -1402,6 +1440,23 @@ export const RELATIONSHIP_EVENTS: RelationshipCard[] = [
     eventCategory: 'opportunity',
     effect: { cashCost: 45_000, monthlyCashflowDelta: 3_000 },
   },
+  // ── 家庭現實（2 張）──
+  {
+    id: 'rel-013',
+    title: '配偶失業',
+    description: '配偶的公司縮編，接下來 6 個月家裡少了一份收入，得靠你撐住。',
+    eventCategory: 'negative',
+    effect: { spouseEvent: 'unemployed', lifeExpGain: 3,
+      unmarriedFallback: { title: '好友失業求助', description: '好友突然失業，向你借了 $20,000 週轉；這份人情日後會回報。現金 −$20,000，NT +1。', cashCost: 20_000, networkDelta: 1 } },
+  },
+  {
+    id: 'rel-014',
+    title: '婚姻觸礁',
+    description: '長期忽略經營關係，婚姻走到盡頭。財產分割：現金 −25%，失去配偶收入，HP −10；這段經歷讓你更了解自己，體驗 +10。',
+    eventCategory: 'negative',
+    effect: { spouseEvent: 'divorce', lifeExpGain: 10,
+      unmarriedFallback: { title: '陪朋友走過離婚', description: '朋友離婚找你訴苦，你陪他走過低潮。NT +1，體驗 +5。', networkDelta: 1, lifeExpGain: 5 } },
+  }
 ];
 
 // ============================================================
@@ -1433,6 +1488,7 @@ export const CRISIS_POOL_BY_STAGE: Readonly<Record<LifeStage, string[]>> = {
     'cr-004',
     'cr-005',
     'cr-006',
+    'cr-009', // 父母重病住院（三明治世代）
   ],
   // 轉型期（50–64）：重症加入，首次出現死亡判定
   [LifeStage.Transition]: [
@@ -1441,6 +1497,8 @@ export const CRISIS_POOL_BY_STAGE: Readonly<Record<LifeStage, string[]>> = {
     'cr-005',
     'cr-006',
     'cr-007', // 嚴重交通意外（壽險，可死亡）
+    'cr-009', // 父母重病住院
+    'cr-010', // 父母需要長期照護
   ],
   // 退休期（65–79）：重症為主，輕症移除
   [LifeStage.Retirement]: [
