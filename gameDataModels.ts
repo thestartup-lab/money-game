@@ -199,6 +199,8 @@ export interface DecisionPhaseState {
   reminderEndsAt: number;
   /** 危機自救階段：本人可在此階段賣資產或申請應急借款，主持人確認後才判定生死。 */
   rescue?: boolean;
+  /** 公開到大螢幕的決策內容（卡片、金額、選項），讓全場一起看 */
+  publicLines?: string[];
 }
 
 export type FacilitatorSceneKind = 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family' | 'global_event' | 'second_life' | 'career' | 'retirement';
@@ -272,6 +274,8 @@ export interface PaydayPlanPayload {
   growthCycles?: number;
   /** 只接受伺服器當期清單的 ID；每人每次發薪最多買一份。 */
   basicInvestmentId?: string;
+  /** 基本投資購買份數（1–10，預設 1） */
+  basicInvestmentQuantity?: number;
   /** 升級財商值（費用依當前 FQ 等級而定，見 FQ_UPGRADE_COSTS） */
   investInFQUpgrade: boolean;
   /** 維護健康：阻止本次 HP 自然衰退（費用 $3,000） */
@@ -748,6 +752,8 @@ export class GameState {
   actionPhaseRound = -1;
   /** 人生轉折：待處理的玩家順序 */
   retirementQueue: string[] = [];
+  /** 主持人自訂結婚禮金（null = 用預設表 + 隨機浮動） */
+  marriageGiftOverride: number | null = null;
   /** 計時發薪：開關、間隔、上次發薪時的「有效經過時間」與輪數 */
   paydayTimerEnabled = true;
   paydayIntervalMs = 10 * 60 * 1000;

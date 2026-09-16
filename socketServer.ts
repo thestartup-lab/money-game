@@ -1112,7 +1112,7 @@ function applyMarriageScene(gs: GameState, player: Player, context: Record<strin
     marriageBonus = card.monthlyBonus;
     lifeExpGained = card.lifeExpGain;
     addLifeExperience(player, lifeExpGained);
-    marriageGift = MARRIAGE_GIFT.window + Math.round(Math.random() * MARRIAGE_GIFT_RANDOM_BONUS);
+    marriageGift = gs.marriageGiftOverride ?? (MARRIAGE_GIFT.window + Math.round(Math.random() * MARRIAGE_GIFT_RANDOM_BONUS));
     player.cash += marriageGift;
     if (card.id === 'marry-003') {
       const previousHealth = player.stats.health;
@@ -1125,7 +1125,7 @@ function applyMarriageScene(gs: GameState, player: Player, context: Record<strin
     if (!result.success) return null;
     marriageBonus = result.marriageBonus ?? 0;
     lifeExpGained = result.lifeExpGained ?? 0;
-    marriageGift = MARRIAGE_GIFT[route] + Math.round(Math.random() * MARRIAGE_GIFT_RANDOM_BONUS);
+    marriageGift = gs.marriageGiftOverride ?? (MARRIAGE_GIFT[route] + Math.round(Math.random() * MARRIAGE_GIFT_RANDOM_BONUS));
     player.cash += marriageGift;
     description = `${player.name} 把${route === 'matchmaker' ? '主持人促成的緣分' : '長期經營的關係'}帶進婚姻：每月收入 +$${marriageBonus.toLocaleString()}、生命體驗 +${lifeExpGained}、禮金 +$${marriageGift.toLocaleString()}。`;
   } else {
@@ -1855,6 +1855,7 @@ function serializeGameState(gs: GameState): object {
     // 只有主持人手動暫停才為 true；決策階段與舞台事件的自動暫停不算
     isManuallyPaused: gs.pausedAt !== null && !gs.decisionPhase && !gs.facilitatorScene,
     readingAutoContinueMs: gs.readingAutoContinueMs,
+    marriageGiftOverride: gs.marriageGiftOverride,
     autoRevealOnSubmit: gs.autoRevealOnSubmit,
     actionPhaseDone: gs.decisionPhase?.playerId === '__all_players__' && (gs.decisionPhase.kind === 'actions' || gs.decisionPhase.kind === 'payday') ? [...gs.actionPhaseDone] : [],
     actionPhaseEnabled: gs.actionPhaseEnabled,
@@ -2541,6 +2542,10 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
     'payday',
     `第 ${gs.globalPaydayNumber + 1} 次全體發薪規劃（結算 ${settlementMonths / MONTHS_PER_ROUND} 年）`,
     '所有人同時在手機填寫這段期間的規劃；全員送出後自動結算，主持人也可提前以空白方案結束。',
+    { publicLines: [
+      `💰 結算 ${settlementMonths} 個月薪資與支出；每人可配置：財商升級、健康投資、專長培訓、人脈投資、保險、股票定期定額`,
+      `🏦 基本投資（每人最多一種、最多 10 份）：${BASIC_INVESTMENTS.map((b) => `${b.name} $${b.cost.toLocaleString()}／份、每月 +$${b.monthlyCashflow.toLocaleString()}`).join('；')}`,
+    ] },
   );
   gs.actionPhaseDone = new Set();
   emitToRoom(roomId, 'paydayPlanningStarted', {
@@ -2638,7 +2643,7 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
     const investmentCash = player.cash;
     const investmentFlow = player.monthlyCashflow;
     const investmentWorth = calcNetWorth(player);
-    const basicInvestment = buyBasicInvestment(player, quarterlyPlan.basicInvestmentId, gs.globalPaydayNumber + 1);
+    const basicInvestment = buyBasicInvestment(player, quarterlyPlan.basicInvestmentId, gs.globalPaydayNumber + 1, quarterlyPlan.basicInvestmentQuantity ?? 1);
     if (basicInvestment.success) {
       logPlayerEvent(player, gs, 'asset_buy', basicInvestment.message, investmentCash, investmentFlow, investmentWorth,
         { source: 'basic_investment', offerId: quarterlyPlan.basicInvestmentId, globalPaydayNumber: gs.globalPaydayNumber + 1 });
@@ -4517,7 +4522,7 @@ io.on('connection', (socket: Socket) => {
   // ----------------------------------------------------------
   // 人生事件祝賀（congratulate）
   // ----------------------------------------------------------
-  onSafe('congratulate', (payload: { targetPlayerId: string; event: string }) => {
+  onSafe('congratulate', (payload: { targetPlayerId: string; event: string; amount?: number }) => {
     const gs = getRoomState(socket);
     if (!gs) return;
     const roomId = gs.gameId;
@@ -4527,8 +4532,9 @@ io.on('connection', (socket: Socket) => {
     if (!sender || !target) return;
     if (!sender.isAlive) { emitClient(socket, 'error', { message: '已出局玩家無法送祝賀。' }); return; }
     if (!target.isAlive) { emitClient(socket, 'error', { message: '對方已離世，無法送上祝賀。' }); return; }
-    const CONGRATS_AMOUNT = 7_500;
     const CONGRATS_PER_NT = 5;
+    const CONGRATS_AMOUNT = Number.isSafeInteger(payload.amount) ? Number(payload.amount) : 7_500;
+    if (CONGRATS_AMOUNT < 1_000 || CONGRATS_AMOUNT > 300_000) { emitClient(socket, 'error', { message: '祝賀金額需介於 $1,000 到 $300,000。' }); return; }
     if (sender.cash < CONGRATS_AMOUNT) { emitClient(socket, 'error', { message: `現金不足（需 $${CONGRATS_AMOUNT.toLocaleString()}）。` }); return; }
 
     sender.cash -= CONGRATS_AMOUNT;
@@ -4813,6 +4819,20 @@ io.on('connection', (socket: Socket) => {
     console.log(`[triggerPaydayNow] 房間 ${gs.gameId} 主持人立即發薪`);
     if (!gs.turnInProgress && !gs.decisionPhase && !gs.facilitatorScene) continueAfterTurnAdvance(gs);
     else emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
+  // ----------------------------------------------------------
+  // 結婚禮金金額 (setMarriageGift)：不帶 amount（或 0）= 恢復預設
+  // ----------------------------------------------------------
+  onSafe('setMarriageGift', (payload: { amount?: number }) => {
+    const gs = getRoomState(socket);
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    if (!isRoomAdmin(socket, gs)) { emitClient(socket, 'error', { message: '只有管理員可以調整結婚禮金。' }); return; }
+    const amount = Number(payload?.amount ?? 0);
+    if (!Number.isFinite(amount) || amount < 0 || amount > 5_000_000) { emitClient(socket, 'error', { message: '禮金需介於 0 到 $5,000,000。' }); return; }
+    gs.marriageGiftOverride = amount > 0 ? Math.round(amount) : null;
+    console.log(`[setMarriageGift] 房間 ${gs.gameId} 結婚禮金：${gs.marriageGiftOverride ?? '預設'}`);
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 
   // ----------------------------------------------------------
@@ -5425,8 +5445,8 @@ io.on('connection', (socket: Socket) => {
       emitClient(socket, 'error', { message: '只有管理員可以觸發邂逅事件。' });
       return;
     }
-    if (gs.decisionPhase || gs.facilitatorScene || gs.globalPaydayPending || gs.globalPaydayInProgress) {
-      emitClient(socket, 'error', { message: '請先完成目前的全場決策或舞台事件。' });
+    if ((gs.decisionPhase && gs.decisionPhase.kind !== 'actions') || gs.facilitatorScene || gs.globalPaydayPending || gs.globalPaydayInProgress) {
+      emitClient(socket, 'error', { message: '請先完成目前的全場決策或舞台事件（全體行動時間內可以觸發）。' });
       return;
     }
 
@@ -5437,7 +5457,7 @@ io.on('connection', (socket: Socket) => {
     }
 
     const result = activateRelationship(target);
-    emitClient(socket, 'triggerRelationshipResult', result);
+    emitClient(socket, 'triggerRelationshipResult', { ...result, targetPlayerId: target.id, targetName: target.name });
 
     if (result.activated) {
       console.log(`[relationship] ${target.name}（${roomId}）邂逅觸發`);
@@ -5991,7 +6011,7 @@ function beginHostDecisionPhase(
   kind: DecisionPhaseState['kind'],
   title: string,
   description?: string,
-  options?: { rescue?: boolean },
+  options?: { rescue?: boolean; publicLines?: string[] },
 ): HostDecisionContext {
   const wasAlreadyPaused = gs.pausedAt !== null;
   if (!wasAlreadyPaused) pauseGameClock(gs);
@@ -6020,6 +6040,7 @@ function beginHostDecisionPhase(
     startedAt: Date.now(),
     reminderEndsAt: Date.now() + (options?.rescue ? 120 : reminderSeconds[kind]) * 1000,
     rescue: options?.rescue ? true : undefined,
+    publicLines: options?.publicLines,
   };
 
   emitToRoom(gs.gameId, 'decisionPhaseStarted', gs.decisionPhase);
@@ -6122,6 +6143,42 @@ function waitForHostRelease(gs: GameState, context: HostDecisionContext): Promis
 // 卡牌決策等待輔助
 // ============================================================
 
+/** 把手機上的決策卡片內容轉成大螢幕可公開的文字（全場一起看、一起討論）。 */
+function describePrompt(prompt: { event: string; payload: unknown } | undefined): string[] | undefined {
+  if (!prompt) return undefined;
+  const p = prompt.payload as Record<string, any>;
+  const money = (n: unknown) => `$${Number(n ?? 0).toLocaleString()}`;
+  switch (prompt.event) {
+    case 'dealCardsDrawn':
+      return [
+        ...(p.cards ?? []).map((c: any) => `📋 ${c.name}：頭期款 ${money(c.downPayment)}，月現金流 ${Number(c.monthlyCashflow) >= 0 ? '+' : ''}${money(c.monthlyCashflow)}`),
+        `手頭現金 ${money(p.playerCash)}，可借 ${money(p.loanAvailable)}；可現金或槓桿買下，放棄則全場競標`,
+      ];
+    case 'fastTrackDealCard': {
+      const d = p.deal ?? {};
+      return [`💼 ${d.title}：頭期款 ${money(d.asset?.downPayment ?? d.asset?.cost)}，月現金流 +${money(d.asset?.monthlyCashflow)}`, `手頭現金 ${money(p.playerCash)}，可借 ${money(p.loanAvailable)}`];
+    }
+    case 'charityCardPending':
+      return [`❤️ 捐出 ${money(p.amount)} 可獲得生命體驗與傳承加成，並得到一次加骰`];
+    case 'crisisNTSkipAvailable':
+      return [`⚠️ ${p.card?.title}：${p.card?.description}`, `未保險費用 ${money(p.card?.baseCost)}；人脈 ≥ 3 可用一次「人脈護盾」跳過`];
+    case 'crisisRescueRequired':
+      return [`🆘 ${p.card?.title} 需要 ${money(p.effectiveCost)}，現金 ${money(p.cash)}，還差 ${money(p.shortfall)}`, '本人可賣資產或申請應急借款自救；補不足才出局'];
+    case 'relationshipCardDrawn':
+      return [`🤝 ${p.card?.title}：${p.card?.description}`, '本人決定接受或婉拒'];
+    case 'techStartupOffer':
+      return [`🚀 科技新創投資：投入 ${money(p.investmentAmount)}，擲骰決定成敗；手頭現金 ${money(p.playerCash)}`];
+    case 'fastTrackTravelOptions':
+      return [...(p.destinations ?? []).slice(0, 6).map((d: any) => `✈️ ${d.name}（${d.region}）${money(d.cost)}，體驗 +${d.lifeExpGained}`), `手頭現金 ${money(p.playerCash)}`];
+    case 'fastTrackPartnershipOptions':
+      return [`🤝 可邀請的夥伴：${(p.availablePartners ?? []).map((x: any) => x.name).join('、')}`];
+    case 'fastTrackPartnershipInvitation':
+      return [`🤝 ${p.offerorName} 發出合夥邀請，預估各得分紅 ${money(p.estimatedDividend)}`];
+    default:
+      return undefined;
+  }
+}
+
 async function waitForCardDecision(
   socket: Socket,
   gs: GameState,
@@ -6131,7 +6188,7 @@ async function waitForCardDecision(
   prompt?: { event: string; payload: unknown },
 ): Promise<Record<string, unknown> | null> {
   await readBoardNotices(gs);
-  const context = beginHostDecisionPhase(gs, player, kind, title);
+  const context = beginHostDecisionPhase(gs, player, kind, title, undefined, { publicLines: describePrompt(prompt) });
   // 卡片一定要等落格說明結束、決策階段開始後才送到手機；
   // 否則落格說明結束時手機會把卡片當成「決策已結束」清掉，玩家就看不到選項。
   if (prompt) emitClient(socket, prompt.event, prompt.payload);
@@ -6155,7 +6212,7 @@ async function applyCrisisWithRescue(
     emitCellEvent(socket, gs.gameId, player.name, label,
       `🆘 ${player.name} 的現金 $${player.cash.toLocaleString()} 付不起「${card.title}」$${preview.effectiveCost.toLocaleString()}（差 $${preview.shortfall.toLocaleString()}）。可先在手機賣資產或申請應急借款自救，主持人確認後才判定。`);
     await readBoardNotices(gs);
-    const context = beginHostDecisionPhase(gs, player, 'crisis', `危機自救：${card.title}`, undefined, { rescue: true });
+    const context = beginHostDecisionPhase(gs, player, 'crisis', `危機自救：${card.title}`, undefined, { rescue: true, publicLines: [`🆘 ${card.title} 需要 $${preview.effectiveCost.toLocaleString()}，現金 $${player.cash.toLocaleString()}，還差 $${preview.shortfall.toLocaleString()}`, '本人可賣資產或申請應急借款自救；補不足才出局'] });
     emitClient(socket, 'crisisRescueRequired', {
       card,
       effectiveCost: preview.effectiveCost,

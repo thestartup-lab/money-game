@@ -16,7 +16,7 @@ const required: Record<string, string[]> = {
   confirmCareerScene: ['sceneId', 'accepted'],
 };
 const numeric = new Set(['amount', 'monthlyRate', 'bidAmount', 'academic', 'health', 'social', 'resource',
-  'seconds', 'addSeconds', 'durationMinutes', 'diceCount', 'cash', 'hp', 'mp', 'fq', 'creditScore']);
+  'seconds', 'addSeconds', 'durationMinutes', 'diceCount', 'cash', 'hp', 'mp', 'fq', 'creditScore', 'basicInvestmentQuantity', 'minutes', 'startupAmount']);
 const boolean = new Set(['accepted', 'accept', 'rescued', 'enabled', 'force', 'useLeverage', 'donate', 'investInFQUpgrade',
   'investInHealthMaintenance', 'investInHealthBoost', 'investInSkillTraining', 'investInNetwork']);
 
@@ -53,6 +53,7 @@ export function validateSocketPayload(event: string, payload: unknown): boolean 
   if (event === 'setPlayerStats' && (!data.stats || typeof data.stats !== 'object' || Array.isArray(data.stats) || Object.values(data.stats).some(v => typeof v !== 'number' || !Number.isFinite(v)))) return false;
   if (event === 'submitPaydayPlan') {
     if ('stockDCAAmount' in data && (!Number.isSafeInteger(data.stockDCAAmount) || (data.stockDCAAmount as number) < 0)) return false;
+    if ('basicInvestmentQuantity' in data && (!Number.isSafeInteger(data.basicInvestmentQuantity) || (data.basicInvestmentQuantity as number) < 1 || (data.basicInvestmentQuantity as number) > 10)) return false;
     if ('buyInsuranceTypes' in data && (!Array.isArray(data.buyInsuranceTypes) || data.buyInsuranceTypes.some(t => !['medical', 'life', 'property'].includes(t)))) return false;
     if ('lifeChoice' in data) {
       const choice = data.lifeChoice as Record<string, unknown> | null;

@@ -60,6 +60,9 @@ export default function AdminPage() {
   const [loginRoomId, setLoginRoomId] = useState(INITIAL_REMEMBERED_ADMIN_ROOM);
   const [loginError, setLoginError] = useState('');
   const [actionError, setActionError] = useState('');
+  const [playerFeedback, setPlayerFeedback] = useState<Record<string, string>>({});
+  const pendingTargetRef = useRef<string>('');
+  const [marriageGiftInput, setMarriageGiftInput] = useState('');
   const paydayRemaining = usePaydayCountdown(gameState?.paydayTimer, Boolean(gameState?.isPaused));
   const [adminCodeInput, setAdminCodeInput] = useState('');
 
@@ -168,6 +171,12 @@ export default function AdminPage() {
       addLog(`錯誤：${message}`);
       setLoginError(message);
       setActionError(message);
+      // 玩家列表的操作被拒絕時，把原因直接顯示在該玩家底下
+      if (pendingTargetRef.current) {
+        const id = pendingTargetRef.current;
+        setPlayerFeedback((prev) => ({ ...prev, [id]: `❌ ${message}` }));
+        pendingTargetRef.current = '';
+      }
     });
     s.on('globalPaydayFailed', (p: { message?: string }) => {
       const message = `季度發薪中斷：${p.message ?? '請檢查玩家狀態後繼續'}`;
@@ -176,10 +185,13 @@ export default function AdminPage() {
     });
     s.on('setPlayerStatsResult', (p: { success: boolean; targetPlayerId?: string; message?: string }) => {
       addLog(p.success ? '玩家數值已更新' : `數值更新失敗：${p.message ?? ''}`);
+      const id = p.targetPlayerId ?? pendingTargetRef.current;
+      if (id) setPlayerFeedback((prev) => ({ ...prev, [id]: p.success ? '✅ 數值已套用' : `❌ ${p.message ?? '套用失敗'}` }));
     });
-    s.on('triggerRelationshipResult', (p: { activated: boolean; message?: string }) => {
+    s.on('triggerRelationshipResult', (p: { activated: boolean; message?: string; targetPlayerId?: string }) => {
       addLog(p.activated ? '已啟動關係' : `關係啟動失敗：${p.message ?? ''}`);
-      if (!p.activated && p.message) setActionError(p.message);
+      const id = p.targetPlayerId ?? pendingTargetRef.current;
+      if (id) setPlayerFeedback((prev) => ({ ...prev, [id]: p.activated ? `💞 ${p.message ?? '已觸發邂逅'}` : `❌ ${p.message ?? '無法觸發'}` }));
     });
 
     return () => { s.disconnect(); };
@@ -329,6 +341,7 @@ export default function AdminPage() {
   // 展示頁 URL（讓展示頁自動帶房間代碼）
   const displayUrl = `${window.location.protocol}//${window.location.host}/?display&room=${roomId}`;
   const playerUrl = `${window.location.protocol}//${window.location.host}/?room=${roomId}`;
+  const hostUrl = `${window.location.protocol}//${window.location.host}/?host&room=${roomId}&code=${readAdminCode(roomId)}`;
 
   const phaseLabel: Record<string, string> = {
     WaitingForPlayers: '等待玩家', Pre20: '設定中',
@@ -425,6 +438,13 @@ export default function AdminPage() {
             <p className="admin-kicker">Player Entry</p>
             <div className="admin-qr-wrap">
               <QRCodeSVG value={playerUrl} size={130} />
+              <details className="mt-2 w-full text-center">
+                <summary className="cursor-pointer text-xs font-bold text-emerald-300">📱 手機控場 QR（主持人自己掃，含控制碼，勿投影）</summary>
+                <div className="mt-2 flex flex-col items-center gap-1">
+                  <div className="rounded-lg bg-white p-2"><QRCodeSVG value={hostUrl} size={110} /></div>
+                  <p className="break-all text-[10px] text-gray-500">{hostUrl}</p>
+                </div>
+              </details>
             </div>
             <p className="text-sm font-bold text-indigo-200">請玩家掃碼加入</p>
             <p className="font-mono text-3xl font-black text-yellow-300 tracking-[0.3em]">{roomId}</p>
@@ -532,6 +552,7 @@ export default function AdminPage() {
                     <p className="text-xs font-bold uppercase tracking-wider text-indigo-300">全場決策時間</p>
                     <p className="mt-1 text-lg font-black text-white">{decisionPhase.title}</p>
                     <p className="text-sm text-indigo-200">{decisionPhase.playerName} 正在決策</p>
+                    {(decisionPhase.publicLines ?? []).map((line, i) => <p key={i} className="mt-1 text-sm text-gray-200">{line}</p>)}
                   </div>
                   <div className="text-right">
                     <DecisionCountdown
@@ -631,6 +652,14 @@ export default function AdminPage() {
                   >{gameState?.actionPhaseEnabled !== false ? '開啟中（點此關閉）' : '關閉中（點此開啟）'}</button>
                 </div>
                 <p className="mt-1 text-[11px] text-gray-500">開啟時每輪擲骰前全員同時處理行動，全員完成或你按結束後開始擲骰。</p>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="font-bold text-gray-200">結婚禮金</span>
+                  <span className="text-gray-300">{gameState?.marriageGiftOverride ? `$${gameState.marriageGiftOverride.toLocaleString()}` : '預設（$6,000–$17,000 依路徑浮動）'}</span>
+                </div>
+                <div className="mt-1 flex gap-1">
+                  <input type="number" min={0} step={1000} value={marriageGiftInput} onChange={(e) => setMarriageGiftInput(e.target.value)} placeholder="金額，0 恢復預設" className="min-w-0 flex-1 rounded-lg border border-slate-600 bg-slate-950 px-2 py-1 text-white" />
+                  <button className="rounded-lg bg-pink-800 px-2 py-1 font-bold text-white hover:bg-pink-700" onClick={() => { const n = Number(marriageGiftInput || 0); emit('setMarriageGift', n > 0 ? { amount: n } : {}); }}>套用</button>
+                </div>
                 <div className="mt-3 border-t border-gray-700 pt-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-bold text-gray-200">計時發薪</span>
@@ -801,13 +830,18 @@ export default function AdminPage() {
                     [p.id]: { ...(prev[p.id] ?? { fq: p.stats.financialIQ, hp: p.stats.health, sk: p.stats.careerSkill, nt: p.stats.network }), [field]: val },
                   }))
                 }
+                feedback={playerFeedback[p.id]}
                 onApplyStats={() => {
                   const se = statsEdit[p.id];
                   if (!se) return;
+                  pendingTargetRef.current = p.id;
+                  setPlayerFeedback((prev) => ({ ...prev, [p.id]: '⏳ 套用中…' }));
                   emit('setPlayerStats', { targetPlayerId: p.id, stats: { fq: se.fq, hp: se.hp, sk: se.sk, nt: se.nt } });
                   addLog(`調整 ${p.name} 數值`);
                 }}
                 onTriggerRelationship={() => {
+                  pendingTargetRef.current = p.id;
+                  setPlayerFeedback((prev) => ({ ...prev, [p.id]: '⏳ 觸發中…' }));
                   emit('triggerRelationship', { targetPlayerId: p.id });
                   addLog(`觸發 ${p.name} 的邂逅機緣`);
                 }}
@@ -941,9 +975,10 @@ interface PlayerRowProps {
   onStatsChange: (field: keyof StatsEdit, val: number) => void;
   onApplyStats: () => void;
   onTriggerRelationship: () => void;
+  feedback?: string;
 }
 
-function PlayerRow({ player: p, currentAge, expanded, statsEdit, onToggleExpand, onStatsChange, onApplyStats, onTriggerRelationship }: PlayerRowProps) {
+function PlayerRow({ player: p, currentAge, expanded, statsEdit, onToggleExpand, onStatsChange, onApplyStats, onTriggerRelationship, feedback }: PlayerRowProps) {
   const hpColor = p.stats.health >= 60 ? 'text-green-400' : p.stats.health >= 30 ? 'text-yellow-400' : 'text-red-400';
   const cfColor = p.monthlyCashflow >= 0 ? 'text-emerald-400' : 'text-red-400';
   const personalAge = p.personalAge ?? Math.max(p.startAge ?? 20, currentAge);
@@ -1017,6 +1052,7 @@ function PlayerRow({ player: p, currentAge, expanded, statsEdit, onToggleExpand,
               </button>
             )}
           </div>
+          {feedback && <p className="rounded-lg bg-slate-800 px-3 py-2 text-sm font-bold text-white" role="status">{feedback}</p>}
           <div className="text-xs text-gray-500 space-y-0.5">
             <p>體驗值 {p.lifeExperience}  ｜  小孩 {p.numberOfChildren}  ｜  信用 {p.creditScore}</p>
             <p>資產 {p.assets.length} 筆  ｜  負債 {p.liabilities.length} 筆  ｜  被動收入 ${fmt(p.totalPassiveIncome)}/月</p>

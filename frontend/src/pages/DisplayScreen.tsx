@@ -884,6 +884,11 @@ export default function DisplayScreen() {
                 <div className="w-full max-w-2xl rounded-3xl border-2 border-indigo-400 bg-gradient-to-br from-indigo-950/95 to-gray-950/95 px-10 py-9 text-center shadow-2xl">
                   <p className="text-sm font-bold uppercase tracking-[0.3em] text-indigo-300">全場決策時間</p>
                   <p className="mt-3 text-5xl font-black text-white">{gameState.decisionPhase.title}</p>
+                  {(gameState.decisionPhase.publicLines ?? []).length > 0 && (
+                    <div className="mx-auto mt-4 max-w-3xl space-y-1 rounded-2xl bg-black/40 px-6 py-4 text-left">
+                      {gameState.decisionPhase.publicLines!.map((line, i) => <p key={i} className="text-2xl leading-snug text-gray-100">{line}</p>)}
+                    </div>
+                  )}
                   {gameState.decisionPhase.playerId === '__all_players__' && (gameState.decisionPhase.kind === 'actions' || gameState.decisionPhase.kind === 'payday') ? (
                     <div className="mx-auto mt-4 flex max-w-3xl flex-wrap justify-center gap-2">
                       {gameState.players.filter((p) => p.isAlive).map((p) => {
@@ -912,7 +917,7 @@ export default function DisplayScreen() {
                         ? (gameState.autoRevealOnSubmit !== false ? '選擇已送出，揭曉中' : '選擇已送出，等待主持人揭曉')
                         : '思考與討論中'}
                   </div>
-                  <p className="mt-5 text-sm text-gray-400">{gameState.decisionPhase.kind === 'actions' ? '全員完成就自動開始擲骰；主持人也可提前結束' : '決策內容保密；由主持人掌握討論與揭曉時機'}</p>
+                  <p className="mt-5 text-sm text-gray-400">{gameState.decisionPhase.kind === 'actions' ? '全員完成就自動開始擲骰；主持人也可提前結束' : '內容全場公開，一起討論；本人在手機選擇，送出後揭曉'}</p>
                 </div>
               </div>
             )}

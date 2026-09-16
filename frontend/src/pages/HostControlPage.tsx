@@ -23,7 +23,12 @@ interface RoomSummary {
 }
 
 
-const INITIAL_ROOM_ID = readRememberedAdminRoom();
+const URL_PARAMS = new URLSearchParams(window.location.search);
+const URL_ROOM = (URL_PARAMS.get('room') ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const URL_CODE = (URL_PARAMS.get('code') ?? '').toUpperCase().trim();
+// 從後台 QR 掃進來會帶房號與控制碼，直接記住並自動登入，不用手動輸入
+if (URL_ROOM && URL_CODE) rememberAdminCode(URL_ROOM, URL_CODE);
+const INITIAL_ROOM_ID = URL_ROOM || readRememberedAdminRoom();
 const PHASE_LABELS: Record<string, string> = {
   WaitingForPlayers: '等待玩家',
   Pre20: '玩家設定中',
@@ -79,10 +84,11 @@ export default function HostControlPage() {
     socket.on('connect', () => {
       setConnected(true);
       socket.emit('listRooms');
-      if (rememberedRoomRef.current && readAdminCode(rememberedRoomRef.current)) {
+      const autoRoom = rememberedRoomRef.current || URL_ROOM;
+      if (autoRoom && readAdminCode(autoRoom)) {
         socket.emit('adminLogin', {
-          roomId: rememberedRoomRef.current,
-          password: readAdminCode(rememberedRoomRef.current),
+          roomId: autoRoom,
+          password: readAdminCode(autoRoom),
         });
       }
     });
@@ -210,7 +216,8 @@ export default function HostControlPage() {
               setMessage('');
             }}
           />
-          <label className="host-label" htmlFor="host-access-code">主持人控制碼</label>
+          <p className="host-help">最快的方式：在電腦後台掃「手機控場 QR」，會自動帶入房號與控制碼。</p>
+          <label className="host-label" htmlFor="host-access-code">主持人控制碼（掃 QR 進來的不用填）</label>
           <input id="host-access-code" type="password" autoComplete="off" placeholder="從原主持人控制台取得" value={adminCodeInput} onChange={e => setAdminCodeInput(e.target.value.toUpperCase().trim())} />
           <button
             className="host-primary-button"

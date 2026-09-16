@@ -191,6 +191,8 @@ export interface GameState {
   isManuallyPaused?: boolean;
   /** 落格說明自動放行毫秒數；0 = 每次等主持人 */
   readingAutoContinueMs?: number;
+  /** 主持人自訂結婚禮金；null 為預設 */
+  marriageGiftOverride?: number | null;
   /** 玩家送出選擇後自動揭曉（預設開） */
   autoRevealOnSubmit?: boolean;
   /** 全體行動時間已按完成的玩家 */
@@ -229,6 +231,8 @@ export interface GameState {
     reminderEndsAt: number;
     /** 危機自救：本人可在此階段賣資產或申請應急借款 */
     rescue?: boolean;
+    /** 公開到大螢幕的決策內容 */
+    publicLines?: string[];
   } | null;
   facilitatorScene?: FacilitatorScene | null;
   turnInProgress?: boolean;
@@ -514,6 +518,7 @@ export interface PaydayFormData {
 export interface PaydayPlanPayload {
   settlementMonths?: number;
   basicInvestmentId?: string;
+  basicInvestmentQuantity?: number;
   investInFQUpgrade: boolean;
   investInHealthMaintenance: boolean;
   investInHealthBoost: boolean;

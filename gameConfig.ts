@@ -39,7 +39,7 @@ export const STOCK_DCA_MONTHLY_RETURN_RATE = 0.009;
 export const STOCK_DCA_MONTHLY_DIVIDEND_RATE = 0.004;
 
 /** 股票定期定額可選投入金額選項 */
-export const STOCK_DCA_AMOUNTS = [15_000, 30_000, 75_000] as const;
+export const STOCK_DCA_AMOUNTS = [15_000, 30_000, 75_000, 150_000, 300_000, 750_000] as const;
 
 /** 「第二人生」格的索引（內圈第 24 格，路過後才能進入外圈）*/
 export const SECOND_LIFE_CELL = 23;

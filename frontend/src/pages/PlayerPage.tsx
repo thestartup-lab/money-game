@@ -94,6 +94,7 @@ export default function PlayerPage() {
   type LoanOffer = { offerId: string; lenderName: string; borrowerId: string; amount: number; monthlyRate: number };
   type LoanRequest = { requestId: string; borrowerName: string; lenderId: string; amount: number; monthlyRate: number };
   const [congratulatableEvent, setCongratulatableEvent] = useState<CongratulatableEvent | null>(null);
+  const [congratsAmount, setCongratsAmount] = useState(7500);
   const [activeAuction, setActiveAuction] = useState<ActiveAuction | null>(null);
   const [auctionBid, setAuctionBid] = useState('');
   const [partnershipOffer, setPartnershipOffer] = useState<PartnershipOffer | null>(null);
@@ -1072,12 +1073,18 @@ export default function PlayerPage() {
         {congratulatableEvent && (
           <div className="card border border-yellow-600 bg-yellow-900 space-y-2">
             <p className="text-yellow-200 font-semibold text-sm">🎉 {congratulatableEvent.targetName} {congratulatableEvent.event}！</p>
-            <p className="text-yellow-400 text-xs">花費 $7,500 送上祝賀（對方 +$7,500，每收到 5 次祝賀 NT+1）</p>
+            <p className="text-yellow-400 text-xs">選一個金額送上祝賀（對方收到同額，每收到 5 次祝賀 NT+1）</p>
+            <div className="grid grid-cols-4 gap-1">
+              {[3000, 7500, 15000, 30000].map((amt) => (
+                <button key={amt} className={`rounded-lg py-1 text-xs font-bold ${congratsAmount === amt ? 'bg-yellow-500 text-black' : 'bg-yellow-950 text-yellow-200'}`} onClick={() => setCongratsAmount(amt)}>${(amt / 1000)}k</button>
+              ))}
+            </div>
+            <input type="number" min={1000} step={1000} value={congratsAmount} onChange={(e) => setCongratsAmount(Math.max(0, Number(e.target.value) || 0))} className="w-full rounded-lg border border-yellow-700 bg-gray-900 px-2 py-1 text-sm text-white" />
             <div className="flex gap-2">
-              <button className="btn-primary text-sm flex-1" onClick={() => {
-                emit('congratulate', { targetPlayerId: congratulatableEvent.targetId, event: congratulatableEvent.event });
+              <button className="btn-primary text-sm flex-1" disabled={congratsAmount < 1000 || (myPlayer?.cash ?? 0) < congratsAmount} onClick={() => {
+                emit('congratulate', { targetPlayerId: congratulatableEvent.targetId, event: congratulatableEvent.event, amount: congratsAmount });
                 setCongratulatableEvent(null);
-              }}>🎊 恭喜（$7,500）</button>
+              }}>🎊 恭喜（${congratsAmount.toLocaleString()}）</button>
               <button className="btn-secondary text-sm" onClick={() => setCongratulatableEvent(null)}>略過</button>
             </div>
           </div>

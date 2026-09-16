@@ -36,7 +36,7 @@ const INSURANCE_LABELS: Record<'medical' | 'life' | 'property', string> = {
 };
 
 const LEVERAGE_RATE_MULTIPLIER = 1.25;
-const DCA_AMOUNTS = [15_000, 30_000, 75_000] as const;
+const DCA_AMOUNTS = [15_000, 30_000, 75_000, 150_000, 300_000, 750_000] as const;
 const LOAN_AMOUNTS = [75_000, 150_000, 300_000, 450_000, 750_000] as const;
 
 function getLoanLimit(score: number): number {

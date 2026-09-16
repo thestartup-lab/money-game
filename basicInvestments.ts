@@ -1,6 +1,6 @@
 import { AssetType, Player } from './gameDataModels';
 
-/** 公開基本機會：每人每期最多一份，不搶全桌庫存，不附攻略排名。
+/** 公開基本機會：每人每期最多一種、最多 10 份，不搶全桌庫存，不附攻略排名。
  * 報酬是遊戲數值，低於地圖高報酬交易；股票／事業仍受市場事件影響。
  */
 export const BASIC_INVESTMENTS = [
@@ -14,7 +14,9 @@ export const BASIC_INVESTMENTS = [
 
 const purchases = new WeakMap<Player, Set<number>>();
 
-export function buyBasicInvestment(player: Player, id: string | undefined, paydayNumber: number) {
+export const BASIC_INVESTMENT_MAX_QUANTITY = 10;
+
+export function buyBasicInvestment(player: Player, id: string | undefined, paydayNumber: number, quantity = 1) {
   const offer = BASIC_INVESTMENTS.find(item => item.id === id);
   const used = purchases.get(player) ?? new Set<number>();
   if (!id) return { success: false, message: '本期不購買基本投資。' };
@@ -22,13 +24,16 @@ export function buyBasicInvestment(player: Player, id: string | undefined, payda
     return { success: false, message: '基本投資項目無效，未扣款。' };
   if (!player.isAlive || used.has(paydayNumber))
     return { success: false, message: '本期已購買或角色無法投資，未重複扣款。' };
-  if (player.cash < offer.cost)
-    return { success: false, message: '配置後現金不足，基本投資未執行。' };
-  player.cash -= offer.cost;
-  player.assets.push({ id: `basic-${player.id}-${paydayNumber}`, name: offer.name,
-    type: offer.type, cost: offer.cost, currentValue: offer.cost, monthlyCashflow: offer.monthlyCashflow });
+  const qty = Math.min(BASIC_INVESTMENT_MAX_QUANTITY, Math.max(1, Math.floor(Number.isFinite(quantity) ? quantity : 1)));
+  const totalCost = offer.cost * qty;
+  const totalFlow = offer.monthlyCashflow * qty;
+  if (player.cash < totalCost)
+    return { success: false, message: `配置後現金不足（${qty} 份需 $${totalCost.toLocaleString()}），基本投資未執行。` };
+  player.cash -= totalCost;
+  player.assets.push({ id: `basic-${player.id}-${paydayNumber}`, name: qty > 1 ? `${offer.name} ×${qty}` : offer.name,
+    type: offer.type, cost: totalCost, currentValue: totalCost, monthlyCashflow: totalFlow });
   used.add(paydayNumber);
   purchases.set(player, used);
-  return { success: true, name: offer.name, cost: offer.cost, monthlyCashflow: offer.monthlyCashflow,
-    message: `購入${offer.name}，支付 $${offer.cost.toLocaleString()}，每月基礎收入 $${offer.monthlyCashflow.toLocaleString()}。` };
+  return { success: true, name: offer.name, cost: totalCost, monthlyCashflow: totalFlow, quantity: qty,
+    message: `購入${offer.name} ${qty} 份，支付 $${totalCost.toLocaleString()}，每月基礎收入 $${totalFlow.toLocaleString()}。` };
 }
