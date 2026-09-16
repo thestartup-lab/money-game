@@ -1746,6 +1746,81 @@ function buildSecondLifeProgress(p: Player): object | null {
   };
 }
 
+/** 手機「行動」面板每個動作點選時要標注的效果與價值（全部由伺服器算，避免前端數字失真）。 */
+function buildActionInfo(p: Player): object {
+  const cfg = require('./gameConfig') as typeof import('./gameConfig');
+  const { CRISIS_EVENTS } = require('./gameCards') as typeof import('./gameCards');
+  const premiumMult = cfg.PREMIUM_MULT_BY_STAGE[p.lifeStage] ?? 1;
+  const age = p.currentAge;
+  const marriageWindow = cfg.LIFE_EVENT_WINDOWS.marriage;
+  const inPeak = age >= marriageWindow.peakStart && age <= marriageWindow.peakEnd;
+  const coversFor = (type: 'hasMedicalInsurance' | 'hasLifeInsurance' | 'hasPropertyInsurance') =>
+    CRISIS_EVENTS.filter((c) => c.requiredInsurance === type).map((c) => ({ title: c.title, baseCost: c.baseCost, insuredCost: c.insuredCost, canCauseDeath: c.canCauseDeath }));
+  const insurance = {
+    medical: { label: '醫療險', activationFee: cfg.INSURANCE_ACTIVATION_FEE.medical, basePremium: MEDICAL_INSURANCE_PREMIUM, monthlyPremium: Math.round(MEDICAL_INSURANCE_PREMIUM * premiumMult), deduction: cfg.MEDICAL_INSURANCE_DEDUCTION, covers: coversFor('hasMedicalInsurance'), extra: '外圈疾病危機也適用' },
+    life: { label: '壽險', activationFee: cfg.INSURANCE_ACTIVATION_FEE.life, basePremium: LIFE_INSURANCE_PREMIUM, monthlyPremium: Math.round(LIFE_INSURANCE_PREMIUM * premiumMult), deduction: cfg.LIFE_INSURANCE_DEDUCTION, covers: coversFor('hasLifeInsurance'), extra: '身故時遺產不扣負債（傳承分）' },
+    property: { label: '財產險', activationFee: cfg.INSURANCE_ACTIVATION_FEE.property, basePremium: PROPERTY_INSURANCE_PREMIUM, monthlyPremium: Math.round(PROPERTY_INSURANCE_PREMIUM * premiumMult), deduction: cfg.PROPERTY_INSURANCE_DEDUCTION, covers: coversFor('hasPropertyInsurance'), extra: '' },
+  };
+  const rate = getLoanRate(p.creditScore);
+  return {
+    travel: cfg.TRAVEL_DESTINATIONS
+      .filter((d) => d.tier === 'both' || d.tier === (p.isInFastTrack ? 'outer' : 'inner'))
+      .map((d) => ({ id: d.id, name: d.name, region: d.region, tier: d.tier, cost: d.cost, description: d.description,
+        lifeExp: p.visitedDestinations.includes(d.id) ? Math.floor(d.lifeExpGained / 2) : d.lifeExpGained,
+        visited: p.visitedDestinations.includes(d.id), hpCost: d.hpCost, salaryPenalty: d.salaryPenalty, statEffect: d.statEffect ?? null })),
+    travelMinHp: HP_ACTIVITY_THRESHOLDS.travel,
+    social: { cost: cfg.SOCIAL_EVENT_COST, drsMin: cfg.SOCIAL_EVENT_DRS_MIN, drsMax: inPeak ? cfg.SOCIAL_EVENT_DRS_PEAK_MAX : cfg.SOCIAL_EVENT_DRS_MAX, inPeak,
+      peakStart: marriageWindow.peakStart, peakEnd: marriageWindow.peakEnd, threshold: RELATIONSHIP_MARRIAGE_THRESHOLD, currentDrs: p.relationshipPoints, active: p.relationshipActive, minHp: HP_ACTIVITY_THRESHOLDS.socialEvent },
+    insurance,
+    premiumMultiplier: premiumMult,
+    dca: { monthlyReturnRate: STOCK_DCA_MONTHLY_RETURN_RATE, monthlyDividendRate: STOCK_DCA_MONTHLY_DIVIDEND_RATE,
+      annualized: Math.round((Math.pow(1 + STOCK_DCA_MONTHLY_RETURN_RATE, 12) - 1 + STOCK_DCA_MONTHLY_DIVIDEND_RATE * 12) * 1000) / 10 },
+    loan: { rate, leverageRate: rate * cfg.LEVERAGE_RATE_MULTIPLIER, limit: getLoanLimit(p.creditScore), available: getAvailableLoan(p),
+      emergencyCreditPenalty: cfg.CREDIT_CHANGE_EMERGENCY_LOAN, repayCredit: cfg.CREDIT_CHANGE_REPAY, clearCredit: 25, negativeCashflowCredit: cfg.CREDIT_CHANGE_NEGATIVE_CF,
+      tiers: cfg.LOAN_RATE_BY_TIER.map((t) => ({ minScore: t.minScore, rate: t.rate, limit: getLoanLimit(t.minScore) })) },
+    capitalGainsTaxRate: cfg.CAPITAL_GAINS_TAX_RATE,
+    homeTransactionCostRate: cfg.HOME_TRANSACTION_COST_RATE,
+    fqMultipliers: FQ_MULTIPLIERS,
+    hpDecayPerRound: cfg.HP_DECAY_BY_STAGE[p.lifeStage] ?? 0,
+    hpThresholds: HP_ACTIVITY_THRESHOLDS,
+    skill: { perSK: p.profession.salaryType === 'sk_driven' ? (p.profession.salaryPerSK ?? 0) : 0, raiseThreshold: cfg.SALARY_GROWTH_SKILL_THRESHOLD, careerChangeThreshold: cfg.SKILL_CAREER_CHANGE_THRESHOLD },
+    network: { perNT: p.profession.salaryType === 'nt_driven' ? (p.profession.salaryPerNT ?? 0) : 0, shieldNT: 3, dealPickNT: 5, familySupportNT: cfg.PARENT_CARE_FAMILY_SUPPORT_NT },
+  };
+}
+
+/** 薪資這個數字是怎麼算出來的（手機點「薪資」顯示）。 */
+function buildSalaryItems(p: Player): { label: string; note?: string }[] {
+  const cfg = require('./gameConfig') as typeof import('./gameConfig');
+  const items: { label: string; note?: string }[] = [];
+  if (p.retirementStatus === 'retired') { items.push({ label: `退休金 $${p.pensionMonthly.toLocaleString()}`, note: `職涯平均月薪 $${p.averageCareerSalary.toLocaleString()} × 替代率（E 40%／S 25%／B、I 0%）` }); return items; }
+  if (p.retirementStatus === 'consultant') { items.push({ label: `顧問收入 $${p.salary.toLocaleString()}`, note: `第二專長 ${p.stats.careerSkill} × 300 + 人脈 ${p.stats.network} × 3,000；HP < 50 接不到案，每輪 HP −5` }); return items; }
+  if (p.retirementStatus === 'founder') { items.push({ label: '退休創業：沒有薪資', note: '收入來自創業事業的月現金流（列在被動收入）' }); return items; }
+  const prof = p.profession;
+  if (prof.salaryType === 'fixed') items.push({ label: `起薪 $${prof.startingSalary.toLocaleString()}`, note: `${prof.name}（固定薪）` });
+  else if (prof.salaryType === 'random') items.push({ label: `浮動薪 $${(prof.minSalary ?? 0).toLocaleString()}–$${(prof.maxSalary ?? 0).toLocaleString()}`, note: '每個結算月隨機' });
+  else if (prof.salaryType === 'nt_driven') items.push({ label: `底薪 $${(prof.salaryBase ?? 0).toLocaleString()} + 人脈 ${p.stats.network} × $${(prof.salaryPerNT ?? 0).toLocaleString()}`, note: '人脈驅動：人脈越高薪水越高' });
+  else items.push({ label: `基礎 $${prof.startingSalary.toLocaleString()} + 專長 ${p.stats.careerSkill} × $${(prof.salaryPerSK ?? 0).toLocaleString()}`, note: '技能驅動：第二專長越高薪水越高' });
+  if (p.salaryGrowthMultiplier !== 1) items.push({ label: `× 年資與升遷 ${p.salaryGrowthMultiplier.toFixed(3)}`, note: `每輪依階段加薪（青年 ${Math.round(cfg.SALARY_GROWTH_BY_STAGE.Youth * 100)}%、成家 ${Math.round(cfg.SALARY_GROWTH_BY_STAGE.Family * 100)}%、轉型 ${Math.round(cfg.SALARY_GROWTH_BY_STAGE.Transition * 100)}%），SK ≥ ${cfg.SALARY_GROWTH_SKILL_THRESHOLD} 再 +${Math.round(cfg.SALARY_GROWTH_SKILL_BONUS * 100)}%；升遷卡永久 +10%` });
+  const habit = cfg.HEALTH_HABIT_OPTIONS[p.healthHabit];
+  if (habit && habit.salaryMultiplier !== 1) items.push({ label: `× 健康習慣「${habit.label}」${habit.salaryMultiplier}`, note: habit.desc });
+  if (p.salaryBonus) items.push({ label: `+ 永久加薪 $${p.salaryBonus.toLocaleString()}`, note: '決策回聲等事件' });
+  if (p.salaryMultiplierMonths > 0) items.push({ label: `× 暫時倍率 ${p.salaryMultiplierPending}（剩 ${p.salaryMultiplierMonths} 個月）`, note: '升遷 ×1.2／職場霸凌 ×0.9' });
+  if (p.travelPenaltyRemaining > 0) items.push({ label: '× 旅遊請假 0.7（下次發薪）', note: '出國旅遊後下次薪水打七折' });
+  if (p.downsizingTurnsLeft > 0) items.push({ label: `裁員中：薪資 $0，剩 ${p.downsizingTurnsLeft} 個月`, note: '職涯轉折格；月數依年齡，SK ≥ 60 減半' });
+  items.push({ label: `＝ 目前月薪 $${p.salary.toLocaleString()}`, note: `另扣勞健保 ${Math.round(cfg.SOCIAL_INSURANCE_RATE * 100)}% = $${p.socialInsurance.toLocaleString()}（列在支出）` });
+  return items;
+}
+
+/** 淨資產 = 現金 + 資產市值 − 負債（逐項列出）。 */
+function buildNetWorthBreakdown(p: Player): object {
+  const liabilityById = new Map(p.liabilities.map((l) => [l.id, l]));
+  const assets = p.assets.map((a) => ({ id: a.id, name: a.name, value: a.currentValue ?? a.cost, cost: a.cost, debt: a.linkedLiabilityId ? (liabilityById.get(a.linkedLiabilityId)?.totalDebt ?? 0) : 0, monthlyCashflow: a.monthlyCashflow, isResidence: Boolean(a.isResidence) }));
+  const liabilities = p.liabilities.map((l) => ({ id: l.id, name: l.name, debt: l.totalDebt, monthlyPayment: l.monthlyPayment ?? 0 }));
+  const assetTotal = assets.reduce((s, a) => s + a.value, 0);
+  const liabilityTotal = liabilities.reduce((s, l) => s + l.debt, 0);
+  return { cash: p.cash, assets, assetTotal, liabilities, liabilityTotal, total: p.cash + assetTotal - liabilityTotal };
+}
+
 function serializePlayer(p: Player, gs: GameState): object {
   const personalAge = Math.round(Math.max(p.startAge ?? 20, getCurrentAge(gs)) * 10) / 10;
 
@@ -1840,6 +1915,9 @@ function serializePlayer(p: Player, gs: GameState): object {
     name: p.name,
     profession: p.profession,
     cashflowBreakdown,
+    salaryItems: buildSalaryItems(p),
+    netWorthBreakdown: buildNetWorthBreakdown(p),
+    actionInfo: buildActionInfo(p),
     cashLedger,
     careerOptions: p.isAlive && p.stats.careerSkill >= SKILL_CAREER_CHANGE_THRESHOLD ? buildAvailableProfessions(p) : [],
     quadrant: p.profession.quadrant,
@@ -2677,6 +2755,7 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
       currentInsurance: player.insurance,
       currentLifestyle: player.lifestyle,
       currentHealthHabit: player.healthHabit,
+      actionInfo: buildActionInfo(player),
       lifestyleOptions: LIFESTYLE_OPTIONS,
       healthHabitOptions: HEALTH_HABIT_OPTIONS,
       livingExpensesBase: player.expenses.otherExpenses,
@@ -7289,17 +7368,30 @@ function buildAffordableOptions(player: Player, settlementMonths = 1): object {
   const totalMaintenanceCost = maintCost * coveredMonths;
   const totalBoostCost = boostCost + maintCost * (coveredMonths - 1);
 
+  const cfg = require('./gameConfig') as typeof import('./gameConfig');
+  const decay = cfg.HP_DECAY_BY_STAGE[player.lifeStage] ?? 0;
+  const habitMult = (cfg.HEALTH_HABIT_OPTIONS[player.healthHabit] ?? cfg.HEALTH_HABIT_OPTIONS.normal).decayMultiplier;
+  const passiveNow = Math.max(0, player.totalPassiveIncome);
+  const fqNow = FQ_MULTIPLIERS[player.stats.financialIQ] ?? 1;
+  const fqNext = FQ_MULTIPLIERS[Math.min(10, player.stats.financialIQ + 1)] ?? fqNow;
   return {
     fqUpgrade: {
       available: fqCost !== null && player.cash >= fqCost,
       cost: fqCost,
       currentFQ: player.stats.financialIQ,
       nextFQ: Math.min(10, player.stats.financialIQ + 1),
+      currentMultiplier: fqNow, nextMultiplier: fqNext,
+      passiveGainPerMonth: Math.round(passiveNow * (fqNext - fqNow)),
+      value: `被動收入乘數 ×${fqNow} → ×${fqNext}${passiveNow ? `（目前被動收入 $${passiveNow.toLocaleString()} → 每月多 $${Math.round(passiveNow * (fqNext - fqNow)).toLocaleString()}）` : '（之後買資產都會放大）'}；FQ ≥ 7 發薪時看得到股市內幕`,
     },
-    healthMaintenance: { available: player.cash >= totalMaintenanceCost, cost: totalMaintenanceCost },
-    healthBoost: { available: player.cash >= totalBoostCost, cost: totalBoostCost },
-    skillTraining: { available: player.cash >= skillCost && player.stats.careerSkill < SKILL_CAREER_CHANGE_THRESHOLD, cost: skillCost, currentSK: player.stats.careerSkill },
-    networkInvest: { available: player.cash >= ntCost && player.stats.network < (player.profession.salaryType === 'nt_driven' ? Infinity : 10), cost: ntCost, currentNT: player.stats.network },
+    healthMaintenance: { available: player.cash >= totalMaintenanceCost, cost: totalMaintenanceCost,
+      value: `本次不衰退：省下 ${Math.round(decay * habitMult)} HP × ${coveredMonths} 輪（${player.lifeStage === 'Youth' ? '青年期' : player.lifeStage === 'Family' ? '成家期' : player.lifeStage === 'Transition' ? '轉型期' : '高齡'}每輪自然衰退 ${decay}${habitMult !== 1 ? `，健康習慣 ×${habitMult}` : ''}）` },
+    healthBoost: { available: player.cash >= totalBoostCost, cost: totalBoostCost,
+      value: `HP ${player.stats.health} → ${Math.min(100, player.stats.health + cfg.HP_BOOST_AMOUNT)}，並含本次維護；HP ≥ 70 完成人生指標「健康」、危機費用減半；< 50 不能旅遊、< 40 不能聯誼` },
+    skillTraining: { available: player.cash >= skillCost && player.stats.careerSkill < SKILL_CAREER_CHANGE_THRESHOLD, cost: skillCost, currentSK: player.stats.careerSkill,
+      value: `SK ${player.stats.careerSkill} → ${Math.min(100, player.stats.careerSkill + 20)}；${player.profession.salaryType === 'sk_driven' ? `技能驅動職業：月薪 +$${((player.profession.salaryPerSK ?? 0) * 20).toLocaleString()}；` : ''}≥ 60 每輪多加薪 2%、裁員月數減半、完成人生指標「成長」；100 可申請轉職；退休顧問收入 SK × 300` },
+    networkInvest: { available: player.cash >= ntCost && player.stats.network < (player.profession.salaryType === 'nt_driven' ? Infinity : 10), cost: ntCost, currentNT: player.stats.network,
+      value: `NT ${player.stats.network} → ${player.stats.network + 1}；${player.profession.salaryType === 'nt_driven' ? `人脈驅動職業：月薪 +$${(player.profession.salaryPerNT ?? 0).toLocaleString()}；` : ''}≥ 3 有一次人脈護盾免除危機；≥ 5 交易抽 2 張擇一、父母事件親友分攤減半、退休創業擲骰 +1；退休顧問收入 NT × 3,000` },
   };
 }
 

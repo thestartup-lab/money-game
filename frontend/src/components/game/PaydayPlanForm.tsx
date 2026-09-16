@@ -194,6 +194,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
                     <div className={`text-xs ${checked || canAfford ? 'text-gray-400' : 'text-red-400'}`}>
                       {opt.cost != null ? `費用：$${opt.cost.toLocaleString()}` : '已達上限'}
                     </div>
+                    {opt.value && <div className="mt-0.5 text-[11px] leading-snug text-emerald-300">價值：{opt.value}</div>}
                   </div>
                 </label>
               );
@@ -224,7 +225,8 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
                 <input type="radio" name="basic-investment" checked={basicInvestmentId === offer.id}
                   disabled={remaining + (data.basicInvestments?.find(item => item.id === basicInvestmentId)?.cost ?? 0) * basicQty < offer.cost}
                   onChange={() => { setBasicInvestmentId(offer.id); setBasicQty(1); }} className="mt-1 h-5 w-5" />
-                <span><strong className="text-lg">{offer.name} · ${offer.cost.toLocaleString()}</strong><span className="mt-1 block text-base">{offer.description}</span></span>
+                <span><strong className="text-lg">{offer.name} · ${offer.cost.toLocaleString()}</strong><span className="mt-1 block text-base">{offer.description}</span>
+                  <span className="mt-1 block text-sm text-emerald-300">價值：每份每月 +${offer.monthlyCashflow.toLocaleString()} 被動收入（年化 {Math.round(offer.monthlyCashflow * 12 / offer.cost * 100)}%），約 {Math.ceil(offer.cost / offer.monthlyCashflow)} 個月回本；受財商乘數放大</span></span>
               </label>
             ))}
           </fieldset>
@@ -238,11 +240,9 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
               <span className="text-lg">📊</span>
               <div>
                 <div className="text-sm text-white font-semibold">股票定期定額{data.globalPayday ? '（本季一次配置）' : ''}</div>
-                {data.stockDCAPortfolioValue > 0 && (
-                  <div className="text-xs text-green-400">
-                    目前持倉：${data.stockDCAPortfolioValue.toLocaleString()}（每月 +0.9% 增值、+0.4% 現金股息，約年化 16%）
-                  </div>
-                )}
+                <div className="text-xs text-green-400">
+                  {data.stockDCAPortfolioValue > 0 ? `目前持倉：$${data.stockDCAPortfolioValue.toLocaleString()}；` : ''}每月增值 {((data.actionInfo?.dca.monthlyReturnRate ?? 0.006) * 100).toFixed(1)}%、現金股息 {((data.actionInfo?.dca.monthlyDividendRate ?? 0.003) * 100).toFixed(1)}%（年化約 {data.actionInfo?.dca.annualized ?? 11}%）；股息算被動收入
+                </div>
               </div>
             </div>
             <div className="flex gap-2">
@@ -265,6 +265,11 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
                 >${amt >= 1000 ? `${(amt / 1000).toFixed(0)}k` : amt}</button>
               ))}
             </div>
+            {dcaAmount > 0 && (
+              <p className="mt-2 text-[11px] leading-snug text-emerald-300">
+                價值：投入 ${dcaAmount.toLocaleString()} → 每月股息約 +${Math.round(dcaAmount * (data.actionInfo?.dca.monthlyDividendRate ?? 0.003)).toLocaleString()}（被動收入）、市值每月約 +${Math.round(dcaAmount * (data.actionInfo?.dca.monthlyReturnRate ?? 0.006)).toLocaleString()}；{data.settlementMonths ?? 24} 個月後市值約 ${Math.round(dcaAmount * Math.pow(1 + (data.actionInfo?.dca.monthlyReturnRate ?? 0.006), data.settlementMonths ?? 24)).toLocaleString()}。受股市行情卡影響。
+              </p>
+            )}
           </div>
 
           {/* 保險購買 */}
@@ -292,8 +297,13 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
                   <div className="flex-1">
                     <div className="text-sm text-white">{cfg.label}</div>
                     <div className="text-xs text-gray-400">
-                      月保費 ${cfg.monthlyPremium} ｜ 啟動費 ${cfg.activationFee}
+                      月保費 ${(data.actionInfo?.insurance[type].monthlyPremium ?? cfg.monthlyPremium).toLocaleString()}{data.actionInfo && data.actionInfo.premiumMultiplier !== 1 ? `（年齡倍率 ×${data.actionInfo.premiumMultiplier}）` : ''} ｜ 啟動費 ${cfg.activationFee.toLocaleString()}
                     </div>
+                    {data.actionInfo && (
+                      <div className="mt-0.5 text-[11px] leading-snug text-emerald-300">
+                        價值：{data.actionInfo.insurance[type].covers.map((c) => `${c.title} $${c.baseCost.toLocaleString()}→$${c.insuredCost.toLocaleString()}${c.canCauseDeath ? '（可致死）' : ''}`).join('、')}；年度節稅扣除 ${data.actionInfo.insurance[type].deduction.toLocaleString()}{data.actionInfo.insurance[type].extra ? `；${data.actionInfo.insurance[type].extra}` : ''}
+                      </div>
+                    )}
                   </div>
                 </label>
               );
@@ -352,7 +362,9 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
             <label className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer ${lifeChoice.type === 'social' ? 'border-pink-500 bg-pink-900/30' : 'border-gray-600 bg-gray-800'}`}>
               <input type="radio" checked={lifeChoice.type === 'social'} onChange={() => { setLifeChoice({ type: 'social' }); setShowTravelList(false); }} className="accent-pink-400" />
               <span className="text-lg mr-1">💫</span>
-              <span className="text-sm text-white">參加聯誼活動</span>
+              <span className="text-sm text-white">參加聯誼活動
+                {data.actionInfo && <span className="block text-[11px] leading-snug text-emerald-300">價值：${data.actionInfo.social.cost.toLocaleString()}，深度關係 +{data.actionInfo.social.drsMin}–{data.actionInfo.social.drsMax}{data.actionInfo.social.inPeak ? '（黃金期加成）' : ''}；目前 {data.actionInfo.social.currentDrs}／{data.actionInfo.social.threshold} 可提親；已婚或 HP &lt; {data.actionInfo.social.minHp} 不能參加</span>}
+              </span>
             </label>
             <div>
               <label className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer ${lifeChoice.type === 'travel' ? 'border-violet-500 bg-violet-900/30' : 'border-gray-600 bg-gray-800'}`}>
@@ -382,6 +394,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
                       >
                         <span className="font-semibold">{dest.name}</span>
                         <span className="ml-2 text-gray-400">{dest.region} ｜ ${dest.cost.toLocaleString()} ｜ 體驗 +{dest.lifeExpGained}</span>
+                        {(() => { const t = data.actionInfo?.travel.find((x) => x.id === dest.id); if (!t) return null; const fx = t.statEffect ?? {}; const parts = [`體驗 +${t.lifeExp}${t.visited ? '（去過減半）' : ''}`, t.hpCost ? `HP −${t.hpCost}` : '', fx.hp ? `HP +${fx.hp}` : '', fx.nt ? `人脈 +${fx.nt}` : '', fx.fq ? `財商 +${fx.fq}` : '', fx.sk ? `專長 +${fx.sk}` : '', fx.legacyScore ? `傳承 +${fx.legacyScore}` : '', t.salaryPenalty < 1 ? `下次薪水 ×${t.salaryPenalty}` : ''].filter(Boolean); return <span className="block text-[11px] text-emerald-300">價值：{parts.join('、')}</span>; })()}
                       </button>
                     );
                   })}

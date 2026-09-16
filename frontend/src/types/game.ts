@@ -168,6 +168,10 @@ export interface Player {
   };
   /** 最近的現金變動紀錄（新到舊） */
   cashLedger?: { age: number; type: string; description: string; delta: number; cashAfter: number }[];
+  /** 薪資怎麼算出來的 */
+  salaryItems?: { label: string; note?: string }[];
+  netWorthBreakdown?: NetWorthBreakdown;
+  actionInfo?: ActionInfo;
   salaryMultiplierPending?: number;
   salaryMultiplierMonths?: number;
   salaryBonus?: number;
@@ -535,6 +539,45 @@ export type ActiveEvent =
 export interface AffordableOption {
   available: boolean;
   cost: number;
+  /** 這項投資的效果與價值（伺服器算好的說明） */
+  value?: string;
+  currentMultiplier?: number;
+  nextMultiplier?: number;
+  passiveGainPerMonth?: number;
+}
+
+export interface ActionTravelInfo {
+  id: string; name: string; region: string; tier: string; cost: number; description: string;
+  lifeExp: number; visited: boolean; hpCost: number; salaryPenalty: number;
+  statEffect: { nt?: number; fq?: number; sk?: number; hp?: number; legacyScore?: number } | null;
+}
+export interface ActionInsuranceInfo {
+  label: string; activationFee: number; basePremium: number; monthlyPremium: number; deduction: number;
+  covers: { title: string; baseCost: number; insuredCost: number; canCauseDeath: boolean }[]; extra: string;
+}
+export interface ActionInfo {
+  travel: ActionTravelInfo[];
+  travelMinHp: number;
+  social: { cost: number; drsMin: number; drsMax: number; inPeak: boolean; peakStart: number; peakEnd: number; threshold: number; currentDrs: number; active: boolean; minHp: number };
+  insurance: { medical: ActionInsuranceInfo; life: ActionInsuranceInfo; property: ActionInsuranceInfo };
+  premiumMultiplier: number;
+  dca: { monthlyReturnRate: number; monthlyDividendRate: number; annualized: number };
+  loan: { rate: number; leverageRate: number; limit: number; available: number; emergencyCreditPenalty: number; repayCredit: number; clearCredit: number; negativeCashflowCredit: number; tiers: { minScore: number; rate: number; limit: number }[] };
+  capitalGainsTaxRate: number;
+  homeTransactionCostRate: number;
+  fqMultipliers: number[];
+  hpDecayPerRound: number;
+  hpThresholds: Record<string, number>;
+  skill: { perSK: number; raiseThreshold: number; careerChangeThreshold: number };
+  network: { perNT: number; shieldNT: number; dealPickNT: number; familySupportNT: number };
+}
+export interface NetWorthBreakdown {
+  cash: number;
+  assets: { id: string; name: string; value: number; cost: number; debt: number; monthlyCashflow: number; isResidence: boolean }[];
+  assetTotal: number;
+  liabilities: { id: string; name: string; debt: number; monthlyPayment: number }[];
+  liabilityTotal: number;
+  total: number;
 }
 
 export interface AffordableOptions {
@@ -565,6 +608,7 @@ export interface PaydayFormData {
   currentInsurance: { hasMedicalInsurance: boolean; hasLifeInsurance: boolean; hasPropertyInsurance: boolean };
   currentLifestyle?: Lifestyle;
   currentHealthHabit?: HealthHabit;
+  actionInfo?: ActionInfo;
   lifestyleOptions?: Record<Lifestyle, LifestyleOption>;
   healthHabitOptions?: Record<HealthHabit, HealthHabitOption>;
   livingExpensesBase?: number;

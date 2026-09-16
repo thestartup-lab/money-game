@@ -1,12 +1,14 @@
 import type { Player } from '../../types/game';
+import type { MoneyDetailMode } from './MoneyDetailSheet';
 
-interface Props { player: Player; onShowCash?: () => void; onShowFlow?: () => void; }
+interface Props { player: Player; onShowCash?: () => void; onShowFlow?: () => void; onShow?: (mode: MoneyDetailMode) => void; }
 
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
 const sign = (n: number) => (n >= 0 ? '+' : '') + fmt(n);
 const cls = (n: number) => (n >= 0 ? 'positive' : 'negative');
 
-export default function FinancialStatement({ player, onShowCash, onShowFlow }: Props) {
+export default function FinancialStatement({ player, onShowCash, onShowFlow, onShow }: Props) {
+  const tap = (mode: MoneyDetailMode) => (onShow ? () => onShow(mode) : undefined);
   const netWorth =
     player.cash +
     player.assets.reduce((s, a) => s + (a.currentValue ?? a.cost), 0) -
@@ -27,26 +29,30 @@ export default function FinancialStatement({ player, onShowCash, onShowFlow }: P
           <button type="button" className="text-2xl font-bold text-yellow-300" onClick={onShowCash}>${fmt(player.cash)}</button>
         </div>
         <div className="card text-center">
-          <p className="text-xs text-gray-400">月總收入</p>
-          <p className="text-xl font-semibold positive">${fmt(player.totalIncome)}</p>
-          <p className="text-xs text-gray-500">{player.retirementStatus === 'retired' ? '退休金' : player.retirementStatus === 'consultant' ? '顧問' : '薪資'} ${fmt(player.salary)} + 被動 ${fmt(player.totalPassiveIncome)}{(player.spouseIncome ?? 0) > 0 ? ` + 配偶 ${fmt(player.spouseIncome ?? 0)}` : ''}</p>
+          <p className="text-xs text-gray-400">月總收入{onShow && <span className="text-emerald-400">（點我看組成）</span>}</p>
+          <button type="button" className="text-xl font-semibold positive" onClick={tap('income')}>${fmt(player.totalIncome)}</button>
+          <p className="text-xs text-gray-500">
+            <span role="button" tabIndex={0} className="cursor-pointer underline decoration-dotted" onClick={tap('salary')}>{player.retirementStatus === 'retired' ? '退休金' : player.retirementStatus === 'consultant' ? '顧問' : '薪資'} ${fmt(player.salary)}</span>
+            {' + '}<span role="button" tabIndex={0} className="cursor-pointer underline decoration-dotted" onClick={tap('passive')}>被動 ${fmt(player.totalPassiveIncome)}</span>
+            {(player.spouseIncome ?? 0) > 0 ? ` + 配偶 ${fmt(player.spouseIncome ?? 0)}` : ''}
+          </p>
         </div>
         <div className="card text-center">
-          <p className="text-xs text-gray-400">月總支出</p>
-          <p className="text-xl font-semibold negative">${fmt(player.totalExpenses)}</p>
+          <p className="text-xs text-gray-400">月總支出{onShow && <span className="text-emerald-400">（點我看組成）</span>}</p>
+          <button type="button" className="text-xl font-semibold negative" onClick={tap('expenses')}>${fmt(player.totalExpenses)}</button>
         </div>
       </div>
 
       {/* 淨資產 */}
-      <div className="card flex justify-between items-center">
-        <span className="text-gray-400">淨資產</span>
+      <button type="button" className="card flex w-full items-center justify-between" onClick={tap('networth')}>
+        <span className="text-gray-400">淨資產{onShow && <span className="ml-1 text-[11px] text-emerald-400">（點我看組成）</span>}</span>
         <span className={`font-bold text-lg ${cls(netWorth)}`}>${fmt(netWorth)}</span>
-      </div>
+      </button>
 
       {/* 資產列表 */}
       {player.assets.length > 0 && (
-        <div className="card">
-          <p className="text-sm text-gray-400 mb-2">資產 ({player.assets.length})</p>
+        <button type="button" className="card w-full text-left" onClick={tap('networth')}>
+          <p className="text-sm text-gray-400 mb-2">資產 ({player.assets.length}){onShow && <span className="ml-1 text-[11px] text-emerald-400">（點我看市值與成本）</span>}</p>
           <div className="space-y-1">
             {player.assets.map((a) => (
               <div key={a.id} className="flex justify-between text-sm">
@@ -55,13 +61,13 @@ export default function FinancialStatement({ player, onShowCash, onShowFlow }: P
               </div>
             ))}
           </div>
-        </div>
+        </button>
       )}
 
       {/* 負債列表 */}
       {player.liabilities.length > 0 && (
-        <div className="card">
-          <p className="text-sm text-gray-400 mb-2">負債 ({player.liabilities.length})</p>
+        <button type="button" className="card w-full text-left" onClick={tap('networth')}>
+          <p className="text-sm text-gray-400 mb-2">負債 ({player.liabilities.length}){onShow && <span className="ml-1 text-[11px] text-emerald-400">（點我看餘額）</span>}</p>
           <div className="space-y-1">
             {player.liabilities.map((l) => (
               <div key={l.id} className="flex justify-between text-sm">
@@ -70,12 +76,12 @@ export default function FinancialStatement({ player, onShowCash, onShowFlow }: P
               </div>
             ))}
           </div>
-        </div>
+        </button>
       )}
 
       {/* 支出細項 */}
-      <div className="card">
-        <p className="text-sm text-gray-400 mb-2">支出細項</p>
+      <button type="button" className="card w-full text-left" onClick={tap('expenses')}>
+        <p className="text-sm text-gray-400 mb-2">支出細項{onShow && <span className="ml-1 text-[11px] text-emerald-400">（點我看每項怎麼算）</span>}</p>
         <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
           {player.expenses.taxes > 0 && <><span className="text-gray-400">稅金</span><span className="negative text-right">{fmt(player.expenses.taxes)}</span></>}
           {(player.expenses.socialInsurance ?? 0) > 0 && <><span className="text-gray-400">勞健保</span><span className="negative text-right">{fmt(player.expenses.socialInsurance ?? 0)}</span></>}
@@ -88,11 +94,11 @@ export default function FinancialStatement({ player, onShowCash, onShowFlow }: P
           {(player.expenses.recurringExpenses ?? 0) > 0 && <><span className="text-gray-400">奉養／照護</span><span className="negative text-right">{fmt(player.expenses.recurringExpenses ?? 0)}</span></>}
           {player.expenses.otherExpenses > 0 && <><span className="text-gray-400">生活</span><span className="negative text-right">{fmt(player.expenses.otherExpenses)}</span></>}
         </div>
-      </div>
+      </button>
 
       {/* 能力值 */}
-      <div className="card">
-        <p className="text-sm text-gray-400 mb-2">能力值</p>
+      <button type="button" className="card w-full" onClick={tap('stats')}>
+        <p className="text-sm text-gray-400 mb-2">能力值{onShow && <span className="ml-1 text-[11px] text-emerald-400">（點我看各代表什麼）</span>}</p>
         <div className="grid grid-cols-4 gap-2 text-center text-xs">
           <div>
             <div className="text-lg font-bold text-blue-400">{player.stats.financialIQ}</div>
@@ -111,7 +117,7 @@ export default function FinancialStatement({ player, onShowCash, onShowFlow }: P
             <div className="text-gray-500">人脈 NT</div>
           </div>
         </div>
-      </div>
+      </button>
 
       {/* 生活狀態 */}
       <div className="card">

@@ -10,6 +10,7 @@ import AnalysisPage from './AnalysisPage';
 import EventCard from '../components/game/EventCard';
 import PaydayPlanForm from '../components/game/PaydayPlanForm';
 import MoneyDetailSheet from '../components/game/MoneyDetailSheet';
+import type { MoneyDetailMode } from '../components/game/MoneyDetailSheet';
 import SecondLifeProgressPanel from '../components/game/SecondLifeProgressPanel';
 import { formatCountdown, usePaydayCountdown } from '../components/game/paydayCountdown';
 import CollapsePanel from '../components/game/CollapsePanel';
@@ -73,7 +74,7 @@ export default function PlayerPage() {
   const myNetworkRef = useRef(0);
   const [connected, setConnected] = useState(false);
   const [disconnectNotice, setDisconnectNotice] = useState<string | null>(null);
-  const [moneyDetail, setMoneyDetail] = useState<'cash' | 'flow' | null>(null);
+  const [moneyDetail, setMoneyDetail] = useState<MoneyDetailMode | null>(null);
   const [myId, setMyId] = useState<string>('');
   const [view, setView] = useState<View>('join');
   const [gameState, setGameState] = useState<GameState | null>(null);
@@ -1440,7 +1441,7 @@ export default function PlayerPage() {
               </CollapsePanel>
             )}
             <CollapsePanel title="財務報表" badge={myPlayer.monthlyCashflow < 0 ? '!' : undefined}>
-              <FinancialStatement player={myPlayer} onShowCash={() => setMoneyDetail('cash')} onShowFlow={() => setMoneyDetail('flow')} />
+              <FinancialStatement player={myPlayer} onShowCash={() => setMoneyDetail('cash')} onShowFlow={() => setMoneyDetail('flow')} onShow={(mode) => setMoneyDetail(mode)} />
             </CollapsePanel>
 
             {(!gameState.decisionPhase || gameState.decisionPhase.kind === 'actions' || (gameState.decisionPhase.rescue && gameState.decisionPhase.playerId === myId)) && !gameState.facilitatorScene && <CollapsePanel title="行動" defaultOpen={Boolean(gameState.decisionPhase?.rescue) || gameState.decisionPhase?.kind === 'actions'}>
@@ -1460,6 +1461,7 @@ export default function PlayerPage() {
                 onLoanRequest={(targetId, amount, monthlyRate) => emit('loanRequest', { targetPlayerId: targetId, amount, monthlyRate })}
                 onSellAsset={(assetId) => emit('sellAsset', { assetId })}
                 onBuyHome={(optionId) => emit('buyHome', { optionId })}
+                onShowDetail={(mode) => setMoneyDetail(mode)}
                 onRequestAnalysis={() => { emit('requestPlayerAnalysis'); }}
                 isGameOver={isGameOver}
               />

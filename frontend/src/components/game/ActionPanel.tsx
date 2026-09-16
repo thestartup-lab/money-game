@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import type { Player } from '../../types/game';
+import EffectPreview from './EffectPreview';
+import type { MoneyDetailMode } from './MoneyDetailSheet';
 
 const DESTINATIONS = [
   { id: 'taiwan_cycling',   name: '台灣環島',   tier: 'inner', cost: 15_000,  lifeExp: 8,  region: '亞太', desc: '騎單車環島',            special: '' },
@@ -71,6 +73,7 @@ interface Props {
   onLoanRequest: (targetId: string, amount: number, monthlyRate: number) => void;
   onSellAsset: (assetId: string) => void;
   onBuyHome?: (optionId: string) => void;
+  onShowDetail?: (mode: MoneyDetailMode) => void;
   onRequestAnalysis: () => void;
   isGameOver: boolean;
   careerChangeData?: {
@@ -78,6 +81,7 @@ interface Props {
     availableProfessions: {
       id: string;
       name: string;
+      salary?: number;
       quadrant?: string;
       description?: string;
       assetCost?: number;
@@ -104,6 +108,7 @@ export default function ActionPanel({
   onLoanRequest,
   onSellAsset,
   onBuyHome,
+  onShowDetail,
   onRequestAnalysis,
   isGameOver,
   careerChangeData,
@@ -125,6 +130,16 @@ export default function ActionPanel({
   const [p2pAmount, setP2pAmount] = useState(75_000);
   const [p2pRate, setP2pRate] = useState(0.01);
   const [sellConfirmId, setSellConfirmId] = useState<string | null>(null);
+  // 點選任何行動先顯示「效果與價值」，確認後才執行
+  const [travelPreview, setTravelPreview] = useState<string | null>(null);
+  const [socialPreview, setSocialPreview] = useState(false);
+  const [repayPreview, setRepayPreview] = useState<{ loanId: string; amount: number } | null>(null);
+  const [dcaPreview, setDcaPreview] = useState<number | null>(null);
+  const [loanPreview, setLoanPreview] = useState<number | null>(null);
+  const [leveragePreview, setLeveragePreview] = useState<number | null>(null);
+  const [careerPreview, setCareerPreview] = useState<string | null>(null);
+  const info = player.actionInfo;
+  const tokenNote = player.hasFlexibleSchedule ? '自由行程職業不限次數' : '消耗本輪 1 次活動額度（固定班表每輪 1 次）';
 
   const noTokensLeft = !player.hasFlexibleSchedule && player.actionTokensThisPayday <= 0;
   const scheduleLabel = player.hasFlexibleSchedule
@@ -141,9 +156,9 @@ export default function ActionPanel({
     : player.isMarried ? '已婚，不再參加聯誼'
     : noTokensLeft ? tokenReason : '';
 
-  const availableDestinations = DESTINATIONS.filter((d) =>
-    d.tier === 'inner' || (d.tier === 'outer' && player.isInFastTrack)
-  );
+  const availableDestinations = info?.travel
+    ? info.travel.map((t) => ({ id: t.id, name: t.name, tier: t.tier, cost: t.cost, lifeExp: t.lifeExp, region: t.region, desc: t.description, special: [t.statEffect?.nt ? `人脈+${t.statEffect.nt}` : '', t.statEffect?.fq ? `財商+${t.statEffect.fq}` : '', t.statEffect?.sk ? `專長+${t.statEffect.sk}` : '', t.statEffect?.hp ? `HP+${t.statEffect.hp}` : '', t.statEffect?.legacyScore ? `傳承+${t.statEffect.legacyScore}` : ''].filter(Boolean).join(' ') }))
+    : DESTINATIONS.filter((d) => d.tier === 'inner' || (d.tier === 'outer' && player.isInFastTrack)).map((d) => ({ ...d, desc: d.desc as string, special: d.special as string }));
   const visited = new Set(player.visitedDestinations ?? []);
 
   const loanLimit = getLoanLimit(player.creditScore);
@@ -194,6 +209,27 @@ export default function ActionPanel({
               {player.isInFastTrack && (
                 <p className="text-xs text-yellow-400">✨ 外圈玩家可前往全球頂級目的地</p>
               )}
+              {travelPreview && (() => {
+                const t = info?.travel.find((x) => x.id === travelPreview);
+                const d = availableDestinations.find((x) => x.id === travelPreview);
+                if (!d) return null;
+                const fx = t?.statEffect ?? {};
+                const rows = [
+                  { label: '費用', value: `-$${fmt(d.cost)}`, tone: 'bad' as const },
+                  { label: '生命體驗', value: `+${t?.lifeExp ?? d.lifeExp}${t?.visited ? '（去過減半）' : ''}`, tone: 'good' as const },
+                  ...(t?.hpCost ? [{ label: '旅途消耗 HP', value: `-${t.hpCost}`, tone: 'bad' as const }] : []),
+                  ...(fx.hp ? [{ label: '療癒 HP', value: `+${fx.hp}`, tone: 'good' as const }] : []),
+                  ...(fx.nt ? [{ label: '人脈 NT', value: `+${fx.nt}`, tone: 'good' as const }] : []),
+                  ...(fx.fq ? [{ label: '財商 FQ', value: `+${fx.fq}`, tone: 'good' as const }] : []),
+                  ...(fx.sk ? [{ label: '第二專長 SK', value: `+${fx.sk}`, tone: 'good' as const }] : []),
+                  ...(fx.legacyScore ? [{ label: '傳承加分', value: `+${fx.legacyScore}`, tone: 'good' as const }] : []),
+                  ...(t && t.salaryPenalty < 1 ? [{ label: '下次發薪薪水', value: `×${t.salaryPenalty}`, tone: 'bad' as const }] : []),
+                  { label: '剩餘現金', value: `$${fmt(player.cash - d.cost)}`, tone: 'neutral' as const },
+                ];
+                return <EffectPreview title={`✈️ ${d.name}：效果與價值`} rows={rows} notes={[tokenNote, '體驗值提高人生評分並計入人生指標「體驗」（≥ 45）', d.desc]}
+                  confirmLabel="確認出發" onCancel={() => setTravelPreview(null)} disabled={player.cash < d.cost} disabledReason="現金不足"
+                  onConfirm={() => { onTravel(d.id); setTravelPreview(null); setShowTravelPanel(false); }} />;
+              })()}
               <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
                 {availableDestinations.map((d) => {
                   const alreadyVisited = visited.has(d.id);
@@ -202,7 +238,7 @@ export default function ActionPanel({
                     <button
                       key={d.id}
                       disabled={!canAfford || travelDisabled}
-                      onClick={() => { onTravel(d.id); setShowTravelPanel(false); }}
+                      onClick={() => setTravelPreview(d.id)}
                       className={`w-full text-left rounded-xl p-2.5 border transition-colors ${
                         d.tier === 'outer'
                           ? 'bg-yellow-900 border-yellow-700 hover:bg-yellow-800'
@@ -225,6 +261,15 @@ export default function ActionPanel({
                 })}
               </div>
             </div>
+          ) : socialPreview && info ? (
+            <EffectPreview title="💑 參加聯誼：效果與價值" rows={[
+              { label: '費用', value: `-$${fmt(info.social.cost)}`, tone: 'bad' },
+              { label: '深度關係 DRS', value: `+${info.social.drsMin}～${info.social.drsMax}${info.social.inPeak ? '（黃金期）' : ''}`, tone: 'good' },
+              { label: '目前 DRS', value: `${info.social.currentDrs}／${info.social.threshold} 可提親`, tone: 'neutral' },
+              { label: '剩餘現金', value: `$${fmt(player.cash - info.social.cost)}`, tone: 'neutral' },
+            ]} notes={[tokenNote, info.social.active ? '關係路徑已啟動，累積到門檻後由主持人開啟婚姻舞台' : '第一次聯誼會啟動關係路徑', `婚姻黃金期 ${info.social.peakStart}–${info.social.peakEnd} 歲加成較高；DRS ≥ 50 完成人生指標「關係」`, '結婚後有配偶收入與婚姻加成']}
+              confirmLabel="確認參加" onCancel={() => setSocialPreview(false)} disabled={player.cash < info.social.cost} disabledReason="現金不足"
+              onConfirm={() => { onSocialEvent(); setSocialPreview(false); }} />
           ) : (
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
@@ -242,7 +287,7 @@ export default function ActionPanel({
                 <button
                   className="btn-secondary text-sm w-full"
                   disabled={socialDisabled}
-                  onClick={onSocialEvent}
+                  onClick={() => (info ? setSocialPreview(true) : onSocialEvent())}
                   title={socialReason || '累積深度關係值'}
                 >
                   💑 參加聯誼
@@ -286,9 +331,19 @@ export default function ActionPanel({
                     <button className="btn-primary mt-2 w-full text-sm" onClick={() => setHomeConfirmId(o.id)}>買下 {o.name}</button>
                   )}
                   {homeConfirmId === o.id && (
-                    <div className="mt-2 flex gap-2">
-                      <button className="btn-primary flex-1 text-sm" onClick={() => { onBuyHome(o.id); setHomeConfirmId(null); setShowHomePanel(false); }}>確認付 ${fmt(o.cashNeeded)}</button>
-                      <button className="btn-secondary text-sm" onClick={() => setHomeConfirmId(null)}>取消</button>
+                    <div className="mt-2">
+                      <EffectPreview title={`🏠 買下${o.name}：效果與價值`} rows={[
+                        { label: '現金支付（頭期款＋稅費）', value: `-$${fmt(o.cashNeeded)}`, tone: 'bad' },
+                        { label: '新增資產（房價）', value: `+$${fmt(o.price)}`, tone: 'good' },
+                        { label: '新增房貸', value: `-$${fmt(o.loan)}`, tone: 'bad' },
+                        { label: '淨資產變化', value: `-$${fmt(o.transactionCost)}（稅費）`, tone: 'neutral' },
+                        { label: '每月房租', value: `-$${fmt(player.expenses.rent ?? 0)} → $0`, tone: 'good' },
+                        { label: '每月房貸', value: `$0 → -$${fmt(o.monthlyPayment)}`, tone: 'bad' },
+                        { label: '月現金流變化', value: `${o.monthlyDelta >= 0 ? '+' : '-'}$${fmt(Math.abs(o.monthlyDelta))}`, tone: o.monthlyDelta >= 0 ? 'good' : 'bad' },
+                        { label: '剩餘現金', value: `$${fmt(player.cash - o.cashNeeded)}`, tone: 'neutral' },
+                      ]} notes={['房租之後會隨物價每輪 +3%，房貸固定 30 年', '房價隨房地產行情卡漲跌，算淨資產但不算被動收入', '房貸可提前還款降低月付；賣房時扣剩餘房貸與 3% 稅費，免資本利得稅']}
+                        confirmLabel={`確認付 $${fmt(o.cashNeeded)}`} onCancel={() => setHomeConfirmId(null)}
+                        onConfirm={() => { onBuyHome(o.id); setHomeConfirmId(null); setShowHomePanel(false); }} />
                     </div>
                   )}
                 </div>
@@ -306,11 +361,31 @@ export default function ActionPanel({
           {/* 確認面板 */}
           {insuranceConfirm ? (
             <div className="rounded-xl bg-gray-700 border border-yellow-600 p-3 space-y-2">
-              <p className="text-sm text-white font-semibold">確認購買 {INSURANCE_LABELS[insuranceConfirm]}</p>
+              <p className="text-sm text-white font-semibold">確認購買 {INSURANCE_LABELS[insuranceConfirm]}：效果與價值</p>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">啟動費</span>
                 <span className="text-red-400 font-bold">-${fmt(INSURANCE_COSTS[insuranceConfirm])}</span>
               </div>
+              {info && (() => { const ins = info.insurance[insuranceConfirm]; return (
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-400">每月保費（現在年齡）</span>
+                    <span className="text-red-300">-${fmt(ins.monthlyPremium)}{info.premiumMultiplier !== 1 ? ` （×${info.premiumMultiplier}）` : ''}</span>
+                  </div>
+                  <div className="text-sm">
+                    <span className="text-gray-400">抵免的危機</span>
+                    <ul className="mt-0.5 space-y-0.5">
+                      {ins.covers.map((c) => <li key={c.title} className="flex justify-between text-xs"><span className="text-gray-200">{c.title}{c.canCauseDeath ? '（可致死）' : ''}</span><span className="text-emerald-300">${fmt(c.baseCost)} → ${fmt(c.insuredCost)}</span></li>)}
+                    </ul>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-400">年度節稅扣除</span>
+                    <span className="text-emerald-300">${fmt(ins.deduction)}</span>
+                  </div>
+                  {ins.extra && <p className="text-[11px] text-gray-400">• {ins.extra}</p>}
+                  <p className="text-[11px] text-gray-400">• 保費會隨年齡上升（成家 ×1.3、轉型 ×1.7、退休 ×2.2、傳承 ×3）；可隨時退保</p>
+                </>
+              ); })()}
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">目前現金</span>
                 <span className="text-white">${fmt(player.cash)}</span>
@@ -398,13 +473,32 @@ export default function ActionPanel({
                       {maxPay <= 0 ? '現金不足' : isOpen ? '收起' : '還款'}
                     </button>
                   </div>
-                  {isOpen && (
+                  {isOpen && repayPreview?.loanId === loan.id && (() => {
+                    const amt = repayPreview.amount; const share = Math.min(1, amt / loan.totalDebt); const clear = amt >= loan.totalDebt;
+                    const newMonthly = clear ? 0 : Math.round(loan.monthlyPayment * (1 - share));
+                    const credit = Math.floor((info?.loan.repayCredit ?? 15) * share) + (clear ? (info?.loan.clearCredit ?? 25) : 0);
+                    return (
+                      <div className="mt-2">
+                        <EffectPreview title={`還款 ${loan.name}：效果與價值`} rows={[
+                          { label: '還款金額', value: `-$${fmt(amt)}`, tone: 'bad' },
+                          { label: '餘額', value: `$${fmt(loan.totalDebt)} → $${fmt(loan.totalDebt - amt)}`, tone: 'good' },
+                          { label: '每月月付', value: `$${fmt(loan.monthlyPayment)} → $${fmt(newMonthly)}`, tone: 'good' },
+                          { label: '月現金流', value: `+$${fmt(loan.monthlyPayment - newMonthly)}/月`, tone: 'good' },
+                          { label: '信用分', value: `+${credit}${clear ? '（含還清加分）' : ''}`, tone: 'good' },
+                          { label: '剩餘現金', value: `$${fmt(player.cash - amt)}`, tone: 'neutral' },
+                        ]} notes={[loan.id.startsWith('home-loan-') || loan.id.startsWith('car-loan-') ? '房貸車貸還本金會等比例降低月付' : '應急／槓桿借款的月付是利息，本金不會自己減少', '還清整筆負債另 +5 生命體驗']}
+                          confirmLabel="確認還款" onCancel={() => setRepayPreview(null)}
+                          onConfirm={() => { onRepayLoan(loan.id, amt); setRepayPreview(null); setRepayTarget(null); }} />
+                      </div>
+                    );
+                  })()}
+                  {isOpen && repayPreview?.loanId !== loan.id && (
                     <div className="mt-2 grid grid-cols-3 gap-2">
                       {options.map((amt) => (
                         <button
                           key={amt}
                           className="rounded-lg py-2 text-xs border border-emerald-800 bg-emerald-950 text-emerald-200 hover:bg-emerald-900"
-                          onClick={() => { onRepayLoan(loan.id, amt); setRepayTarget(null); }}
+                          onClick={() => setRepayPreview({ loanId: loan.id, amount: amt })}
                         >
                           還 ${fmt(amt)}{amt >= loan.totalDebt ? '（還清）' : ''}
                         </button>
@@ -429,9 +523,22 @@ export default function ActionPanel({
             )}
           </div>
 
-          {showDCAPanel ? (
+          {showDCAPanel && dcaPreview !== null ? (() => {
+            const r = info?.dca.monthlyReturnRate ?? 0.006; const dv = info?.dca.monthlyDividendRate ?? 0.003; const amt = dcaPreview;
+            return <EffectPreview title={`📈 投入 $${fmt(amt)}：效果與價值`} rows={[
+              { label: '投入', value: `-$${fmt(amt)}`, tone: 'bad' },
+              { label: '每月現金股息', value: `+$${fmt(Math.round(amt * dv))}/月（被動收入）`, tone: 'good' },
+              { label: '每月市值增值', value: `約 +$${fmt(Math.round(amt * r))}（${(r * 100).toFixed(1)}%）`, tone: 'good' },
+              { label: '24 個月後市值', value: `約 $${fmt(Math.round(amt * Math.pow(1 + r, 24)))}`, tone: 'good' },
+              { label: '年化報酬', value: `約 ${info?.dca.annualized ?? 11}%`, tone: 'neutral' },
+              { label: '持倉後合計', value: `$${fmt(Math.round(dcaPortfolioValue + amt))}`, tone: 'neutral' },
+              { label: '剩餘現金', value: `$${fmt(player.cash - amt)}`, tone: 'neutral' },
+            ]} notes={['股息乘上財商乘數，幫助脫離內圈', '市值受股市行情卡與世界事件影響，可能腰斬也可能翻倍', '賣出時獲利課 20% 資本利得稅']}
+              confirmLabel="確認投入" onCancel={() => setDcaPreview(null)} disabled={player.cash < amt} disabledReason="現金不足"
+              onConfirm={() => { onInvestStockDCA(amt); setDcaPreview(null); setShowDCAPanel(false); }} />;
+          })() : showDCAPanel ? (
             <div className="space-y-2">
-              <p className="text-xs text-gray-400">選擇每次投入金額（指數基金，年均報酬約 6%）</p>
+              <p className="text-xs text-gray-400">選擇每次投入金額（指數基金，每月增值 {((info?.dca.monthlyReturnRate ?? 0.006) * 100).toFixed(1)}%、股息 {((info?.dca.monthlyDividendRate ?? 0.003) * 100).toFixed(1)}%，年化約 {info?.dca.annualized ?? 11}%）</p>
               <div className="grid grid-cols-3 gap-2">
                 {DCA_AMOUNTS.map((amt) => {
                   const canAfford = player.cash >= amt;
@@ -439,7 +546,7 @@ export default function ActionPanel({
                     <button
                       key={amt}
                       disabled={!canAfford}
-                      onClick={() => { onInvestStockDCA(amt); setShowDCAPanel(false); }}
+                      onClick={() => setDcaPreview(amt)}
                       className={`rounded-lg py-2 text-sm font-semibold border transition-colors ${
                         canAfford
                           ? 'bg-blue-900 border-blue-700 text-blue-200 hover:bg-blue-800'
@@ -479,7 +586,18 @@ export default function ActionPanel({
             </span>
           </div>
 
-          {showLoanPanel ? (
+          {showLoanPanel && loanPreview !== null ? (() => {
+            const amt = loanPreview; const monthly = Math.round(amt * loanRate); const penalty = info?.loan.emergencyCreditPenalty ?? -50;
+            return <EffectPreview title={`🏦 應急借款 $${fmt(amt)}：效果與價值`} rows={[
+              { label: '拿到現金', value: `+$${fmt(amt)}`, tone: 'good' },
+              { label: '每月利息', value: `-$${fmt(monthly)}/月（${(loanRate * 100).toFixed(1)}%）`, tone: 'bad' },
+              { label: '信用分', value: `${player.creditScore} → ${Math.max(300, player.creditScore + penalty)}`, tone: 'bad' },
+              { label: '剩餘信用額度', value: `$${fmt(availableLoan - amt)}`, tone: 'neutral' },
+              { label: '現金', value: `$${fmt(player.cash + amt)}`, tone: 'neutral' },
+            ]} notes={['本金不會自動攤還，要用「提前還款」還；還款會加回信用分', '信用分下降會讓之後借款利率變高、上限變低', '危機自救時也可以用這個補足費用']}
+              confirmLabel="確認借款" onCancel={() => setLoanPreview(null)}
+              onConfirm={() => { onTakeEmergencyLoan(amt); setLoanPreview(null); setShowLoanPanel(false); }} />;
+          })() : showLoanPanel ? (
             <div className="space-y-2">
               <div className="flex justify-between text-xs text-gray-400 mb-1">
                 <span>可借：${fmt(availableLoan)}</span>
@@ -494,7 +612,7 @@ export default function ActionPanel({
                     return (
                       <button
                         key={amt}
-                        onClick={() => { onTakeEmergencyLoan(amt); setShowLoanPanel(false); }}
+                        onClick={() => setLoanPreview(amt)}
                         className="rounded-lg py-2 px-3 text-left text-sm border bg-orange-950 border-orange-800 text-orange-200 hover:bg-orange-900 transition-colors"
                       >
                         <div className="font-semibold">${fmt(amt)}</div>
@@ -528,10 +646,21 @@ export default function ActionPanel({
             </span>
           </div>
 
-          {showLeveragePanel ? (
+          {showLeveragePanel && leveragePreview !== null ? (() => {
+            const amt = leveragePreview; const rate = loanRate * LEVERAGE_RATE_MULTIPLIER; const monthly = Math.max(1, Math.round(amt * rate));
+            return <EffectPreview title={`🚀 槓桿借款 $${fmt(amt)}：效果與價值`} rows={[
+              { label: '拿到現金', value: `+$${fmt(amt)}`, tone: 'good' },
+              { label: '每月利息', value: `-$${fmt(monthly)}/月（${(rate * 100).toFixed(2)}%）`, tone: 'bad' },
+              { label: '信用分', value: '不變', tone: 'neutral' },
+              { label: '剩餘信用額度', value: `$${fmt(availableLoan - amt)}`, tone: 'neutral' },
+              { label: '現金', value: `$${fmt(player.cash + amt)}`, tone: 'neutral' },
+            ]} notes={[`用途：${leverageAssetName.trim() || '投資資產'}`, '利率比應急借款高 25%，但不扣信用分', '划算的標準：買到的資產月現金流要高於每月利息', '本金要用「提前還款」主動還']}
+              confirmLabel="確認借款" onCancel={() => setLeveragePreview(null)}
+              onConfirm={() => { onTakeLeverageLoan(amt, leverageAssetName.trim() || '投資資產'); setLeveragePreview(null); setShowLeveragePanel(false); setLeverageAssetName(''); }} />;
+          })() : showLeveragePanel ? (
             <div className="space-y-2">
               <p className="text-[11px] text-gray-400">
-                專為投資資產設計：享八折利率、不扣信用值。請輸入打算購買的資產名稱備註。
+                專為投資資產設計：不扣信用值，但利率比應急借款高 25%。請輸入打算購買的資產名稱備註。
               </p>
               <div className="flex justify-between text-xs text-gray-400 mb-1">
                 <span>可借：${fmt(availableLoan)}</span>
@@ -556,11 +685,7 @@ export default function ActionPanel({
                       <button
                         key={amt}
                         disabled={disabled}
-                        onClick={() => {
-                          onTakeLeverageLoan(amt, leverageAssetName.trim() || '投資資產');
-                          setShowLeveragePanel(false);
-                          setLeverageAssetName('');
-                        }}
+                        onClick={() => setLeveragePreview(amt)}
                         className={`rounded-lg py-2 px-3 text-left text-sm border transition-colors ${
                           disabled
                             ? 'bg-gray-800 border-gray-700 text-gray-500 cursor-not-allowed'
@@ -595,7 +720,7 @@ export default function ActionPanel({
           <span className="text-white font-bold">{Math.round(currentAge)} 歲</span>
         </div>
         <div className="flex justify-between text-sm mt-1">
-          <span className="text-gray-400">信用評分</span>
+          <button type="button" className="text-gray-400 underline decoration-dotted" onClick={() => onShowDetail?.('credit')}>信用評分（點我看怎麼算）</button>
           <span className={player.creditScore >= 650 ? 'text-green-400' : player.creditScore >= 550 ? 'text-yellow-400' : 'text-red-400'}>
             {player.creditScore}
           </span>
@@ -733,18 +858,28 @@ export default function ActionPanel({
                       <span>還款後淨得 <span className={netChange >= 0 ? 'text-emerald-400' : 'text-red-400'}>${fmt(netChange)}</span></span>
                     )}
                   </div>
-                  {isSellConfirming ? (
-                    <div className="space-y-1">
-                      <p className="text-xs text-yellow-300">確認賣出？淨收益 <span className={netChange >= 0 ? 'text-emerald-400' : 'text-red-400'}>${fmt(netChange)}</span></p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button className="btn-secondary text-xs py-1 rounded-lg" onClick={() => setSellConfirmId(null)}>取消</button>
-                        <button
-                          className="text-xs py-1 rounded-lg bg-red-700 hover:bg-red-600 text-white"
-                          onClick={() => { onSellAsset(asset.id); setSellConfirmId(null); }}
-                        >確認賣出</button>
-                      </div>
-                    </div>
-                  ) : (
+                  {isSellConfirming ? (() => {
+                    const value = asset.currentValue ?? asset.cost;
+                    const debt = asset.linkedLiabilityId ? (player.liabilities?.find((l) => l.id === asset.linkedLiabilityId)?.totalDebt ?? 0) : 0;
+                    const isHome = asset.id.startsWith('home-');
+                    const fee = isHome ? Math.round(value * (info?.homeTransactionCostRate ?? 0.03)) : 0;
+                    const tax = isHome ? 0 : Math.round(Math.max(0, value - asset.cost) * (info?.capitalGainsTaxRate ?? 0.2));
+                    const net = value - debt - fee - tax;
+                    return (
+                      <EffectPreview title={`賣出 ${asset.name}：效果與價值`} rows={[
+                        { label: '市價', value: `+$${fmt(value)}`, tone: 'good' },
+                        ...(debt ? [{ label: '清償連結負債', value: `-$${fmt(debt)}`, tone: 'bad' as const }] : []),
+                        ...(fee ? [{ label: '交易稅費 3%', value: `-$${fmt(fee)}`, tone: 'bad' as const }] : []),
+                        ...(isHome ? [] : [{ label: `資本利得稅（獲利 $${fmt(Math.max(0, value - asset.cost))} × 20%）`, value: `-$${fmt(tax)}`, tone: (tax ? 'bad' : 'neutral') as 'bad' | 'neutral' }]),
+                        { label: '淨入帳', value: `${net >= 0 ? '+' : '-'}$${fmt(Math.abs(net))}`, tone: net >= 0 ? 'good' : 'bad' },
+                        ...(asset.monthlyCashflow ? [{ label: '失去月現金流', value: `${asset.monthlyCashflow > 0 ? '-' : '+'}$${fmt(Math.abs(asset.monthlyCashflow))}/月`, tone: (asset.monthlyCashflow > 0 ? 'bad' : 'good') as 'bad' | 'good' }] : []),
+                        ...(isHome ? [{ label: '之後房租', value: `-$${fmt(player.profession ? Math.round((player.expenses.rent || 0) || 0) : 0)}/月起（回到租屋）`, tone: 'bad' as const }] : []),
+                        { label: '賣出後現金', value: `$${fmt(player.cash + net)}`, tone: 'neutral' },
+                      ]} notes={[isHome ? '自住房免資本利得稅；賣掉後房租依職業設定並隨物價上漲' : '成本 $' + fmt(asset.cost) + '；賣出後就沒有這筆被動收入', '賣出不影響信用分；危機自救時可用來補足費用']}
+                        confirmLabel="確認賣出" onCancel={() => setSellConfirmId(null)}
+                        onConfirm={() => { onSellAsset(asset.id); setSellConfirmId(null); }} />
+                    );
+                  })() : (
                     <button
                       className="w-full text-xs py-1 rounded-lg border border-gray-600 text-gray-300 hover:border-red-500 hover:text-red-400 transition-colors"
                       onClick={() => setSellConfirmId(asset.id)}
@@ -763,6 +898,21 @@ export default function ActionPanel({
           <p className="text-xs text-yellow-400 font-bold mb-1">🎯 技能巔峰 — 可以轉職！</p>
           <p className="text-xs text-gray-300 mb-2">{careerChangeData.message}</p>
           <p className="text-[11px] text-amber-300 mb-2">轉職至 B/I 象限需以現金買入起始事業/投資資產（自有資金部分）。</p>
+          {careerPreview && (() => {
+            const prof = careerChangeData.availableProfessions.find((x) => x.id === careerPreview);
+            if (!prof) return null;
+            const cost = prof.assetCost ?? 0;
+            return <EffectPreview title={`轉職為 ${prof.name}：效果與價值`} rows={[
+              { label: '月薪', value: `$${fmt(player.salary)} → ${prof.salary !== undefined ? `$${fmt(prof.salary)}` : '依新職業'}${prof.quadrant === 'S' ? '（動態薪）' : ''}`, tone: 'neutral' },
+              ...(cost ? [{ label: '買入起始事業／投資資產', value: `-$${fmt(cost)}`, tone: 'bad' as const }] : []),
+              ...(prof.startingFQ ? [{ label: '財商 FQ', value: `${player.stats.financialIQ} → ${Math.max(player.stats.financialIQ, prof.startingFQ)}`, tone: 'good' as const }] : []),
+              { label: '第二專長 SK', value: `${player.stats.careerSkill} → 0（重新累積）`, tone: 'bad' },
+              { label: '年資加薪倍率', value: `×${(player.salaryGrowthMultiplier ?? 1).toFixed(2)} 保留`, tone: 'good' },
+              { label: '生命體驗', value: '+10', tone: 'good' },
+            ]} notes={['信用卡與生活支出改依新職業；房租／房貸、車貸、保險、資產、負債、人脈都保留', 'B／I 象限：薪資低或為零，收入來自起始事業或投資組合的現金流', '主持人會在大螢幕開轉職舞台，你確認後才生效']}
+              confirmLabel="送出轉職申請" onCancel={() => setCareerPreview(null)}
+              onConfirm={() => { onCareerChange(prof.id); setCareerPreview(null); }} />;
+          })()}
           <div className="space-y-1">
             {careerChangeData.availableProfessions.map((prof) => {
               const cost = prof.assetCost ?? 0;
@@ -777,7 +927,7 @@ export default function ActionPanel({
                       ? 'bg-yellow-900/40 hover:bg-yellow-900/70 border-yellow-700 text-yellow-200'
                       : 'bg-gray-800 border-gray-700 text-gray-500 cursor-not-allowed'
                   }`}
-                  onClick={() => affordable && onCareerChange(prof.id)}
+                  onClick={() => affordable && setCareerPreview(prof.id)}
                   title={cost > 0 ? `需付資產成本 $${cost.toLocaleString()}` : ''}
                 >
                   <div className="flex items-center justify-between">
