@@ -10,6 +10,7 @@ import AnalysisPage from './AnalysisPage';
 import EventCard from '../components/game/EventCard';
 import PaydayPlanForm from '../components/game/PaydayPlanForm';
 import MoneyDetailSheet from '../components/game/MoneyDetailSheet';
+import SecondLifeProgressPanel from '../components/game/SecondLifeProgressPanel';
 import { formatCountdown, usePaydayCountdown } from '../components/game/paydayCountdown';
 import CollapsePanel from '../components/game/CollapsePanel';
 import DecisionCountdown from '../components/game/DecisionCountdown';
@@ -1432,6 +1433,11 @@ export default function PlayerPage() {
 
           {/* ── 可展開面板 ── */}
           <div className="mt-2">
+            {!isGameOver && !myPlayer.isInFastTrack && myPlayer.secondLifeProgress && (
+              <CollapsePanel title={`🚪 脫離內圈還差多少（${Math.min(150, Math.round(myPlayer.secondLifeProgress.coverageRatio * 100))}%）`} badge={myPlayer.secondLifeProgress.eligible ? '✓' : undefined}>
+                <SecondLifeProgressPanel progress={myPlayer.secondLifeProgress} />
+              </CollapsePanel>
+            )}
             <CollapsePanel title="財務報表" badge={myPlayer.monthlyCashflow < 0 ? '!' : undefined}>
               <FinancialStatement player={myPlayer} onShowCash={() => setMoneyDetail('cash')} onShowFlow={() => setMoneyDetail('flow')} />
             </CollapsePanel>

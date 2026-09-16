@@ -77,6 +77,36 @@ export interface Profession {
   startingSalary: number;
 }
 
+export interface SecondLifeRouteProgress {
+  label: string;
+  coverageRequired: number;
+  indicatorsRequired: number;
+  targetEffectivePassiveIncome: number;
+  effectivePassiveGap: number;
+  rawPassiveGap: number;
+  indicatorGap: number;
+  financialMet: boolean;
+  indicatorsMet: boolean;
+  met: boolean;
+}
+
+export interface SecondLifeProgress {
+  eligible: boolean;
+  route: 'financialBreakthrough' | 'balancedLife' | null;
+  passedCell: boolean;
+  paydayCount: number;
+  minPaydays: number;
+  seasoned: boolean;
+  rawPassiveIncome: number;
+  fqMultiplier: number;
+  effectivePassiveIncome: number;
+  totalExpenses: number;
+  coverageRatio: number;
+  indicators: { key: 'health' | 'growth' | 'relationship' | 'experience'; label: string; achieved: boolean; value: number; threshold: number; gap: number }[];
+  achievedIndicatorCount: number;
+  routes: { financialBreakthrough: SecondLifeRouteProgress; balancedLife: SecondLifeRouteProgress };
+}
+
 export interface Player {
   careerOptions?: { id: string; name: string; assetCost?: number; canAfford?: boolean }[];
   id: string;
@@ -132,6 +162,8 @@ export interface Player {
   isSenior?: boolean;
   isInFastTrack: boolean;
   hasPassedSecondLife: boolean;
+  /** 脫離內圈還差多少（已在外圈為 null） */
+  secondLifeProgress?: SecondLifeProgress | null;
   fastTrackPosition: number;
   visitedDestinations: string[];
   legacyBonusPoints: number;

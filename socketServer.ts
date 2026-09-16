@@ -60,6 +60,8 @@ import {
   E_PROFESSION_POOLS, S_PROFESSION_POOLS, B_PROFESSION_POOLS, I_PROFESSION_POOLS,
   QUADRANT_SELECT_THRESHOLDS, FRANCHISE_CASH_THRESHOLD, PROFESSIONS,
   SECOND_LIFE_CELL,
+  SECOND_LIFE_MIN_PAYDAYS, SECOND_LIFE_FINANCIAL_COVERAGE_RATIO, SECOND_LIFE_BALANCED_COVERAGE_RATIO,
+  SECOND_LIFE_FINANCIAL_INDICATORS_REQUIRED, SECOND_LIFE_BALANCED_INDICATORS_REQUIRED,
   MONTHS_PER_GLOBAL_PAYDAY,
   MONTHS_PER_ROUND,
   RETIREMENT_ROUND, RETIREMENT_STARTUP_AMOUNTS, RETIREMENT_STARTUP_SUCCESS_ROLL, RETIREMENT_STARTUP_RETURN_RATE,
@@ -1689,6 +1691,51 @@ function startFinalRound(gs: GameState): void {
  * 第二個參數 gs 用來算 personalAge（顯示用個人年齡 = max(startAge, 全體回合年齡)），
  * 讓所有前端讀同一個欄位即可，避免「進修玩家從 25 起算」與「全域時鐘 20」對不上。
  */
+/**
+ * 手機端「脫離內圈還差多少」解析：把第二人生資格拆成可行動的缺口。
+ * 已進外圈的玩家回傳 null。
+ */
+function buildSecondLifeProgress(p: Player): object | null {
+  if (p.isInFastTrack) return null;
+  const e = evaluateSecondLifeEligibility(p);
+  const fqMultiplier = FQ_MULTIPLIERS[p.stats.financialIQ] ?? 1;
+  const route = (label: string, coverageRequired: number, indicatorsRequired: number, met: boolean) => {
+    const targetEffective = Math.ceil(e.totalExpenses * coverageRequired);
+    const effectiveGap = Math.max(0, targetEffective - e.effectivePassiveIncome);
+    // 換算回「原始被動收入」：實際要多買到多少月現金流的資產
+    const rawGap = Math.ceil(effectiveGap / fqMultiplier);
+    return {
+      label, coverageRequired, indicatorsRequired,
+      targetEffectivePassiveIncome: targetEffective,
+      effectivePassiveGap: effectiveGap,
+      rawPassiveGap: rawGap,
+      indicatorGap: Math.max(0, indicatorsRequired - e.achievedIndicatorCount),
+      financialMet: e.coverageRatio >= coverageRequired,
+      indicatorsMet: e.achievedIndicatorCount >= indicatorsRequired,
+      met,
+    };
+  };
+  return {
+    eligible: e.eligible,
+    route: e.route,
+    passedCell: p.hasPassedSecondLife,
+    paydayCount: p.paydayCount,
+    minPaydays: SECOND_LIFE_MIN_PAYDAYS,
+    seasoned: p.paydayCount >= SECOND_LIFE_MIN_PAYDAYS,
+    rawPassiveIncome: e.rawPassiveIncome,
+    fqMultiplier,
+    effectivePassiveIncome: e.effectivePassiveIncome,
+    totalExpenses: e.totalExpenses,
+    coverageRatio: Math.round(e.coverageRatio * 1000) / 1000,
+    indicators: e.indicators.map((i) => ({ ...i, gap: Math.max(0, i.threshold - i.value) })),
+    achievedIndicatorCount: e.achievedIndicatorCount,
+    routes: {
+      financialBreakthrough: route('財務突破', SECOND_LIFE_FINANCIAL_COVERAGE_RATIO, SECOND_LIFE_FINANCIAL_INDICATORS_REQUIRED, e.financialBreakthroughMet),
+      balancedLife: route('平衡人生', SECOND_LIFE_BALANCED_COVERAGE_RATIO, SECOND_LIFE_BALANCED_INDICATORS_REQUIRED, e.balancedLifeMet),
+    },
+  };
+}
+
 function serializePlayer(p: Player, gs: GameState): object {
   const personalAge = Math.round(Math.max(p.startAge ?? 20, getCurrentAge(gs)) * 10) / 10;
 
@@ -1812,6 +1859,7 @@ function serializePlayer(p: Player, gs: GameState): object {
     travelPenaltyRemaining: p.travelPenaltyRemaining,
     isInFastTrack: p.isInFastTrack,
     hasPassedSecondLife: p.hasPassedSecondLife,
+    secondLifeProgress: buildSecondLifeProgress(p),
     fastTrackPosition: p.fastTrackPosition,
     visitedDestinations: p.visitedDestinations ?? [],
     legacyBonusPoints: p.legacyBonusPoints ?? 0,

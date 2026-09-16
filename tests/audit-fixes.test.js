@@ -201,3 +201,4 @@ test('65 歲轉折：退休金依象限替代率、顧問收入依專長人脈�
   const investor = createPlayer('i', '投資人', 'angel_investor');
   assert.equal(computePension(investor), 0, 'I 象限沒有退休金');
 });
+
