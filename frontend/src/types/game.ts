@@ -193,6 +193,8 @@ export interface GameState {
   /** 全體行動時間已按完成的玩家 */
   actionPhaseDone?: string[];
   actionPhaseEnabled?: boolean;
+  /** 計時發薪：剩餘毫秒（時鐘暫停時凍結）、經過輪數、下次結算月數 */
+  paydayTimer?: { enabled: boolean; intervalMs: number; remainingMs: number; roundsSince: number; settlementMonths: number; due: boolean };
   activeAuctions?: Array<{
     auctionId: string; dealCardId: string; triggeredBy: string; triggeredByName: string;
     minBid: number; highestBid: number; highestBidderId?: string; endsAt: number;

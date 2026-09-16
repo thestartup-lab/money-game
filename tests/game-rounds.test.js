@@ -13,6 +13,8 @@ const {
 
 test('20 個完整回合會把全體年齡從 20 推進到 100', () => {
   const game = new GameState('ROUND20');
+  // 計時發薪關閉時走每三輪備援；計時模式由伺服器依時間排程，這裡驗證模型層的備援
+  game.paydayTimerEnabled = false;
   const players = ['p1', 'p2', 'p3'].map((id) => createPlayer(id, id));
   players.forEach((player) => game.addPlayer(player));
   game.currentPlayerTurnId = players[0].id;

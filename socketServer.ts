@@ -59,6 +59,8 @@ import {
   QUADRANT_SELECT_THRESHOLDS, FRANCHISE_CASH_THRESHOLD, PROFESSIONS,
   SECOND_LIFE_CELL,
   MONTHS_PER_GLOBAL_PAYDAY,
+  MONTHS_PER_ROUND,
+  PAYDAY_TIMER_DEFAULT_MS,
   GROWTH_CYCLES_PER_GLOBAL_PAYDAY,
   YEARS_PER_COMPLETED_ROUND,
   TOTAL_LIFE_ROUNDS,
@@ -1864,6 +1866,14 @@ function serializeGameState(gs: GameState): object {
     yearsPerRound: YEARS_PER_COMPLETED_ROUND,
     totalLifeRounds: TOTAL_LIFE_ROUNDS,
     roundsSinceGlobalPayday: gs.roundsSinceGlobalPayday,
+    paydayTimer: {
+      enabled: gs.paydayTimerEnabled,
+      intervalMs: gs.paydayIntervalMs,
+      remainingMs: paydayRemainingMs(gs),
+      roundsSince: gs.turnNumber - gs.roundsAtLastPayday,
+      settlementMonths: paydaySettlementMonths(gs),
+      due: isPaydayDue(gs) || gs.globalPaydayPending,
+    },
     globalPaydayPending: gs.globalPaydayPending,
     globalPaydayInProgress: gs.globalPaydayInProgress,
     globalPaydayNumber: gs.globalPaydayNumber,
@@ -2097,6 +2107,7 @@ function continueAfterTurnAdvance(gs: GameState): void {
 function advanceTurn(gs: GameState): void {
   if (gs.gamePhase === GamePhase.GameOver) return;
   gs.advanceToNextTurn();
+  schedulePaydayIfDue(gs);
   skipCurrentEducationTurns(gs);
   continueAfterTurnAdvance(gs);
   tryOpenWorldEvent(gs);
@@ -2277,8 +2288,10 @@ function settleQuarterMonths(
   gs: GameState,
   player: Player,
   maintenanceCovered: boolean,
+  settlementMonths = MONTHS_PER_GLOBAL_PAYDAY,
+  growthCycles = GROWTH_CYCLES_PER_GLOBAL_PAYDAY,
 ): void {
-  for (let month = 1; month <= MONTHS_PER_GLOBAL_PAYDAY; month += 1) {
+  for (let month = 1; month <= settlementMonths; month += 1) {
     const cashBefore = player.cash;
     const cashflowBefore = player.monthlyCashflow;
     const netWorthBefore = calcNetWorth(player);
@@ -2291,12 +2304,12 @@ function settleQuarterMonths(
       dcaAsset.monthlyCashflow = dcaDividend;
     }
 
-    triggerPayday(player, gs, maintenanceCovered, month <= GROWTH_CYCLES_PER_GLOBAL_PAYDAY);
+    triggerPayday(player, gs, maintenanceCovered, month <= growthCycles);
     logPlayerEvent(
       player,
       gs,
       'payday',
-      `第 ${gs.globalPaydayNumber + 1} 季・第 ${month} 月結算（累計第 ${player.paydayCount} 月）`,
+      `第 ${gs.globalPaydayNumber + 1} 次發薪・第 ${month}/${settlementMonths} 月結算（累計第 ${player.paydayCount} 月）`,
       cashBefore,
       cashflowBefore,
       netWorthBefore,
@@ -2335,7 +2348,7 @@ function settleQuarterMonths(
     emitToRoom(gs.gameId, 'fastTrackPayday', {
       playerId: player.id,
       playerName: player.name,
-      cashflow: player.monthlyCashflow * MONTHS_PER_GLOBAL_PAYDAY,
+      cashflow: player.monthlyCashflow * settlementMonths,
       bonus,
       cashAfter: player.cash,
     });
@@ -2356,7 +2369,59 @@ function settleQuarterMonths(
   }
 }
 
-/** 每三個完整回合觸發一次；全員依回合順序逐位完成同一季的規劃與結算。 */
+/** 遊戲開始後扣掉暫停的有效經過毫秒數（舞台事件、決策、手動暫停都不算）。 */
+function getActiveElapsedMs(gs: GameState): number {
+  if (!gs.gameStartTime) return 0;
+  const pausedNow = gs.pausedAt ? Date.now() - gs.pausedAt.getTime() : 0;
+  return Math.max(0, Date.now() - gs.gameStartTime.getTime() - gs.totalPausedMs - pausedNow);
+}
+
+/** 距上次發薪經過的輪數（至少算一輪）。 */
+function roundsSinceLastPayday(gs: GameState): number {
+  return Math.max(1, gs.turnNumber - gs.roundsAtLastPayday);
+}
+
+/** 本次（或下一次）發薪要結算的月數 = 經過輪數 × 12。 */
+function paydaySettlementMonths(gs: GameState): number {
+  return roundsSinceLastPayday(gs) * MONTHS_PER_ROUND;
+}
+
+/** 計時發薪的剩餘毫秒數（時鐘暫停時凍結）。 */
+function paydayRemainingMs(gs: GameState): number {
+  if (!gs.paydayTimerEnabled) return -1;
+  return Math.max(0, gs.paydayIntervalMs - (getActiveElapsedMs(gs) - gs.lastPaydayActiveMs));
+}
+
+/**
+ * 混合制：計時器到期「而且」至少經過一輪才到期；計時器關閉時由 advanceToNextTurn 的每三輪備援處理。
+ * 到期的發薪排在目前玩家行動結束時（advanceTurn）或全場空檔時執行。
+ */
+function isPaydayDue(gs: GameState): boolean {
+  if (!gs.paydayTimerEnabled || gs.gamePhase === GamePhase.GameOver || gs.finalRoundStarted) return false;
+  if (gs.turnNumber - gs.roundsAtLastPayday < 1) return false;
+  return paydayRemainingMs(gs) <= 0;
+}
+
+function schedulePaydayIfDue(gs: GameState): boolean {
+  if (gs.globalPaydayPending || gs.globalPaydayInProgress) return false;
+  if (!isPaydayDue(gs)) return false;
+  gs.globalPaydayPending = true;
+  console.log(`[paydayTimer] 房間 ${gs.gameId} 計時到期，發薪排入目前行動結束後（經過 ${roundsSinceLastPayday(gs)} 輪）`);
+  return true;
+}
+
+/** 空檔時（沒人在行動、沒有決策或舞台）到期就直接發薪；每 5 秒檢查一次。 */
+setInterval(() => {
+  for (const gs of rooms.values()) {
+    if (gs.gamePhase !== GamePhase.RatRace && gs.gamePhase !== GamePhase.FastTrack) continue;
+    if (gs.turnInProgress || gs.decisionPhase || gs.facilitatorScene || gs.globalPaydayInProgress) continue;
+    if (gs.globalPaydayPending || schedulePaydayIfDue(gs)) {
+      continueAfterTurnAdvance(gs);
+    }
+  }
+}, 5_000).unref();
+
+/** 計時到期後排在目前行動結束執行；全員同時規劃、依回合順序結算，結算月數 = 經過輪數 × 12。 */
 async function runGlobalPayday(gs: GameState): Promise<void> {
   const roomId = gs.gameId;
   const wasPaused = gs.pausedAt !== null;
@@ -2364,10 +2429,13 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
 
   gs.globalPaydayPending = false;
   const playerIds = gs.playerOrder.filter((id) => gs.players.get(id)?.isAlive);
+  const settlementMonths = paydaySettlementMonths(gs);
+  const growthCycles = roundsSinceLastPayday(gs);
 
   emitToRoom(roomId, 'globalPaydayStarted', {
     globalPaydayNumber: gs.globalPaydayNumber + 1,
-    settlementMonths: MONTHS_PER_GLOBAL_PAYDAY,
+    settlementMonths,
+    growthCycles,
     playerCount: playerIds.length,
   });
   emitToRoom(roomId, 'gamePaused', {
@@ -2385,7 +2453,8 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
     investInNetwork: false,
     stockDCAAmount: 0,
     buyInsuranceTypes: [],
-    settlementMonths: MONTHS_PER_GLOBAL_PAYDAY,
+    settlementMonths,
+    growthCycles,
   };
 
   // ── 全體同時規劃：一個決策階段，每人各自在手機送出；全員送出自動結算 ──
@@ -2394,14 +2463,15 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
     gs,
     { id: '__all_players__', name: '全體玩家' },
     'payday',
-    `第 ${gs.globalPaydayNumber + 1} 季全體發薪規劃`,
-    '所有人同時在手機填寫本季規劃；全員送出後自動結算，主持人也可提前以空白方案結束。',
+    `第 ${gs.globalPaydayNumber + 1} 次全體發薪規劃（結算 ${settlementMonths / MONTHS_PER_ROUND} 年）`,
+    '所有人同時在手機填寫這段期間的規劃；全員送出後自動結算，主持人也可提前以空白方案結束。',
   );
   gs.actionPhaseDone = new Set();
   emitToRoom(roomId, 'paydayPlanningStarted', {
     paydayPosition: -1,
-    settlementCount: MONTHS_PER_GLOBAL_PAYDAY,
-    settlementMonths: MONTHS_PER_GLOBAL_PAYDAY,
+    settlementCount: settlementMonths,
+    settlementMonths,
+    growthCycles,
     globalPayday: true,
     globalPaydayNumber: gs.globalPaydayNumber + 1,
     playerCount: playerIds.length,
@@ -2424,12 +2494,13 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
       paydayIndex: index + 1,
       totalPaydays: playerIds.length,
       combinedPlanning: true,
-      settlementMonths: MONTHS_PER_GLOBAL_PAYDAY,
+      settlementMonths,
+      growthCycles,
       globalPayday: true,
       globalPaydayNumber: gs.globalPaydayNumber + 1,
       currentStats: player.stats,
       currentCash: player.cash,
-      affordableOptions: buildAffordableOptions(player, MONTHS_PER_GLOBAL_PAYDAY),
+      affordableOptions: buildAffordableOptions(player, growthCycles),
       basicInvestments: BASIC_INVESTMENTS,
       currentInsurance: player.insurance,
       stockDCAPortfolioValue: player.assets.find((asset) => asset.id === 'stock-dca')?.currentValue ?? 0,
@@ -2473,7 +2544,7 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
       globalPaydayNumber: gs.globalPaydayNumber + 1,
     });
 
-    const quarterlyPlan = { ...plan, settlementMonths: MONTHS_PER_GLOBAL_PAYDAY };
+    const quarterlyPlan = { ...plan, settlementMonths, growthCycles };
     const planResult = applyPaydayPlan(player, quarterlyPlan);
     const maintenanceCovered =
       planResult.investments.healthBoost.executed ||
@@ -2497,7 +2568,7 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
         { source: 'basic_investment', offerId: quarterlyPlan.basicInvestmentId, globalPaydayNumber: gs.globalPaydayNumber + 1 });
     }
     emitToRoom(roomId, 'basicInvestmentResult', { playerId: player.id, playerName: player.name, ...basicInvestment });
-    settleQuarterMonths(playerSocket, gs, player, maintenanceCovered);
+    settleQuarterMonths(playerSocket, gs, player, maintenanceCovered, settlementMonths, growthCycles);
     queueSecondLifeCandidates(gs, player);
     player.paydayPlanningPending = false;
 
@@ -2505,8 +2576,8 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
       playerId: player.id,
       playerName: player.name,
       paydayPosition: -1,
-      settlementCount: MONTHS_PER_GLOBAL_PAYDAY,
-      settlementMonths: MONTHS_PER_GLOBAL_PAYDAY,
+      settlementCount: settlementMonths,
+      settlementMonths,
       globalPayday: true,
       globalPaydayNumber: gs.globalPaydayNumber + 1,
       planResult,
@@ -2515,6 +2586,8 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
   }
 
   gs.roundsSinceGlobalPayday = 0;
+  gs.roundsAtLastPayday = gs.turnNumber;
+  gs.lastPaydayActiveMs = getActiveElapsedMs(gs);
   gs.globalPaydayNumber += 1;
   gs.globalPaydayInProgress = false;
   const expiredWorldEvents = expireWorldEffects(gs);
@@ -2524,7 +2597,7 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
 
   emitToRoom(roomId, 'globalPaydayCompleted', {
     globalPaydayNumber: gs.globalPaydayNumber,
-    settlementMonths: MONTHS_PER_GLOBAL_PAYDAY,
+    settlementMonths,
     nextPlayer: (() => {
       const player = gs.players.get(gs.currentPlayerTurnId);
       if (!player) return undefined;
@@ -4560,6 +4633,8 @@ io.on('connection', (socket: Socket) => {
     gs.gamePhase = GamePhase.RatRace;
     gs.turnNumber = 0;
     gs.roundsSinceGlobalPayday = 0;
+    gs.roundsAtLastPayday = 0;
+    gs.lastPaydayActiveMs = 0;
     gs.globalPaydayPending = false;
     gs.globalPaydayInProgress = false;
     gs.globalPaydayNumber = 0;
@@ -4601,6 +4676,37 @@ io.on('connection', (socket: Socket) => {
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
     // 第一輪的全體行動時間
     continueAfterTurnAdvance(gs);
+  });
+
+  // ----------------------------------------------------------
+  // 計時發薪設定 (setPaydayTimer) 與立即發薪 (triggerPaydayNow)
+  // ----------------------------------------------------------
+  onSafe('setPaydayTimer', (payload: { minutes?: number; enabled?: boolean }) => {
+    const gs = getRoomState(socket);
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    if (!isRoomAdmin(socket, gs)) { emitClient(socket, 'error', { message: '只有管理員可以調整發薪計時。' }); return; }
+    if (payload?.enabled !== undefined) gs.paydayTimerEnabled = payload.enabled === true;
+    if (payload?.minutes !== undefined) {
+      const minutes = Number(payload.minutes);
+      if (!Number.isFinite(minutes) || minutes < 1 || minutes > 60) { emitClient(socket, 'error', { message: '發薪間隔需介於 1 到 60 分鐘。' }); return; }
+      gs.paydayIntervalMs = Math.round(minutes * 60 * 1000);
+    }
+    console.log(`[setPaydayTimer] 房間 ${gs.gameId} 計時發薪：${gs.paydayTimerEnabled ? `${gs.paydayIntervalMs / 60000} 分鐘` : '關閉（每三輪）'}`);
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
+  onSafe('triggerPaydayNow', () => {
+    const gs = getRoomState(socket);
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    if (!isRoomAdmin(socket, gs)) { emitClient(socket, 'error', { message: '只有管理員可以立即發薪。' }); return; }
+    if (gs.gamePhase !== GamePhase.RatRace && gs.gamePhase !== GamePhase.FastTrack) { emitClient(socket, 'error', { message: '遊戲尚未進行中。' }); return; }
+    if (gs.finalRoundStarted) { emitClient(socket, 'error', { message: '最後一輪不再發薪。' }); return; }
+    if (gs.globalPaydayPending || gs.globalPaydayInProgress) { emitClient(socket, 'error', { message: '發薪已排入或進行中。' }); return; }
+    if (gs.turnNumber - gs.roundsAtLastPayday < 1) { emitClient(socket, 'error', { message: '上次發薪後還沒完成任何一輪，暫時沒有可結算的薪資。' }); return; }
+    gs.globalPaydayPending = true;
+    console.log(`[triggerPaydayNow] 房間 ${gs.gameId} 主持人立即發薪`);
+    if (!gs.turnInProgress && !gs.decisionPhase && !gs.facilitatorScene) continueAfterTurnAdvance(gs);
+    else emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 
   // ----------------------------------------------------------
@@ -6809,7 +6915,7 @@ function buildAffordableOptions(player: Player, settlementMonths = 1): object {
   } = require('./gameConfig');
 
   const fqCost = getFQUpgradeCost(player.stats.financialIQ);
-  const coveredMonths = Math.min(GROWTH_CYCLES_PER_GLOBAL_PAYDAY, Math.max(1, Math.floor(settlementMonths)));
+  const coveredMonths = Math.min(12, Math.max(1, Math.floor(settlementMonths)));
   const totalMaintenanceCost = maintCost * coveredMonths;
   const totalBoostCost = boostCost + maintCost * (coveredMonths - 1);
 

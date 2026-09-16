@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { usePaydayCountdown, formatCountdown, type PaydayTimerInfo } from './paydayCountdown';
 import './GameBoard.css';
 
 // ============================================================
@@ -36,6 +37,10 @@ interface GameBoardProps {
   completedRoundsInCycle?: number;
   /** 全體玩家是否正處於統一發薪日。 */
   isGlobalPayday?: boolean;
+  /** 計時發薪資訊（伺服器序列化） */
+  paydayTimer?: PaydayTimerInfo;
+  /** 時鐘是否暫停（決策、舞台、手動暫停都算） */
+  clockFrozen?: boolean;
 }
 
 import { PLAYER_COLORS } from './playerColors';
@@ -81,6 +86,8 @@ export function GameBoard({
   showMiniMap = true,
   completedRoundsInCycle = 0,
   isGlobalPayday = false,
+  paydayTimer,
+  clockFrozen = false,
 }: GameBoardProps) {
   const [manualBoardView, setManualBoardView] = useState<{ anchor: string; view: 'inner' | 'outer' } | null>(null);
   const [calibrate, setCalibrate] = useState(false);
@@ -120,6 +127,8 @@ export function GameBoard({
           completedRounds={completedRoundsInCycle}
           isGlobalPayday={isGlobalPayday}
           isOuter={isOuter}
+          paydayTimer={paydayTimer}
+          clockFrozen={clockFrozen}
         />
 
         {/* ══ 切換按鈕 ══ */}
@@ -296,34 +305,45 @@ function QuarterDial({
   completedRounds,
   isGlobalPayday,
   isOuter,
+  paydayTimer,
+  clockFrozen,
 }: {
   completedRounds: number;
   isGlobalPayday: boolean;
   isOuter: boolean;
+  paydayTimer?: PaydayTimerInfo;
+  clockFrozen: boolean;
 }) {
-  const completed = Math.min(3, Math.max(0, completedRounds));
-  const currentRound = Math.min(3, completed + 1);
-  const roundsLeft = Math.max(0, 3 - completed);
+  const remaining = usePaydayCountdown(paydayTimer, clockFrozen);
+  const rounds = paydayTimer ? Math.max(0, paydayTimer.roundsSince) : Math.max(0, completedRounds);
+  const years = Math.max(1, rounds);
+  const timerOn = paydayTimer?.enabled ?? false;
+  const due = paydayTimer?.due ?? false;
+  const roundsLeft = Math.max(0, 3 - Math.min(3, completedRounds));
 
   return (
     <div className={`quarter-dial ${isOuter ? 'is-outer' : 'is-inner'}${isGlobalPayday ? ' is-payday' : ''}`}>
       <div className="quarter-dial-rings" />
-      <p className="quarter-dial-kicker">{isOuter ? 'FASTTRACK · 同步季曆' : '人生季度'}</p>
+      <p className="quarter-dial-kicker">{isOuter ? 'FASTTRACK · 同步薪資曆' : '薪資累積'}</p>
       <p className="quarter-dial-title">
-        {isGlobalPayday ? '全體發薪日' : `本季第 ${currentRound} 輪`}
+        {isGlobalPayday ? '全體發薪日' : timerOn ? (due ? '發薪即將開始' : formatCountdown(remaining)) : `再 ${roundsLeft} 輪發薪`}
       </p>
-      <div className="quarter-dial-segments" aria-label={`季度進度 ${completed}/3`}>
+      <div className="quarter-dial-segments" aria-label={`已累積 ${rounds} 輪`}>
         {[0, 1, 2].map((index) => (
           <span
             key={index}
-            className={`quarter-dial-segment${index < completed ? ' is-complete' : ''}${index === completed && !isGlobalPayday ? ' is-current' : ''}`}
+            className={`quarter-dial-segment${index < Math.min(3, rounds) ? ' is-complete' : ''}${index === Math.min(3, rounds) && !isGlobalPayday ? ' is-current' : ''}`}
           >
             {index + 1}
           </span>
         ))}
       </div>
       <p className="quarter-dial-status">
-        {isGlobalPayday ? '本次六個月收支統一結算' : `再 ${roundsLeft} 輪進入統一發薪`}
+        {isGlobalPayday
+          ? `本次結算 ${years} 年（${years * 12} 個月）收支`
+          : timerOn
+            ? (clockFrozen ? '時鐘暫停中' : due ? '本位玩家行動結束後發薪' : `已累積 ${years} 年薪資，時間到即發薪`)
+            : `再 ${roundsLeft} 輪進入統一發薪`}
       </p>
     </div>
   );

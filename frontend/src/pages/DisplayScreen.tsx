@@ -240,7 +240,7 @@ export default function DisplayScreen() {
       setPaydayCards(new Map());
       showPaydayOverlayRef.current = false;
       setShowPaydayOverlay(false);
-      addTicker(`💰 第 ${p.globalPaydayNumber} 季全體發薪：一次規劃、結算 ${p.settlementMonths} 個月`);
+      addTicker(`💰 第 ${p.globalPaydayNumber} 次全體發薪：一次規劃、結算 ${p.settlementMonths} 個月`);
     });
     s.on('globalPaydayPlayerTurn', (p: {
       playerId: string; playerName: string; playerIndex: number; playerCount: number; globalPaydayNumber: number;
@@ -804,7 +804,7 @@ export default function DisplayScreen() {
                     })}
                   </div>
                 )}
-                <p className="my-4 text-2xl">一次配置，結算六個月收支。每人本次最多購買一份基本投資，也可以不買。</p>
+                <p className="my-4 text-2xl">一次配置，結算 {gameState.paydayTimer?.settlementMonths ?? 12} 個月收支。每人本次最多購買一份基本投資，也可以不買。</p>
                 <div className="grid gap-5">
                   {gameState.basicInvestmentOffers.map(offer => (
                     <article key={offer.id} className="rounded-2xl border-2 border-amber-700 bg-slate-900 p-5">
@@ -821,6 +821,8 @@ export default function DisplayScreen() {
               focusPlayerId={boardFocusPlayerId}
               completedRoundsInCycle={gameState.roundsSinceGlobalPayday ?? (gameState.turnNumber % 3)}
               isGlobalPayday={gameState.globalPaydayInProgress ?? false}
+              paydayTimer={gameState.paydayTimer}
+              clockFrozen={gameState.isPaused}
               showPlayerPanel={false}
               showMiniMap={false}
             />}

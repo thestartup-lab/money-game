@@ -265,8 +265,10 @@ export interface PlayerStats {
  * 每個 boolean 代表「是否選擇該投資項目」，實際扣款由 statsSystem 驗證。
  */
 export interface PaydayPlanPayload {
-  /** 季度制結算涵蓋的月份；省略時視為舊版單月發薪。 */
+  /** 本次結算涵蓋的月份；省略時視為舊版單月發薪。 */
   settlementMonths?: number;
+  /** 本次涵蓋的健康／人脈成長週期數（＝經過輪數）；伺服器填入，用於維護費計算 */
+  growthCycles?: number;
   /** 只接受伺服器當期清單的 ID；每人每次發薪最多買一份。 */
   basicInvestmentId?: string;
   /** 升級財商值（費用依當前 FQ 等級而定，見 FQ_UPGRADE_COSTS） */
@@ -710,6 +712,11 @@ export class GameState {
   /** 每輪開始是否開「全體行動時間」（主持人可關） */
   actionPhaseEnabled = true;
   actionPhaseRound = -1;
+  /** 計時發薪：開關、間隔、上次發薪時的「有效經過時間」與輪數 */
+  paydayTimerEnabled = true;
+  paydayIntervalMs = 10 * 60 * 1000;
+  lastPaydayActiveMs = 0;
+  roundsAtLastPayday = 0;
   /** 本輪行動時間已按「完成」的玩家 */
   actionPhaseDone: Set<string> = new Set();
   gameId: string;
@@ -880,7 +887,8 @@ export class GameState {
           this.turnNumber += 1;
           if (!this.finalRoundStarted && !this.globalPaydayInProgress && !this.globalPaydayPending) {
             this.roundsSinceGlobalPayday += 1;
-            if (this.roundsSinceGlobalPayday >= 3) {
+            // 計時器關閉時才用「每三輪」備援；開啟時由伺服器依時間判定
+            if (!this.paydayTimerEnabled && this.roundsSinceGlobalPayday >= 3) {
               this.globalPaydayPending = true;
             }
           }

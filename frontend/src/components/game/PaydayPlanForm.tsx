@@ -94,7 +94,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
           </div>
           {data.globalPayday ? (
             <div className="text-xs font-semibold text-emerald-300">
-              本次涵蓋 {data.settlementMonths ?? 6} 個月收支，只配置一次；健康與自然人脈維持原節奏
+              本次涵蓋 {data.settlementMonths ?? 12} 個月收支（{Math.round((data.settlementMonths ?? 12) / 12)} 年），只配置一次
             </div>
           ) : data.combinedPlanning ? (
             <div className="text-xs font-semibold text-emerald-300">只需規劃一次，薪資將依序結算</div>
@@ -200,7 +200,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
         {data.basicInvestments && (
           <fieldset className="space-y-3 rounded-xl border-2 border-amber-500 p-4">
             <legend className="px-2 text-xl font-bold text-amber-200">本次基本投資機會</legend>
-            <p className="text-base text-gray-200">每人本次最多一份，不搶全桌名額。先用現有現金配置，再結算六個月收支；不保證獲利。</p>
+            <p className="text-base text-gray-200">每人本次最多一份，不搶全桌名額。先用現有現金配置，再結算這段期間的收支；不保證獲利。</p>
             <label className="flex min-h-14 items-center gap-3 text-lg text-white">
               <input type="radio" name="basic-investment" checked={!basicInvestmentId} onChange={() => setBasicInvestmentId(undefined)} className="h-5 w-5" />本次不購買
             </label>

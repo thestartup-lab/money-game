@@ -127,7 +127,8 @@ export function getCareerChangeAssetCost(newProfessionId: string): number {
 export function applyPaydayPlan(player: Player, plan: PaydayPlanPayload): PaydayPlanResult {
   let remainingCash = player.cash;
   let totalCostDeducted = 0;
-  const settlementMonths = Math.min(GROWTH_CYCLES_PER_GLOBAL_PAYDAY, Math.max(1, Math.floor(plan.settlementMonths ?? 1)));
+  // 維護費依「成長週期數」計：一輪 = 一次 HP 衰退；舊版季度制 fallback 為 3
+  const settlementMonths = Math.min(12, Math.max(1, Math.floor(plan.growthCycles ?? Math.min(GROWTH_CYCLES_PER_GLOBAL_PAYDAY, plan.settlementMonths ?? 1))));
   const quarterlyMaintenanceCost = HP_MAINTENANCE_COST * settlementMonths;
   const quarterlyBoostCost = HP_BOOST_COST + HP_MAINTENANCE_COST * (settlementMonths - 1);
 

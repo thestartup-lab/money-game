@@ -20,6 +20,7 @@ import {
   saveClassicReview,
 } from '../lib/classicReviews';
 import './AdminClarity.css';
+import { formatCountdown, usePaydayCountdown } from '../components/game/paydayCountdown';
 
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
 
@@ -59,6 +60,7 @@ export default function AdminPage() {
   const [loginRoomId, setLoginRoomId] = useState(INITIAL_REMEMBERED_ADMIN_ROOM);
   const [loginError, setLoginError] = useState('');
   const [actionError, setActionError] = useState('');
+  const paydayRemaining = usePaydayCountdown(gameState?.paydayTimer, Boolean(gameState?.isPaused));
   const [adminCodeInput, setAdminCodeInput] = useState('');
 
   const [adaptiveDirector, setAdaptiveDirector] = useState<AdaptiveDirectorStatus | null>(null);
@@ -629,6 +631,30 @@ export default function AdminPage() {
                   >{gameState?.actionPhaseEnabled !== false ? '開啟中（點此關閉）' : '關閉中（點此開啟）'}</button>
                 </div>
                 <p className="mt-1 text-[11px] text-gray-500">開啟時每輪擲骰前全員同時處理行動，全員完成或你按結束後開始擲骰。</p>
+                <div className="mt-3 border-t border-gray-700 pt-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold text-gray-200">計時發薪</span>
+                    <span className="text-gray-300">
+                      {gameState?.paydayTimer?.enabled
+                        ? (gameState.paydayTimer.due ? '到期，等目前行動結束' : `下次 ${formatCountdown(paydayRemaining)}`)
+                        : '關閉（每三輪發薪）'}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {[5, 10, 15, 20].map((min) => {
+                      const active = gameState?.paydayTimer?.enabled && Math.round((gameState.paydayTimer.intervalMs ?? 0) / 60000) === min;
+                      return (
+                        <button key={min} className={`rounded-lg px-2 py-1 font-bold ${active ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+                          onClick={() => emit('setPaydayTimer', { minutes: min, enabled: true })}>{min} 分鐘</button>
+                      );
+                    })}
+                    <button className={`rounded-lg px-2 py-1 font-bold ${gameState?.paydayTimer?.enabled === false ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+                      onClick={() => emit('setPaydayTimer', { enabled: false })}>改用每三輪</button>
+                    <button className="rounded-lg bg-amber-700 px-2 py-1 font-bold text-white hover:bg-amber-600"
+                      onClick={() => { if (window.confirm('立即安排發薪？會在目前玩家行動結束後開始。')) emit('triggerPaydayNow'); }}>立即發薪</button>
+                  </div>
+                  <p className="mt-1 text-[11px] text-gray-500">時間到就排在目前玩家行動結束後發薪；結算月數 = 距上次發薪經過的輪數 × 12。舞台、決策與暫停時計時停止。已累積 {gameState?.paydayTimer?.roundsSince ?? 0} 輪。</p>
+                </div>
               </div>
             )}
             {isRunning && !decisionPhase && !gameState?.facilitatorScene && (

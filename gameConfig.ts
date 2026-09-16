@@ -65,10 +65,16 @@ export const SECOND_LIFE_SKILL_THRESHOLD = 60;
 export const SECOND_LIFE_RELATIONSHIP_THRESHOLD = 50;
 export const SECOND_LIFE_EXPERIENCE_THRESHOLD = 45;
 
-/** 發薪日不再綁定地圖格；每三個完整輪次由伺服器統一觸發。 */
+/** 發薪日不再綁定地圖格；由「計時 + 輪數」混合制統一觸發（見 PAYDAY_TIMER_DEFAULT_MS）。 */
 export const PAYDAY_LOCATIONS: readonly number[] = [];
+/** 計時器關閉時的備援：每三個完整輪次發薪一次。 */
 export const ROUNDS_PER_GLOBAL_PAYDAY = 3;
+/** 舊常數：保留給舊測試與說明；實際結算月數 = 經過輪數 × MONTHS_PER_ROUND。 */
 export const MONTHS_PER_GLOBAL_PAYDAY = 6;
+/** 每個完整輪視為一年薪資：結算月數 = 經過輪數 × 12（至少一輪）。 */
+export const MONTHS_PER_ROUND = 12;
+/** 計時發薪預設間隔（主持人可調 5–20 分鐘）；到期後排在目前玩家行動結束時執行，且至少要經過一輪。 */
+export const PAYDAY_TIMER_DEFAULT_MS = 10 * 60 * 1000;
 /** 健康與自然人脈仍維持原本每次發薪三個成長週期，不隨財務月份加倍。 */
 export const GROWTH_CYCLES_PER_GLOBAL_PAYDAY = 3;
 

@@ -9,6 +9,7 @@ import AnalysisPage from './AnalysisPage';
 import EventCard from '../components/game/EventCard';
 import PaydayPlanForm from '../components/game/PaydayPlanForm';
 import MoneyDetailSheet from '../components/game/MoneyDetailSheet';
+import { formatCountdown, usePaydayCountdown } from '../components/game/paydayCountdown';
 import CollapsePanel from '../components/game/CollapsePanel';
 import DecisionCountdown from '../components/game/DecisionCountdown';
 import '../components/game/MobileClarity.css';
@@ -702,6 +703,7 @@ export default function PlayerPage() {
     setPaydayForm(null);
   }
 
+  const paydayRemaining = usePaydayCountdown(gameState?.paydayTimer, Boolean(gameState?.isPaused));
   const myPlayer: Player | undefined = gameState?.players.find((p) => p.id === myId);
   const isMyTurn = gameState?.currentPlayerTurnId === myId;
   const isGameOver = gameState?.gamePhase === 'GameOver';
@@ -1265,7 +1267,7 @@ export default function PlayerPage() {
                   ? '本季全體發薪中'
                   : gameState.finalRoundStarted
                     ? '96 歲 · 第 20 輪（最後一輪）'
-                    : `人生第 ${Math.min(gameState.totalLifeRounds ?? 20, (gameState.completedLifeRounds ?? gameState.turnNumber) + 1)} 輪 · 發薪進度 ${Math.min(3, (gameState.roundsSinceGlobalPayday ?? 0) + 1)}/3`}
+                    : `人生第 ${Math.min(gameState.totalLifeRounds ?? 20, (gameState.completedLifeRounds ?? gameState.turnNumber) + 1)} 輪 · ${gameState.paydayTimer?.enabled ? (gameState.paydayTimer.due ? '發薪即將開始' : `下次發薪 ${formatCountdown(paydayRemaining)}`) : `發薪進度 ${Math.min(3, (gameState.roundsSinceGlobalPayday ?? 0) + 1)}/3`}`}
               </span>
             </div>
           )}
