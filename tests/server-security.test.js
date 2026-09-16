@@ -71,6 +71,9 @@ test('房間專屬控制碼、多裝置控場、零玩家防呆、來源限制�
   assert.equal(created.roomId, 'SAFE01');
   assert.match(created.adminCode, /^[A-F0-9]{12}$/);
 
+  const disabledPromise = waitForEvent(admin, 'gameStateUpdate', (g) => g.actionPhaseEnabled === false);
+  admin.emit('setActionPhaseEnabled', { enabled: false });
+  await disabledPromise;
   const noPlayerStartPromise = waitForEvent(admin, 'error');
   admin.emit('startGame');
   assert.match((await noPlayerStartPromise).message, /沒有玩家/);

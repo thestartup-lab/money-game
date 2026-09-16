@@ -394,7 +394,9 @@ export default function HostControlPage() {
               className="host-primary-button host-continue-button"
               onClick={() => emit('continueDecisionPhase', { phaseId: decisionPhase.id })}
             >
-              {decisionPhase.kind === 'auction'
+              {decisionPhase.kind === 'actions'
+                ? `結束行動時間，開始擲骰（${(gameState?.actionPhaseDone ?? []).length}/${players.filter((player) => player.isAlive && !player.isDisconnected).length} 已完成）`
+                : decisionPhase.kind === 'auction'
                 ? '結束競標並揭曉'
                 : decisionPhase.submitted
                   ? '揭曉結果並繼續'

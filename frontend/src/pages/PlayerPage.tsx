@@ -1241,7 +1241,7 @@ export default function PlayerPage() {
             <div className="text-right text-xs font-bold text-yellow-200">
               人生輪 {Math.min(gameState.totalLifeRounds ?? 20, (gameState.completedLifeRounds ?? gameState.turnNumber) + 1)}/{gameState.totalLifeRounds ?? 20}
             </div>
-            {gameState.isPaused ? <div className="text-orange-300 text-xs text-right font-bold">⏸ 暫停</div> : null}
+            {(gameState.isManuallyPaused ?? (gameState.isPaused && !gameState.decisionPhase && !gameState.facilitatorScene)) ? <div className="text-orange-300 text-xs text-right font-bold">⏸ 暫停</div> : null}
             <button type="button" className={`senior-cashflow underline decoration-dotted ${myPlayer.monthlyCashflow >= 0 ? 'text-green-300' : 'text-red-300'}`} onClick={() => setMoneyDetail('flow')} title="看月現金流的組成">
               {myPlayer.monthlyCashflow >= 0 ? '+' : ''}${fmt(myPlayer.monthlyCashflow)}/月
             </button>
@@ -1307,7 +1307,29 @@ export default function PlayerPage() {
             </div>
           )}
 
-          {gameState.decisionPhase && !paydayForm && (
+          {gameState.decisionPhase?.kind === 'actions' && !paydayForm && (() => {
+            const done = new Set(gameState.actionPhaseDone ?? []);
+            const alive = gameState.players.filter((p) => p.isAlive && !p.isDisconnected);
+            const meDone = done.has(myId);
+            return (
+              <div className="mx-4 mb-3 rounded-2xl border-2 border-emerald-500 bg-emerald-950/70 px-4 py-3 text-center">
+                <p className="text-lg font-black text-emerald-200">🕒 {gameState.decisionPhase.title}</p>
+                <p className="mt-1 text-xs text-emerald-100/80">打開下方「行動」面板：旅遊、聯誼、保險、投資、借還款都在這裡處理。</p>
+                <DecisionCountdown reminderEndsAt={gameState.decisionPhase.reminderEndsAt} className="mt-2 block font-mono text-lg font-black text-yellow-300" />
+                <p className="mt-1 text-xs text-gray-300">已完成 {alive.filter((p) => done.has(p.id)).length}/{alive.length}</p>
+                <button
+                  type="button"
+                  className={`mt-2 w-full rounded-xl py-3 text-base font-black ${meDone ? 'bg-gray-700 text-gray-300' : 'bg-emerald-600 text-white hover:bg-emerald-500'}`}
+                  disabled={meDone}
+                  onClick={() => emit('finishActionPhase')}
+                >
+                  {meDone ? '已完成，等待其他人' : '我這輪完成了'}
+                </button>
+              </div>
+            );
+          })()}
+
+          {gameState.decisionPhase && gameState.decisionPhase.kind !== 'actions' && !paydayForm && (
             <div className="mx-4 mb-3 rounded-xl border border-indigo-700 bg-indigo-950/60 px-3 py-3 text-center">
               <p className="text-sm font-bold text-indigo-200">
                 {gameState.decisionPhase.kind === 'reading' ? '請抬頭看落格說明，等待主持人繼續' : gameState.decisionPhase.playerId === myId
@@ -1400,7 +1422,7 @@ export default function PlayerPage() {
               <FinancialStatement player={myPlayer} onShowCash={() => setMoneyDetail('cash')} onShowFlow={() => setMoneyDetail('flow')} />
             </CollapsePanel>
 
-            {(!gameState.decisionPhase || (gameState.decisionPhase.rescue && gameState.decisionPhase.playerId === myId)) && !gameState.facilitatorScene && <CollapsePanel title="行動" defaultOpen={Boolean(gameState.decisionPhase?.rescue)}>
+            {(!gameState.decisionPhase || gameState.decisionPhase.kind === 'actions' || (gameState.decisionPhase.rescue && gameState.decisionPhase.playerId === myId)) && !gameState.facilitatorScene && <CollapsePanel title="行動" defaultOpen={Boolean(gameState.decisionPhase?.rescue) || gameState.decisionPhase?.kind === 'actions'}>
               <ActionPanel
                 player={myPlayer}
                 currentAge={personalAge}

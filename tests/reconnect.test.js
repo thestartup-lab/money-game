@@ -43,6 +43,7 @@ test('本機端到端：異常封包不崩潰、禁止中途加入、暫停操�
   await send(admin, 'playerJoin', { playerName: {}, roomCode: 'TEST01' }, 'error');
   assert.equal((await (await fetch(`http://127.0.0.1:${port}/health`)).json()).ok, true);
   await send(admin, 'createRoom', { roomId: 'TEST01' }, 'roomCreated');
+  await send(admin, 'setActionPhaseEnabled', { enabled: false }, 'gameStateUpdate', g => g.actionPhaseEnabled === false);
   const p = await connect(), q = await connect();
   const pSession = await send(p, 'playerJoin', { playerName: '甲', roomCode: 'TEST01' }, 'playerSession');
   await send(q, 'playerJoin', { playerName: '乙', roomCode: 'TEST01' }, 'playerSession');

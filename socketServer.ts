@@ -1843,6 +1843,8 @@ function serializeGameState(gs: GameState): object {
     isManuallyPaused: gs.pausedAt !== null && !gs.decisionPhase && !gs.facilitatorScene,
     readingAutoContinueMs: gs.readingAutoContinueMs,
     autoRevealOnSubmit: gs.autoRevealOnSubmit,
+    actionPhaseDone: gs.decisionPhase?.kind === 'actions' ? [...gs.actionPhaseDone] : [],
+    actionPhaseEnabled: gs.actionPhaseEnabled,
     activeAuctions: Object.entries(gs.activeAuctions ?? {}).map(([auctionId, a]) => ({
       auctionId,
       dealCardId: a.dealCardId,
@@ -2011,6 +2013,42 @@ function skipCurrentEducationTurns(gs: GameState): void {
  * 推進回合的唯一入口。完成第三個完整桌次輪後，立即鎖住擲骰並啟動
  * 全體季度發薪；實際規劃仍由主持人逐位收束。
  */
+/**
+ * 每輪開始的「全體行動時間」：所有人同時在手機處理旅遊、聯誼、保險、投資與借還款。
+ * 全員按「完成」或主持人按結束後才開始擲骰。固定班表職業的活動額度在此重置為每輪 1 次。
+ */
+async function runActionPhase(gs: GameState): Promise<void> {
+  const roomId = gs.gameId;
+  gs.actionPhaseRound = gs.turnNumber;
+  gs.actionPhaseDone = new Set();
+  for (const player of gs.players.values()) {
+    if (player.isAlive && !player.profession.hasFlexibleSchedule) player.actionTokensThisPayday = 1;
+  }
+  const roundLabel = gs.finalRoundStarted ? '最後一輪' : `第 ${gs.turnNumber + 1} 輪`;
+  const context = beginHostDecisionPhase(
+    gs,
+    { id: '__all_players__', name: '全體玩家' },
+    'actions',
+    `${roundLabel}全體行動時間`,
+    '所有人同時在手機處理旅遊、聯誼、保險、投資與借還款；完成後按「我這輪完成了」，全員完成就開始擲骰。',
+  );
+  emitToRoom(roomId, 'actionPhaseStarted', { phaseId: context.phaseId, round: gs.turnNumber + 1 });
+  await waitForHostRelease(gs, context);
+  gs.actionPhaseDone = new Set();
+  emitToRoom(roomId, 'actionPhaseEnded', { phaseId: context.phaseId });
+  emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+  continueAfterTurnAdvance(gs);
+}
+
+/** 全體在線存活玩家都按了完成 → 自動結束行動時間。 */
+function maybeCompleteActionPhase(gs: GameState): void {
+  if (gs.decisionPhase?.kind !== 'actions') return;
+  const waiting = [...gs.players.values()].filter((p) => p.isAlive && !p.isDisconnected && !gs.actionPhaseDone.has(p.id));
+  if (waiting.length > 0) return;
+  const waiter = decisionReleaseWaiters.get(gs.gameId);
+  if (waiter?.phaseId === gs.decisionPhase.id) waiter.release();
+}
+
 function continueAfterTurnAdvance(gs: GameState): void {
   if (gs.gamePhase === GamePhase.GameOver || gs.facilitatorScene) return;
   if (gs.decisionPhase) return;
@@ -2036,7 +2074,7 @@ function continueAfterTurnAdvance(gs: GameState): void {
     !gs.finalRoundStarted
   ) {
     gs.globalPaydayInProgress = true;
-    void runGlobalPayday(gs).catch((error) => {
+    void runGlobalPayday(gs).then(() => continueAfterTurnAdvance(gs)).catch((error) => {
       console.error(`[globalPayday] 房間 ${gs.gameId} 季度結算失敗：`, error);
       gs.globalPaydayPending = false;
       gs.globalPaydayInProgress = false;
@@ -2045,6 +2083,12 @@ function continueAfterTurnAdvance(gs: GameState): void {
       emitToRoom(gs.gameId, 'globalPaydayFailed', { message: '季度發薪發生錯誤，已解除流程鎖定。' });
       emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
     });
+    return;
+  }
+
+  // 每輪開始：全體行動時間（發薪、舞台、第二人生都處理完之後才開）
+  if (gs.actionPhaseEnabled && gs.actionPhaseRound !== gs.turnNumber && !gs.turnInProgress && !gs.globalPaydayInProgress) {
+    void runActionPhase(gs).catch((error) => console.error(`[actionPhase] 房間 ${gs.gameId}：`, error));
   }
 }
 
@@ -2550,7 +2594,9 @@ io.on('connection', (socket: Socket) => {
     // 危機自救階段：本人可賣資產、申請應急借款，其他財務操作照常封鎖
     const rescueAllowed = Boolean(gs && player?.isAlive && gs.decisionPhase?.rescue && gs.decisionPhase.playerId === player.id
       && ['sellAsset', 'takeEmergencyLoan'].includes(event));
-    if (financialActions.has(event) && !rescueAllowed && (!gs || !player?.isAlive ||
+    // 全體行動時間：所有存活玩家都可自由操作
+    const actionsOpen = Boolean(gs && player?.isAlive && gs.decisionPhase?.kind === 'actions' && !gs.facilitatorScene);
+    if (financialActions.has(event) && !rescueAllowed && !actionsOpen && (!gs || !player?.isAlive ||
       ![GamePhase.RatRace, GamePhase.FastTrack].includes(gs.gamePhase) || gs.pausedAt !== null ||
       gs.decisionPhase || gs.facilitatorScene || gs.turnInProgress || gs.globalPaydayPending || gs.globalPaydayInProgress)) {
       emitClient(socket, 'error', { message: '目前不是自由操作時間，請等待主持人完成決策或恢復遊戲。' });
@@ -4531,6 +4577,34 @@ io.on('connection', (socket: Socket) => {
     skipCurrentEducationTurns(gs);
 
     emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+    // 第一輪的全體行動時間
+    continueAfterTurnAdvance(gs);
+  });
+
+  // ----------------------------------------------------------
+  // 全體行動時間開關 (setActionPhaseEnabled)
+  // ----------------------------------------------------------
+  onSafe('setActionPhaseEnabled', (payload: { enabled: boolean }) => {
+    const gs = getRoomState(socket);
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    if (!isRoomAdmin(socket, gs)) { emitClient(socket, 'error', { message: '只有管理員可以調整行動時間設定。' }); return; }
+    gs.actionPhaseEnabled = payload.enabled === true;
+    console.log(`[setActionPhaseEnabled] 房間 ${gs.gameId} 全體行動時間：${gs.actionPhaseEnabled ? '開' : '關'}`);
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
+  // ----------------------------------------------------------
+  // 全體行動時間：玩家按「我這輪完成了」
+  // ----------------------------------------------------------
+  onSafe('finishActionPhase', () => {
+    const gs = getRoomState(socket);
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    const player = gs.players.get(playerIdentity(socket));
+    if (!player?.isAlive) { emitClient(socket, 'error', { message: '玩家不存在或已出局。' }); return; }
+    if (gs.decisionPhase?.kind !== 'actions') { emitClient(socket, 'error', { message: '現在不是全體行動時間。' }); return; }
+    gs.actionPhaseDone.add(player.id);
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+    maybeCompleteActionPhase(gs);
   });
 
   onSafe('pauseGame', (payload?: { reason?: string }) => {
@@ -5563,6 +5637,7 @@ io.on('connection', (socket: Socket) => {
       // 保留角色；所有人離線後才啟動整房閒置清理。
       player.isDisconnected = true;
       console.log(`[斷線] 玩家 ${player.name} 斷線，保留角色等待原裝置重連`);
+      maybeCompleteActionPhase(gs);
       emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
 
       // Preserve disconnected characters until the host explicitly removes them.
@@ -5647,6 +5722,7 @@ function beginHostDecisionPhase(
     marriage: 60,
     startup: 45,
     auction: 30,
+    actions: 90,
   };
   gs.decisionPhase = {
     id: phaseId,

@@ -190,6 +190,9 @@ export interface GameState {
   readingAutoContinueMs?: number;
   /** 玩家送出選擇後自動揭曉（預設開） */
   autoRevealOnSubmit?: boolean;
+  /** 全體行動時間已按完成的玩家 */
+  actionPhaseDone?: string[];
+  actionPhaseEnabled?: boolean;
   activeAuctions?: Array<{
     auctionId: string; dealCardId: string; triggeredBy: string; triggeredByName: string;
     minBid: number; highestBid: number; highestBidderId?: string; endsAt: number;
@@ -211,7 +214,7 @@ export interface GameState {
   basicInvestmentOffers?: Array<{ id: string; name: string; cost: number; monthlyCashflow: number; description: string }>;
   decisionPhase?: {
     id: string;
-    kind: 'reading' | 'payday' | 'deal' | 'charity' | 'crisis' | 'relationship' | 'marriage' | 'startup' | 'auction';
+    kind: 'reading' | 'payday' | 'deal' | 'charity' | 'crisis' | 'relationship' | 'marriage' | 'startup' | 'auction' | 'actions';
     description?: string;
     title: string;
     playerId: string;

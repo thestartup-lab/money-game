@@ -537,7 +537,7 @@ export default function AdminPage() {
                       className="font-mono text-2xl font-black text-yellow-300"
                     />
                     <div className={`mt-1 rounded-full px-3 py-1 text-xs font-bold ${decisionPhase.submitted ? 'bg-emerald-700 text-emerald-100' : 'bg-amber-700 text-amber-100'}`}>
-                      {decisionPhase.kind === 'auction' ? '競標中' : decisionPhase.submitted ? '已送出' : '思考中'}
+                      {decisionPhase.kind === 'actions' ? '行動中' : decisionPhase.kind === 'auction' ? '競標中' : decisionPhase.submitted ? '已送出' : '思考中'}
                     </div>
                   </div>
                 </div>
@@ -585,7 +585,9 @@ export default function AdminPage() {
                   className="w-full rounded-xl bg-indigo-500 px-4 py-3 text-base font-black text-white transition-colors hover:bg-indigo-400"
                   onClick={() => emit('continueDecisionPhase', { phaseId: decisionPhase.id })}
                 >
-                  {decisionPhase.kind === 'auction'
+                  {decisionPhase.kind === 'actions'
+                    ? `結束行動時間，開始擲骰 ▶（已完成 ${(gameState?.actionPhaseDone ?? []).length}/${players.filter((p: Player) => p.isAlive && !p.isDisconnected).length}）`
+                    : decisionPhase.kind === 'auction'
                     ? '結束競標並揭曉 ▶'
                     : decisionPhase.submitted
                       ? '揭曉結果並繼續 ▶'
@@ -617,6 +619,14 @@ export default function AdminPage() {
                   >{gameState?.autoRevealOnSubmit !== false ? '開啟中（點此改為手動揭曉）' : '關閉中（點此開啟）'}</button>
                 </div>
                 <p className="mt-1 text-[11px] text-gray-500">開啟時玩家一送出就在 1.5 秒後揭曉；競標仍由你按「結束競標」。</p>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="font-bold text-gray-200">每輪開始的全體行動時間</span>
+                  <button
+                    className={`rounded-lg px-2 py-1 font-bold ${gameState?.actionPhaseEnabled !== false ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+                    onClick={() => emit('setActionPhaseEnabled', { enabled: gameState?.actionPhaseEnabled === false })}
+                  >{gameState?.actionPhaseEnabled !== false ? '開啟中（點此關閉）' : '關閉中（點此開啟）'}</button>
+                </div>
+                <p className="mt-1 text-[11px] text-gray-500">開啟時每輪擲骰前全員同時處理行動，全員完成或你按結束後開始擲骰。</p>
               </div>
             )}
             {isRunning && !decisionPhase && !gameState?.facilitatorScene && (

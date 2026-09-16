@@ -187,7 +187,7 @@ export interface MarketEvent {
  */
 export interface DecisionPhaseState {
   id: string;
-  kind: 'reading' | 'payday' | 'deal' | 'charity' | 'crisis' | 'relationship' | 'marriage' | 'startup' | 'auction';
+  kind: 'reading' | 'payday' | 'deal' | 'charity' | 'crisis' | 'relationship' | 'marriage' | 'startup' | 'auction' | 'actions';
   description?: string;
   title: string;
   playerId: string;
@@ -706,6 +706,12 @@ export class GameState {
   readingAutoContinueMs = 10_000;
   /** 玩家送出選擇後是否自動揭曉（不必等主持人按）；競標仍由主持人結束。 */
   autoRevealOnSubmit = true;
+  /** 已跑過「全體行動時間」的輪數（turnNumber）；每輪開始只跑一次 */
+  /** 每輪開始是否開「全體行動時間」（主持人可關） */
+  actionPhaseEnabled = true;
+  actionPhaseRound = -1;
+  /** 本輪行動時間已按「完成」的玩家 */
+  actionPhaseDone: Set<string> = new Set();
   gameId: string;
   /** 以玩家 ID 為 key 的快速查詢表 */
   players: Map<string, Player>;

@@ -32,8 +32,9 @@ function safeTree(value: unknown, depth = 0): boolean {
 }
 
 export function validateSocketPayload(event: string, payload: unknown): boolean {
-  if (payload === undefined) return !required[event];
-  if (payload === null || typeof payload !== 'object' || Array.isArray(payload) || !safeTree(payload)) return false;
+  // socket.io 會把 emit(event, undefined) 編成 null；沒有必填欄位的事件視同無 payload
+  if (payload === undefined || payload === null) return !required[event];
+  if (typeof payload !== 'object' || Array.isArray(payload) || !safeTree(payload)) return false;
   const data = payload as Record<string, unknown>;
   for (const key of required[event] ?? []) if (!(key in data)) return false;
   for (const [key, value] of Object.entries(data)) {

@@ -38,6 +38,7 @@ test('離線且未完成設定的玩家會擋開局；強制開始後主持人�
 
   const admin = await open();
   const room = await send(admin, 'createRoom', { roomId: 'H' + PORT }, 'roomCreated');
+  await send(admin, 'setActionPhaseEnabled', { enabled: false }, 'gameStateUpdate', g => g.actionPhaseEnabled === false);
   const a = await open(); const b = await open();
   const sa = await send(a, 'playerJoin', { playerName: '甲', roomCode: room.roomId }, 'playerSession');
   await send(b, 'playerJoin', { playerName: '乙', roomCode: room.roomId }, 'playerSession');

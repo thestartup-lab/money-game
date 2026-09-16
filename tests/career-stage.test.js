@@ -44,6 +44,7 @@ test('轉職排隊→暫停舞台→本人確認→主持揭曉→繼續；權�
   async function connect() { const s = io('http://127.0.0.1:3227', { transports: ['websocket'], reconnection: false }); sockets.push(s); await wait(s, 'connect'); return s; }
   const admin = await connect(), a = await connect(), b = await connect();
   const room = await send(admin, 'createRoom', { roomId: 'CRTEST' }, 'roomCreated');
+  await send(admin, 'setActionPhaseEnabled', { enabled: false }, 'gameStateUpdate', g => g.actionPhaseEnabled === false);
   const sa = await send(a, 'playerJoin', { playerName: '甲', roomCode: room.roomId }, 'playerSession');
   const sb = await send(b, 'playerJoin', { playerName: '乙', roomCode: room.roomId }, 'playerSession');
   const start = await send(admin, 'startGame', { force: true }, 'gameStateUpdate', g => g.gamePhase === 'RatRace');

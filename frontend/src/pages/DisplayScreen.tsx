@@ -874,20 +874,35 @@ export default function DisplayScreen() {
                 <div className="w-full max-w-2xl rounded-3xl border-2 border-indigo-400 bg-gradient-to-br from-indigo-950/95 to-gray-950/95 px-10 py-9 text-center shadow-2xl">
                   <p className="text-sm font-bold uppercase tracking-[0.3em] text-indigo-300">全場決策時間</p>
                   <p className="mt-3 text-5xl font-black text-white">{gameState.decisionPhase.title}</p>
-                  <p className="mt-4 text-2xl font-bold text-yellow-300">{gameState.decisionPhase.playerName}</p>
+                  {gameState.decisionPhase.kind === 'actions' ? (
+                    <div className="mx-auto mt-4 flex max-w-3xl flex-wrap justify-center gap-2">
+                      {gameState.players.filter((p) => p.isAlive).map((p) => {
+                        const done = (gameState.actionPhaseDone ?? []).includes(p.id);
+                        return (
+                          <span key={p.id} className={`rounded-full px-4 py-1 text-xl font-bold ${done ? 'bg-emerald-700 text-white' : 'bg-gray-700 text-gray-300'}`}>
+                            {done ? '✓ ' : ''}{p.name}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="mt-4 text-2xl font-bold text-yellow-300">{gameState.decisionPhase.playerName}</p>
+                  )}
                   <DecisionCountdown
                     reminderEndsAt={gameState.decisionPhase.reminderEndsAt}
                     className="mt-5 block font-mono text-7xl font-black tracking-tight text-yellow-300"
                   />
                   <div className={`mx-auto mt-6 inline-flex items-center gap-2 rounded-full px-5 py-2 text-lg font-bold ${gameState.decisionPhase.submitted ? 'bg-emerald-700 text-emerald-100' : 'bg-amber-700 text-amber-100'}`}>
                     <span className={`h-3 w-3 rounded-full ${gameState.decisionPhase.submitted ? 'bg-emerald-200' : 'animate-pulse bg-amber-200'}`} />
-                    {gameState.decisionPhase.kind === 'auction'
+                    {gameState.decisionPhase.kind === 'actions'
+                      ? `大家同時在手機處理行動，已完成 ${(gameState.actionPhaseDone ?? []).length}/${gameState.players.filter((p) => p.isAlive && !p.isDisconnected).length}`
+                      : gameState.decisionPhase.kind === 'auction'
                       ? '公開競標進行中，主持人決定結束時間'
                       : gameState.decisionPhase.submitted
                         ? (gameState.autoRevealOnSubmit !== false ? '選擇已送出，揭曉中' : '選擇已送出，等待主持人揭曉')
                         : '思考與討論中'}
                   </div>
-                  <p className="mt-5 text-sm text-gray-400">決策內容保密；由主持人掌握討論與揭曉時機</p>
+                  <p className="mt-5 text-sm text-gray-400">{gameState.decisionPhase.kind === 'actions' ? '全員完成就自動開始擲骰；主持人也可提前結束' : '決策內容保密；由主持人掌握討論與揭曉時機'}</p>
                 </div>
               </div>
             )}

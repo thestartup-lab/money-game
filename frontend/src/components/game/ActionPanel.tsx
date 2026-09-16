@@ -125,11 +125,11 @@ export default function ActionPanel({
   const noTokensLeft = !player.hasFlexibleSchedule && player.actionTokensThisPayday <= 0;
   const scheduleLabel = player.hasFlexibleSchedule
     ? '自由行程（不限次數）'
-    : `本季剩餘活動：${player.actionTokensThisPayday} 次`;
+    : `本輪剩餘活動：${player.actionTokensThisPayday} 次`;
 
   const travelDisabled = player.isBedridden || player.stats.health < 50 || noTokensLeft;
   const socialDisabled = player.isBedridden || player.isMarried || noTokensLeft;
-  const tokenReason = '本次發薪的活動額度已用完（固定班表每次發薪 1 次，下次發薪重置）';
+  const tokenReason = '本輪的活動額度已用完（固定班表每輪 1 次，下一輪開始時重置）';
   const travelReason = player.isBedridden ? '臥床中無法出遊'
     : player.stats.health < 50 ? `健康值 ${player.stats.health} 未達 50，先投資健康`
     : noTokensLeft ? tokenReason : '';

@@ -14,7 +14,7 @@ function send(s, event, payload, response, predicate) {
   const result = wait(s, response, predicate); s.emit(event, payload); return result;
 }
 
-async function fixture(t, port, passed, passive, autoReading = true, outer = false, deal = false, seasoned = false, crisis = false, charity = false) {
+async function fixture(t, port, passed, passive, autoReading = true, outer = false, deal = false, seasoned = false, crisis = false, charity = false, actionPhase = false) {
   // Test-only deterministic state: exercise production Socket handlers without adding a production test endpoint.
   const boot = `
     Math.random=()=>0.4;
@@ -50,6 +50,7 @@ async function fixture(t, port, passed, passive, autoReading = true, outer = fal
   const admin = await connect();
   if (autoReading) admin.on('gameStateUpdate', g => { if (g.decisionPhase?.kind === 'reading') admin.emit('continueDecisionPhase', { phaseId: g.decisionPhase.id }); });
   const room = await send(admin, 'createRoom', { roomId: 'F' + port }, 'roomCreated');
+  if (!actionPhase) await send(admin, 'setActionPhaseEnabled', { enabled: false }, 'gameStateUpdate', g => g.actionPhaseEnabled === false);
   const a = await connect(), b = await connect();
   const sa = await send(a, 'playerJoin', { playerName: '甲', roomCode: room.roomId }, 'playerSession');
   const sb = await send(b, 'playerJoin', { playerName: '乙', roomCode: room.roomId }, 'playerSession');
@@ -198,4 +199,20 @@ test('玩家送出後自動揭曉，不必主持人按繼續；關閉後恢復�
   assert.equal(ended.submitted, true);
   const off = await send(admin, 'setAutoRevealOnSubmit', { enabled: false }, 'gameStateUpdate', g => g.autoRevealOnSubmit === false);
   assert.equal(off.autoRevealOnSubmit, false);
+});
+
+test('每輪開始的全體行動時間：擲骰被擋、財務操作開放、全員完成自動結束', { timeout: 20000 }, async t => {
+  const { admin, a, b, sa } = await fixture(t, 3239, false, 0, true, false, false, false, false, false, true);
+  // 開局後行動時間可能已經在 fixture 回傳前開啟：用一個會回傳狀態的設定請求來讀取
+  const phase = await send(admin, 'setReadingAutoContinue', { seconds: 10 }, 'gameStateUpdate', g => g.decisionPhase?.kind === 'actions');
+  assert.equal(phase.actionPhaseEnabled, true);
+  assert.match((await send(a, 'playerRoll', { diceCount: 1 }, 'error')).message, /主持人控制/);
+  const insured = await send(a, 'buyInsurance', { insuranceType: 'life' }, 'insuranceUpdated');
+  assert.equal(insured.active, true, '行動時間內可自由操作');
+  const one = await send(a, 'finishActionPhase', undefined, 'gameStateUpdate', g => (g.actionPhaseDone ?? []).includes(sa.playerId));
+  assert.equal(one.decisionPhase?.kind, 'actions', '一人完成還不結束');
+  const ended = await send(b, 'finishActionPhase', undefined, 'gameStateUpdate', g => !g.decisionPhase);
+  assert.deepEqual(ended.actionPhaseDone, []);
+  const rolled = await send(a, 'playerRoll', { diceCount: 1 }, 'gameStateUpdate', g => g.decisionPhase?.kind === 'reading' || g.turnInProgress);
+  assert.ok(rolled);
 });
