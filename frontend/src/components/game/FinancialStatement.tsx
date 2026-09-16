@@ -29,7 +29,7 @@ export default function FinancialStatement({ player, onShowCash, onShowFlow }: P
         <div className="card text-center">
           <p className="text-xs text-gray-400">月總收入</p>
           <p className="text-xl font-semibold positive">${fmt(player.totalIncome)}</p>
-          <p className="text-xs text-gray-500">薪資 ${fmt(player.salary)} + 被動 ${fmt(player.totalPassiveIncome)}</p>
+          <p className="text-xs text-gray-500">{player.retirementStatus === 'retired' ? '退休金' : player.retirementStatus === 'consultant' ? '顧問' : '薪資'} ${fmt(player.salary)} + 被動 ${fmt(player.totalPassiveIncome)}</p>
         </div>
         <div className="card text-center">
           <p className="text-xs text-gray-400">月總支出</p>

@@ -14,7 +14,7 @@ function send(s, event, payload, response, predicate) {
   const result = wait(s, response, predicate); s.emit(event, payload); return result;
 }
 
-async function fixture(t, port, passed, passive, autoReading = true, outer = false, deal = false, seasoned = false, crisis = false, charity = false, actionPhase = false) {
+async function fixture(t, port, passed, passive, autoReading = true, outer = false, deal = false, seasoned = false, crisis = false, charity = false, actionPhase = false, retirementRound = null) {
   // Test-only deterministic state: exercise production Socket handlers without adding a production test endpoint.
   const boot = `
     Math.random=()=>0.4;
@@ -32,6 +32,7 @@ async function fixture(t, port, passed, passive, autoReading = true, outer = fal
     const cards=require('./dist/gameCards');
     cards.BOARD.forEach(cell=>cell.type=cards.SquareType.SecondLife);
     if (${deal}) cards.BOARD.forEach(cell=>{cell.type=cards.SquareType.SmallDeal;cell.label='小交易';});
+    if (${retirementRound !== null}) require('./dist/gameConfig').RETIREMENT_ROUND = ${retirementRound ?? 0};
     if (${charity}) cards.BOARD.forEach(cell=>{cell.type=cards.SquareType.Charity;cell.label='慈善捐款';});
     if (${crisis}) { cards.BOARD.forEach(cell=>{cell.type=cards.SquareType.Crisis;cell.label='危機事件';}); cards.CRISIS_POOL_BY_STAGE.Youth.splice(0, cards.CRISIS_POOL_BY_STAGE.Youth.length, 'cr-001'); }
     if (${outer}) cards.FAST_TRACK_BOARD.forEach(cell=>{cell.type=cards.FastTrackSquareType.TaxPlanning;cell.label='稅務規劃';});
@@ -233,4 +234,29 @@ test('計時發薪：主持人立即發薪要等一輪完成、排在行動結�
   const end = await send(b, 'submitPaydayPlan', { phaseId: phase.decisionPhase.id, stockDCAAmount: 0, buyInsuranceTypes: [] }, 'gameStateUpdate', g => g.globalPaydayNumber === 1 && !g.globalPaydayInProgress);
   assert.equal(end.players.find(p => p.id === sa.playerId).paydayCount, 12);
   assert.equal(end.paydayTimer.roundsSince, 0);
+});
+
+test('65 歲人生轉折：到達輪數後逐位開舞台，本人選退休後薪資變退休金、高齡支出啟用', { timeout: 25000 }, async t => {
+  const { admin, a, b, sa, sb } = await fixture(t, 3242, false, 0, true, false, false, false, false, false, false, 1);
+  // 第一輪：甲、乙各走一次 → turnNumber 1 → 轉折舞台（先甲）
+  await send(a, 'playerRoll', { diceCount: 1 }, 'gameStateUpdate', g => g.currentPlayerTurnId === sb.playerId && !g.decisionPhase && !g.turnInProgress);
+  const scene = await send(b, 'playerRoll', { diceCount: 1 }, 'gameStateUpdate', g => g.facilitatorScene?.kind === 'retirement');
+  assert.equal(scene.facilitatorScene.careerPlayerId, sa.playerId);
+  assert.equal(scene.players.find(p => p.id === sa.playerId).isSenior, true);
+  // 主持人不能代選；本人選退休
+  assert.match((await send(admin, 'resolveFacilitatorScene', { sceneId: scene.facilitatorScene.id, choiceId: 'reveal' }, 'error')).message, /本人/);
+  await send(b, 'chooseRetirement', { sceneId: scene.facilitatorScene.id, choice: 'retire' }, 'error');
+  const chosen = await send(a, 'chooseRetirement', { sceneId: scene.facilitatorScene.id, choice: 'retire' }, 'gameStateUpdate', g => g.facilitatorScene?.careerConfirmed === true);
+  assert.equal(chosen.facilitatorScene.options.length, 1);
+  const result = await send(admin, 'resolveFacilitatorScene', { sceneId: scene.facilitatorScene.id, choiceId: 'reveal' }, 'gameStateUpdate', g => g.facilitatorScene?.stage === 'result');
+  const me = result.players.find(p => p.id === sa.playerId);
+  assert.equal(me.retirementStatus, 'retired');
+  assert.equal(me.salary, me.pensionMonthly);
+  // 關閉後輪到乙的轉折；乙選延後
+  const second = await send(admin, 'closeFacilitatorScene', { sceneId: scene.facilitatorScene.id }, 'gameStateUpdate', g => g.facilitatorScene?.kind === 'retirement' && g.facilitatorScene.careerPlayerId === sb.playerId);
+  await send(b, 'chooseRetirement', { sceneId: second.facilitatorScene.id, choice: 'defer' }, 'gameStateUpdate', g => g.facilitatorScene?.careerConfirmed === true);
+  const deferred = await send(admin, 'resolveFacilitatorScene', { sceneId: second.facilitatorScene.id, choiceId: 'reveal' }, 'gameStateUpdate', g => g.facilitatorScene?.stage === 'result');
+  assert.equal(deferred.players.find(p => p.id === sb.playerId).retirementStatus, 'working');
+  const done = await send(admin, 'closeFacilitatorScene', { sceneId: second.facilitatorScene.id }, 'gameStateUpdate', g => !g.facilitatorScene);
+  assert.ok(done);
 });

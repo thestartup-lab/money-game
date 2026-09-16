@@ -127,6 +127,9 @@ export interface Player {
   salaryMultiplierMonths?: number;
   salaryBonus?: number;
   congratulationsReceived?: number;
+  retirementStatus?: 'working' | 'retired' | 'consultant' | 'founder';
+  pensionMonthly?: number;
+  isSenior?: boolean;
   isInFastTrack: boolean;
   hasPassedSecondLife: boolean;
   fastTrackPosition: number;
@@ -234,7 +237,7 @@ export interface GameState {
 
 export interface FacilitatorScene {
   id: string;
-  kind: 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family' | 'global_event' | 'second_life' | 'career';
+  kind: 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family' | 'global_event' | 'second_life' | 'career' | 'retirement';
   stage: 'prompt' | 'result';
   kicker: string;
   title: string;

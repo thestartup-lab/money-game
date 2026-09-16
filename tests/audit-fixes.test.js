@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createPlayer, triggerPayday, repayLoan, getAvailableLoan, applyEducationLoan, calculateLifeScore } = require('../dist/gameLogic');
+const { createPlayer, triggerPayday, repayLoan, getAvailableLoan, applyEducationLoan, calculateLifeScore, computePension, computeConsultantIncome } = require('../dist/gameLogic');
 const { GameState } = require('../dist/gameDataModels');
 const { CRISIS_POOL_BY_STAGE, CRISIS_EVENTS, DOODADS, RELATIONSHIP_EVENTS, CHARITY_CARD, MARKET_CARDS } = require('../dist/gameCards');
 const { applyDoodadCard, applyCrisisCard, applyCharityDonation, applyRelationshipCard, applyMarketCard, getCharityDonationAmount, evaluateSecondLifeEligibility, previewCrisisCost } = require('../dist/cardSystem');
@@ -176,4 +176,28 @@ test('房貸車貸具象成資產＋負債，可提前還款且月付等比例�
   assert.ok(!p.liabilities.some((l) => l.id === 'home-loan-h'));
   assert.ok(p.assets.some((a) => a.id === 'home-h'), '房子保留');
   assert.equal(sellAsset(p, 'home-h').success, false, '自住房不可出售');
+});
+
+test('65 歲轉折：退休金依象限替代率、顧問收入依專長人脈、高齡支出依 HP', () => {
+  const game = new GameState('RETIRE');
+  const p = createPlayer('r', '退休者', 'teacher');
+  p.cash = 100000;
+  for (let i = 0; i < 12; i++) triggerPayday(p, game);
+  const avg = p.averageCareerSalary;
+  assert.ok(avg > 0);
+  assert.equal(computePension(p), Math.round(avg * 0.4), 'E 象限 40%');
+  p.retirementStatus = 'retired'; p.pensionMonthly = computePension(p);
+  triggerPayday(p, game);
+  assert.equal(p.salary, p.pensionMonthly, '退休後薪資 = 退休金');
+  p.retirementStatus = 'consultant'; p.stats.health = 70; p.stats.careerSkill = 40; p.stats.network = 4;
+  triggerPayday(p, game);
+  assert.equal(p.salary, 40 * 300 + 4 * 3000);
+  assert.equal(computeConsultantIncome({ ...p, stats: { ...p.stats, health: 49 } }), 0, 'HP 不足接不到案');
+  const before = p.totalExpenses;
+  p.isSenior = true; p.stats.health = 55;
+  assert.equal(p.totalExpenses, before + 3000);
+  p.stats.health = 25;
+  assert.equal(p.totalExpenses, before + 12000);
+  const investor = createPlayer('i', '投資人', 'angel_investor');
+  assert.equal(computePension(investor), 0, 'I 象限沒有退休金');
 });

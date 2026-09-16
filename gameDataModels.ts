@@ -20,6 +20,7 @@ import {
 } from './gameConstants';
 import { Deck, DealCard, DoodadCard, CrisisCard, MarketCard, SMALL_DEALS, BIG_DEALS, DOODADS, CRISIS_EVENTS, MARKET_CARDS } from './gameCards';
 import type { AdminGlobalEvent, GlobalEventEffect } from './adminEvents';
+import { SENIOR_MEDICAL_HP, SENIOR_MEDICAL_EXPENSE, SENIOR_CARE_HP, SENIOR_CARE_EXPENSE } from './gameConfig';
 
 // ============================================================
 // ENUMS — 定義於 gameConstants.ts，此處透過 re-export 保留向後相容性
@@ -200,7 +201,7 @@ export interface DecisionPhaseState {
   rescue?: boolean;
 }
 
-export type FacilitatorSceneKind = 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family' | 'global_event' | 'second_life' | 'career';
+export type FacilitatorSceneKind = 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family' | 'global_event' | 'second_life' | 'career' | 'retirement';
 
 export interface FacilitatorSceneState {
   id: string;
@@ -396,6 +397,19 @@ export class Player {
   numberOfChildren: number;
   /** 收到的祝賀次數；每 5 次 NT +1 */
   congratulationsReceived: number;
+  /** 65 歲人生轉折：working（未退休）、retired（領退休金）、consultant（顧問）、founder（退休創業） */
+  retirementStatus: 'working' | 'retired' | 'consultant' | 'founder';
+  /** 退休金月額（retired 時使用） */
+  pensionMonthly: number;
+  /** 是否已進入 65 歲後的醫療／長照支出階段 */
+  isSenior: boolean;
+  /** 已延後退休的次數 */
+  retirementDeferrals: number;
+  /** 延後退休當下的輪數（該輪不再詢問） */
+  retirementDeferralRound: number;
+  /** 職涯期間有薪月數與累計薪資，用來算退休金 */
+  salaryMonthsWorked: number;
+  salaryTotalEarned: number;
   /**
    * 累計發薪日次數。每次 triggerPayday 時遞增。
    * 每 12 個月觸發一次年度累進稅結算。
@@ -569,6 +583,13 @@ export class Player {
     this.insurance = { ...DEFAULT_INSURANCE_STATE };
     this.numberOfChildren = 0;
     this.congratulationsReceived = 0;
+    this.retirementStatus = 'working';
+    this.pensionMonthly = 0;
+    this.isSenior = false;
+    this.retirementDeferrals = 0;
+    this.retirementDeferralRound = -1;
+    this.salaryMonthsWorked = 0;
+    this.salaryTotalEarned = 0;
     this.paydayCount = 0;
     this.stats = {
       financialIQ: 1,
@@ -629,6 +650,18 @@ export class Player {
     }, 0);
   }
 
+  /** 65 歲後：HP < 60 每月醫療 +3,000；HP < 30 再加長照 +9,000 */
+  get seniorCareExpense(): number {
+    if (!this.isSenior) return 0;
+    return (this.stats.health < SENIOR_MEDICAL_HP ? SENIOR_MEDICAL_EXPENSE : 0)
+      + (this.stats.health < SENIOR_CARE_HP ? SENIOR_CARE_EXPENSE : 0);
+  }
+
+  /** 職涯平均月薪（退休金基準）；沒有薪資紀錄時用目前薪資 */
+  get averageCareerSalary(): number {
+    return this.salaryMonthsWorked > 0 ? Math.round(this.salaryTotalEarned / this.salaryMonthsWorked) : this.salary;
+  }
+
   get worldExpenseAdjustment(): number {
     const change = this.worldEffects.reduce((sum, entry) =>
       sum + (entry.effect.type === 'ExpenseChange' ? entry.effect.flatAmount ?? 0 : 0), 0);
@@ -676,6 +709,7 @@ export class Player {
 
     return (
       e.taxes +
+      this.seniorCareExpense +
       e.homeMortgagePayment +
       e.carLoanPayment +
       e.creditCardPayment +
@@ -712,6 +746,8 @@ export class GameState {
   /** 每輪開始是否開「全體行動時間」（主持人可關） */
   actionPhaseEnabled = true;
   actionPhaseRound = -1;
+  /** 人生轉折：待處理的玩家順序 */
+  retirementQueue: string[] = [];
   /** 計時發薪：開關、間隔、上次發薪時的「有效經過時間」與輪數 */
   paydayTimerEnabled = true;
   paydayIntervalMs = 10 * 60 * 1000;

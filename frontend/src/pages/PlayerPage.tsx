@@ -5,6 +5,7 @@ import FinancialStatement from '../components/game/FinancialStatement';
 import DiceRoller from '../components/game/DiceRoller';
 import ActionPanel from '../components/game/ActionPanel';
 import CareerStagePanel from '../components/game/CareerStagePanel';
+import RetirementStagePanel from '../components/game/RetirementStagePanel';
 import AnalysisPage from './AnalysisPage';
 import EventCard from '../components/game/EventCard';
 import PaydayPlanForm from '../components/game/PaydayPlanForm';
@@ -1280,6 +1281,7 @@ export default function PlayerPage() {
             </div>
           )}
 
+          {!isGameOver && myPlayer ? <RetirementStagePanel gameState={gameState} player={myPlayer} emit={emit} /> : null}
           {!isGameOver && myPlayer ? <CareerStagePanel gameState={gameState} player={myPlayer} emit={emit} /> : null}
 
           {/* 事件卡（有事件時取代格子顯示，或加在下面） */}

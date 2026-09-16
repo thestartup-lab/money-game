@@ -6,6 +6,7 @@ import {
   CREDIT_CHANGE_EMERGENCY_LOAN, CREDIT_CHANGE_NEGATIVE_CF,
   INSURANCE_ACTIVATION_FEE,
   getLoanRate, getLoanLimit, LEVERAGE_RATE_MULTIPLIER,
+  CONSULTANT_MIN_HP, CONSULTANT_SK_RATE, CONSULTANT_NT_RATE, PENSION_RATE_BY_QUADRANT,
   SOCIAL_CLASS_CONFIG, PROFESSION_THRESHOLDS,
   EDUCATION_LOAN_AMOUNT, EDUCATION_LOAN_MONTHLY, EDUCATION_FQ_BONUS,
   LIFE_EXP,
@@ -204,6 +205,21 @@ export function triggerPayday(player: Player, gameState: GameState, maintenanceD
   if (player.travelPenaltyRemaining > 0) {
     player.salary = Math.round(player.salary * TRAVEL_SALARY_PENALTY);
     player.travelPenaltyRemaining -= 1;
+  }
+
+  // 65 歲人生轉折後的收入
+  if (player.retirementStatus === 'retired') {
+    player.salary = player.pensionMonthly;
+  } else if (player.retirementStatus === 'consultant') {
+    player.salary = player.stats.health >= CONSULTANT_MIN_HP
+      ? player.stats.careerSkill * CONSULTANT_SK_RATE + player.stats.network * CONSULTANT_NT_RATE
+      : 0;
+  } else if (player.retirementStatus === 'founder') {
+    player.salary = 0;
+  } else if (player.salary > 0) {
+    // 職涯期間累計，作為退休金基準
+    player.salaryMonthsWorked += 1;
+    player.salaryTotalEarned += player.salary;
   }
 
   player.cash += player.monthlyCashflow;
@@ -1382,4 +1398,21 @@ export function buyArrangedMarriage(player: Player, currentAge: number): Confirm
     marriageBonus: bonus,
     lifeExpGained: LIFE_EXP.MARRIAGE_ARRANGED,
   };
+}
+
+
+// ============================================================
+// 65 歲人生轉折
+// ============================================================
+
+/** 退休金月額 = 職涯平均月薪 × 象限替代率（E 40%、S 25%、B/I 0%） */
+export function computePension(player: Player): number {
+  const rate = PENSION_RATE_BY_QUADRANT[player.profession.quadrant] ?? 0;
+  return Math.round(player.averageCareerSalary * rate);
+}
+
+/** 顧問月收入（HP 不足時為 0） */
+export function computeConsultantIncome(player: Player): number {
+  if (player.stats.health < CONSULTANT_MIN_HP) return 0;
+  return player.stats.careerSkill * CONSULTANT_SK_RATE + player.stats.network * CONSULTANT_NT_RATE;
 }

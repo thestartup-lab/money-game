@@ -80,13 +80,13 @@ export default function FacilitatorControlPanel({ gameState, emit }: Props) {
 
         {scene.stage === 'prompt' ? (
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            {scene.kind === 'career' && !scene.careerConfirmed ? <p className="text-base font-bold text-yellow-200">等待本人在手機確認，主持人不能代為確認。</p> : null}
+            {(scene.kind === 'career' || scene.kind === 'retirement') && !scene.careerConfirmed ? <p className="text-base font-bold text-yellow-200">等待本人在手機{scene.kind === 'retirement' ? '選擇' : '確認'}，主持人不能代為決定。</p> : null}
             {(scene.options ?? []).map((option) => (
               <button
                 key={option.id}
                 className="min-h-14 rounded-xl border border-violet-300 bg-violet-700 px-3 py-2 text-base font-black text-white hover:bg-violet-600 disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={scene.kind === 'career' && !scene.careerConfirmed}
-                title={scene.kind === 'career' && !scene.careerConfirmed ? '等待玩家本人在手機確認轉職' : undefined}
+                disabled={(scene.kind === 'career' || scene.kind === 'retirement') && !scene.careerConfirmed}
+                title={(scene.kind === 'career' || scene.kind === 'retirement') && !scene.careerConfirmed ? '等待玩家本人在手機做決定' : undefined}
                 onClick={() => emit('resolveFacilitatorScene', { sceneId: scene.id, choiceId: option.id })}
               >
                 {option.label}

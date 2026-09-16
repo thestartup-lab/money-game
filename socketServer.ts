@@ -10,6 +10,8 @@ import {
   createPlayer,
   applyGlobalEvent,
   rollDice,
+  computePension,
+  computeConsultantIncome,
   movePlayer,
   triggerPayday,
   checkAndApplyAnnualTax,
@@ -60,6 +62,9 @@ import {
   SECOND_LIFE_CELL,
   MONTHS_PER_GLOBAL_PAYDAY,
   MONTHS_PER_ROUND,
+  RETIREMENT_ROUND, RETIREMENT_STARTUP_AMOUNTS, RETIREMENT_STARTUP_SUCCESS_ROLL, RETIREMENT_STARTUP_RETURN_RATE,
+  RETIREMENT_STARTUP_FAILURE_LOSS, RETIREMENT_DEFER_HP_COST, RETIREMENT_MAX_DEFERRALS, CONSULTANT_HP_COST_PER_CYCLE,
+  CONSULTANT_MIN_HP, CONSULTANT_SK_RATE, CONSULTANT_NT_RATE, PENSION_RATE_BY_QUADRANT,
   PAYDAY_TIMER_DEFAULT_MS,
   GROWTH_CYCLES_PER_GLOBAL_PAYDAY,
   YEARS_PER_COMPLETED_ROUND,
@@ -1705,7 +1710,8 @@ function serializePlayer(p: Player, gs: GameState): object {
   const fqMultiplier = FQ_MULTIPLIERS[p.stats.financialIQ] ?? 1;
   const ftMultiplier = p.isInFastTrack ? FAST_TRACK_INCOME_MULTIPLIER : 1;
   const incomeItems: { label: string; amount: number; note?: string }[] = [];
-  incomeItems.push({ label: `薪資（${p.profession.name}）`, amount: p.salary,
+  const salaryLabel = p.retirementStatus === 'retired' ? '退休金' : p.retirementStatus === 'consultant' ? '顧問收入' : p.retirementStatus === 'founder' ? '薪資（已退休創業）' : `薪資（${p.profession.name}）`;
+  incomeItems.push({ label: salaryLabel, amount: p.salary,
     note: p.downsizingTurnsLeft > 0 ? `裁員中，剩 ${p.downsizingTurnsLeft} 個月`
       : p.salaryMultiplierMonths > 0 ? `薪資倍率 ×${p.salaryMultiplierPending}，剩 ${p.salaryMultiplierMonths} 個月` : undefined });
   const positiveAssets = p.assets.filter((a) => a.monthlyCashflow > 0);
@@ -1724,6 +1730,7 @@ function serializePlayer(p: Player, gs: GameState): object {
   const expenseItems: { label: string; amount: number; note?: string }[] = [];
   const pushExpense = (label: string, amount: number, note?: string) => { if (amount) expenseItems.push({ label, amount, note }); };
   pushExpense('稅', p.expenses.taxes);
+  pushExpense('高齡醫療／長照', p.seniorCareExpense, p.stats.health < 30 ? 'HP < 30：醫療 + 長照' : 'HP < 60：醫療');
   pushExpense('房貸月付', p.expenses.homeMortgagePayment, '可用「提前還款」降低');
   pushExpense('車貸月付', p.expenses.carLoanPayment, '可用「提前還款」降低');
   pushExpense('信用卡', p.expenses.creditCardPayment);
@@ -1792,6 +1799,9 @@ function serializePlayer(p: Player, gs: GameState): object {
     salaryBonus: p.salaryBonus,
     startAge: p.startAge ?? 20,
     personalAge,
+    retirementStatus: p.retirementStatus,
+    pensionMonthly: p.pensionMonthly,
+    isSenior: p.isSenior,
     isMarried: p.isMarried,
     marriageBonus: p.marriageBonus,
     relationshipPoints: p.relationshipPoints,
@@ -2050,6 +2060,55 @@ async function runActionPhase(gs: GameState): Promise<void> {
   continueAfterTurnAdvance(gs);
 }
 
+// ============================================================
+// 65 歲人生轉折舞台
+// ============================================================
+
+function retirementSceneDescription(player: Player): string {
+  const pension = computePension(player);
+  const consultant = computeConsultantIncome(player);
+  const rate = Math.round((PENSION_RATE_BY_QUADRANT[player.profession.quadrant] ?? 0) * 100);
+  const lines = [
+    `${player.name}（${player.profession.name}）滿 65 歲。職涯平均月薪 $${player.averageCareerSalary.toLocaleString()}，目前月薪 $${player.salary.toLocaleString()}，被動收入 $${player.totalPassiveIncome.toLocaleString()}／月。`,
+    `1. 退休：薪資歸零，改領退休金 $${pension.toLocaleString()}／月（${player.profession.quadrant} 象限替代率 ${rate}%）。`,
+    `2. 當顧問：月收入 = 第二專長 ${player.stats.careerSkill} × ${CONSULTANT_SK_RATE} + 人脈 ${player.stats.network} × ${CONSULTANT_NT_RATE.toLocaleString()} = $${consultant.toLocaleString()}；每輪扣 HP ${CONSULTANT_HP_COST_PER_CYCLE}，HP 低於 ${CONSULTANT_MIN_HP} 接不到案。`,
+    `3. 創業：投入 $${RETIREMENT_STARTUP_AMOUNTS.map((a) => (a / 10000) + '萬').join('／')}，擲骰 ≥ ${RETIREMENT_STARTUP_SUCCESS_ROLL}（人脈 ≥ 5 加 1）成功，月現金流 = 投入 × ${RETIREMENT_STARTUP_RETURN_RATE * 100}%；失敗損失一半。`,
+    player.retirementDeferrals < RETIREMENT_MAX_DEFERRALS ? `4. 延後一輪退休：多領一輪薪水，HP 額外 −${RETIREMENT_DEFER_HP_COST}。` : '',
+    '65 歲起 HP 低於 60 每月多 $3,000 醫療，低於 30 再加 $9,000 長照。',
+  ].filter(Boolean);
+  return lines.join('\n');
+}
+
+/** 到達轉折輪時：所有存活玩家進入高齡支出階段；還在內圈工作的玩家排入轉折隊列。 */
+function queueRetirementCandidates(gs: GameState): void {
+  if (gs.turnNumber < RETIREMENT_ROUND) return;
+  for (const id of gs.playerOrder) {
+    const player = gs.players.get(id);
+    if (!player?.isAlive) continue;
+    player.isSenior = true;
+    if (player.isInFastTrack || player.retirementStatus !== 'working') continue;
+    if (player.retirementDeferrals > 0 && player.retirementDeferralRound === gs.turnNumber) continue;
+    if (!gs.retirementQueue.includes(id)) gs.retirementQueue.push(id);
+  }
+}
+
+function tryOpenRetirementScene(gs: GameState): boolean {
+  if (gs.facilitatorScene || gs.decisionPhase || gs.turnInProgress || gs.globalPaydayInProgress) return false;
+  while (gs.retirementQueue.length > 0) {
+    const id = gs.retirementQueue.shift()!;
+    const player = gs.players.get(id);
+    if (!player?.isAlive || player.isInFastTrack || player.retirementStatus !== 'working') continue;
+    beginFacilitatorScene(gs, {
+      kind: 'retirement', kicker: '65 歲人生轉折', title: `${player.name} 的退休選擇`,
+      description: retirementSceneDescription(player), participantNames: [player.name],
+      careerPlayerId: player.id, careerConfirmed: false,
+      reminderEndsAt: Date.now() + 90_000, options: [],
+    }, { playerId: player.id, choice: null });
+    return true;
+  }
+  return false;
+}
+
 /** 全體在線存活玩家都按了完成 → 自動結束行動時間。 */
 function maybeCompleteActionPhase(gs: GameState): void {
   const phase = gs.decisionPhase;
@@ -2097,6 +2156,10 @@ function continueAfterTurnAdvance(gs: GameState): void {
     });
     return;
   }
+
+  // 65 歲人生轉折（在發薪之後、行動時間之前，逐位開舞台）
+  queueRetirementCandidates(gs);
+  if (tryOpenRetirementScene(gs)) return;
 
   // 每輪開始：全體行動時間（發薪、舞台、第二人生都處理完之後才開）
   if (gs.actionPhaseEnabled && gs.actionPhaseRound !== gs.turnNumber && !gs.turnInProgress && !gs.globalPaydayInProgress) {
@@ -2305,6 +2368,7 @@ function settleQuarterMonths(
     }
 
     triggerPayday(player, gs, maintenanceCovered, month <= growthCycles);
+    if (month <= growthCycles && player.retirementStatus === 'consultant' && player.salary > 0) applyHPChange(player, -CONSULTANT_HP_COST_PER_CYCLE);
     logPlayerEvent(
       player,
       gs,
@@ -3344,6 +3408,35 @@ io.on('connection', (socket: Socket) => {
     if (!payload.accepted) { revealFacilitatorResult(gs, '保留原本的職涯', `${scene.participantNames[0]} 取消了本次轉職，沒有扣款或重置技能。`); return; }
     scene.careerConfirmed = true;
     scene.options = [{ id: 'reveal', label: '本人已確認・揭曉轉職', description: '正式執行轉職，再由主持人繼續遊戲。' }];
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
+  // ----------------------------------------------------------
+  // 65 歲人生轉折：本人在手機選擇 (chooseRetirement)
+  // ----------------------------------------------------------
+  onSafe('chooseRetirement', (payload: { sceneId: string; choice: 'retire' | 'consultant' | 'startup' | 'defer'; startupAmount?: number }) => {
+    const gs = getRoomState(socket);
+    const scene = gs?.facilitatorScene;
+    const context = gs?.facilitatorSceneContext;
+    if (!gs || !context || scene?.kind !== 'retirement' || scene.id !== payload.sceneId || scene.stage !== 'prompt' || scene.careerPlayerId !== playerIdentity(socket)) {
+      emitClient(socket, 'error', { message: '只有本次轉折的玩家可以選擇。' }); return;
+    }
+    const player = gs.players.get(playerIdentity(socket));
+    if (!player) return;
+    const choice = payload.choice;
+    if (!['retire', 'consultant', 'startup', 'defer'].includes(choice)) { emitClient(socket, 'error', { message: '選項不正確。' }); return; }
+    if (choice === 'defer' && player.retirementDeferrals >= RETIREMENT_MAX_DEFERRALS) { emitClient(socket, 'error', { message: '已經延後過一次，這次必須選擇。' }); return; }
+    let startupAmount = 0;
+    if (choice === 'startup') {
+      startupAmount = Number(payload.startupAmount ?? 0);
+      if (!(RETIREMENT_STARTUP_AMOUNTS as readonly number[]).includes(startupAmount)) { emitClient(socket, 'error', { message: '請選擇創業投入金額。' }); return; }
+      if (player.cash < startupAmount) { emitClient(socket, 'error', { message: `現金不足（需 $${startupAmount.toLocaleString()}）。` }); return; }
+    }
+    context.choice = choice;
+    context.startupAmount = startupAmount;
+    scene.careerConfirmed = true;
+    const labels: Record<string, string> = { retire: '退休領退休金', consultant: '當顧問', startup: `創業（投入 $${startupAmount.toLocaleString()}）`, defer: '延後一輪退休' };
+    scene.options = [{ id: 'reveal', label: `本人已選：${labels[choice]}・揭曉`, description: '正式套用選擇，再由主持人繼續遊戲。' }];
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 
@@ -4635,6 +4728,7 @@ io.on('connection', (socket: Socket) => {
     gs.roundsSinceGlobalPayday = 0;
     gs.roundsAtLastPayday = 0;
     gs.lastPaydayActiveMs = 0;
+    gs.retirementQueue = [];
     gs.globalPaydayPending = false;
     gs.globalPaydayInProgress = false;
     gs.globalPaydayNumber = 0;
@@ -4991,6 +5085,56 @@ io.on('connection', (socket: Socket) => {
       revealFacilitatorResult(gs, `${player.name} 的新職涯啟動了`, `${scene.description.split('\n').slice(0, -1).join('\n')}\n轉職已生效，SK 已歸零；請主持人帶領觀察後繼續。`);
       const target = getPlayerSocket(player.id);
       if (target) emitClient(target, 'careerChangeResult', { ...result, staged: true });
+      return;
+    }
+
+    if (scene.kind === 'retirement') {
+      if (choiceId !== 'reveal' || !scene.careerConfirmed || !context.choice) {
+        emitClient(socket, 'error', { message: '請先等待玩家本人在手機選擇。' }); return;
+      }
+      const player = gs.players.get(String(context.playerId));
+      if (!player?.isAlive) { revealFacilitatorResult(gs, '本次轉折未執行', '玩家已離開。'); return; }
+      const cash = player.cash, flow = player.monthlyCashflow, worth = calcNetWorth(player);
+      const choice = String(context.choice);
+      let title = '', detail = '';
+      if (choice === 'retire') {
+        player.retirementStatus = 'retired';
+        player.pensionMonthly = computePension(player);
+        player.salary = player.pensionMonthly;
+        title = `${player.name} 退休了`;
+        detail = `每月領退休金 $${player.pensionMonthly.toLocaleString()}，被動收入照領。月現金流 ${player.monthlyCashflow >= 0 ? '+' : ''}$${player.monthlyCashflow.toLocaleString()}。`;
+      } else if (choice === 'consultant') {
+        player.retirementStatus = 'consultant';
+        player.salary = computeConsultantIncome(player);
+        title = `${player.name} 轉任顧問`;
+        detail = `顧問月收入 $${player.salary.toLocaleString()}（隨第二專長與人脈變動），每輪扣 HP ${CONSULTANT_HP_COST_PER_CYCLE}；HP 低於 ${CONSULTANT_MIN_HP} 就接不到案。`;
+      } else if (choice === 'startup') {
+        const amount = Number(context.startupAmount ?? 0);
+        const roll = rollDice(1) + (player.stats.network >= 5 ? 1 : 0);
+        player.retirementStatus = 'founder';
+        player.salary = 0;
+        if (roll >= RETIREMENT_STARTUP_SUCCESS_ROLL) {
+          player.cash -= amount;
+          const monthly = Math.round(amount * RETIREMENT_STARTUP_RETURN_RATE);
+          player.assets.push({ id: `retire-biz-${player.id}`, name: '退休創業事業', type: AssetType.Business, cost: amount, currentValue: amount, monthlyCashflow: monthly });
+          title = `${player.name} 退休創業成功`;
+          detail = `擲出 ${roll}，投入 $${amount.toLocaleString()} 成立事業，每月現金流 +$${monthly.toLocaleString()}。`;
+        } else {
+          const loss = Math.round(amount * RETIREMENT_STARTUP_FAILURE_LOSS);
+          player.cash -= loss;
+          title = `${player.name} 退休創業失敗`;
+          detail = `擲出 ${roll}，未達 ${RETIREMENT_STARTUP_SUCCESS_ROLL}，損失 $${loss.toLocaleString()}；之後沒有薪資，靠被動收入生活。`;
+        }
+      } else {
+        player.retirementDeferrals += 1;
+        player.retirementDeferralRound = gs.turnNumber;
+        applyHPChange(player, -RETIREMENT_DEFER_HP_COST);
+        title = `${player.name} 選擇再工作一輪`;
+        detail = `保留薪資到下一輪，HP −${RETIREMENT_DEFER_HP_COST}（目前 ${player.stats.health}）。下一輪會再問一次。`;
+      }
+      logPlayerEvent(player, gs, 'career_change', `65 歲人生轉折：${title}`, cash, flow, worth, { retirementChoice: choice });
+      revealFacilitatorResult(gs, title, `${detail}\n請主持人帶領觀察後繼續。`);
+      emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
       return;
     }
 
@@ -6417,6 +6561,14 @@ async function handleLandingSquare(
     }
 
     case SquareType.Downsizing: {
+      if (player.retirementStatus !== 'working') {
+        // 退休者不會被裁員：職涯轉折格改為一次性顧問案／人脈機會
+        const gig = Math.max(15_000, player.stats.network * CONSULTANT_NT_RATE + player.stats.careerSkill * CONSULTANT_SK_RATE);
+        player.cash += gig;
+        emitCellEvent(socket, roomId, player.name, '職涯轉折', `💼 退休後的一次性顧問案：${player.name} 收到 $${gig.toLocaleString()}。`);
+        emitToRoom(roomId, 'cardApplied', { playerId: player.id, playerName: player.name, squareType, effect: { type: 'retireeGig', cashGain: gig } });
+        break;
+      }
       applyDownsizingCard(player, {
         id: 'ds-default',
         title: '裁員',

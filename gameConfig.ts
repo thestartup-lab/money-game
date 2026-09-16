@@ -1052,9 +1052,36 @@ export const SALARY_MULT_BY_STAGE: Readonly<Record<LifeStage, number>> = {
   [LifeStage.Youth]:      1.0,
   [LifeStage.Family]:     1.0,
   [LifeStage.Transition]: 1.0,
-  [LifeStage.Retirement]: 0.5,
-  [LifeStage.Legacy]:     0.0, // 無薪資，依靠被動收入
+  // 65 歲後薪資改由「人生轉折」的選擇決定（退休金／顧問／創業），不再用倍率壓低
+  [LifeStage.Retirement]: 1.0,
+  [LifeStage.Legacy]:     1.0,
 };
+
+// ============================================================
+// 65 歲人生轉折（退休機制）
+// ============================================================
+/** 全場完成幾輪後開啟人生轉折舞台：20 + 11×4 = 64 歲那輪開始（本輪內滿 65）。 */
+export const RETIREMENT_ROUND = 11;
+/** 退休金替代率（依象限）：退休金 = 職涯平均月薪 × 替代率 */
+export const PENSION_RATE_BY_QUADRANT: Readonly<Record<'E' | 'S' | 'B' | 'I', number>> = { E: 0.4, S: 0.25, B: 0, I: 0 };
+/** 顧問月收入 = 第二專長 × 300 + 人脈 × 3,000；HP 低於 50 接不到案；每個成長週期扣 HP */
+export const CONSULTANT_SK_RATE = 300;
+export const CONSULTANT_NT_RATE = 3_000;
+export const CONSULTANT_MIN_HP = 50;
+export const CONSULTANT_HP_COST_PER_CYCLE = 5;
+/** 退休創業：投入金額選項、擲骰成功門檻（NT ≥ 5 加 1）、成功月現金流比例、失敗損失比例 */
+export const RETIREMENT_STARTUP_AMOUNTS = [300_000, 750_000, 1_500_000] as const;
+export const RETIREMENT_STARTUP_SUCCESS_ROLL = 4;
+export const RETIREMENT_STARTUP_RETURN_RATE = 0.08;
+export const RETIREMENT_STARTUP_FAILURE_LOSS = 0.5;
+/** 延後退休：多工作一輪，HP 額外扣 10；最多延後一次 */
+export const RETIREMENT_DEFER_HP_COST = 10;
+export const RETIREMENT_MAX_DEFERRALS = 1;
+/** 65 歲後的醫療與長照支出：HP < 60 每月 +3,000；HP < 30 再 +9,000 */
+export const SENIOR_MEDICAL_HP = 60;
+export const SENIOR_MEDICAL_EXPENSE = 3_000;
+export const SENIOR_CARE_HP = 30;
+export const SENIOR_CARE_EXPENSE = 9_000;
 
 // ============================================================
 // 百歲人生：人生事件機率視窗（依年齡區間調整）

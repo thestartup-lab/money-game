@@ -7,6 +7,7 @@ interface Props {
 
 const KIND_THEME: Record<FacilitatorScene['kind'], { icon: string; border: string; glow: string }> = {
   career: { icon: '🎯', border: 'border-yellow-400', glow: 'from-yellow-950/90' },
+  retirement: { icon: '🎂', border: 'border-amber-300', glow: 'from-amber-950/90' },
   second_life: { icon: '🌟', border: 'border-amber-400', glow: 'from-amber-950/90' },
   community: { icon: '🗳️', border: 'border-cyan-400', glow: 'from-cyan-950/90' },
   echo: { icon: '🔁', border: 'border-violet-400', glow: 'from-violet-950/90' },
@@ -83,7 +84,7 @@ export default function FacilitatorSceneOverlay({ scene }: Props) {
         ) : null}
 
         <p className="mt-5 text-xl font-black text-emerald-300">
-          {isResult ? '請一起觀察：這個結果改變了誰？' : scene.kind === 'career' ? (scene.careerConfirmed ? '本人已確認，等待主持人揭曉。' : '等待本人在手機確認；時間到不會自動轉職。') : '請抬頭看大螢幕共同討論，由主持人決定何時揭曉。'}
+          {isResult ? '請一起觀察：這個結果改變了誰？' : scene.kind === 'career' ? (scene.careerConfirmed ? '本人已確認，等待主持人揭曉。' : '等待本人在手機確認；時間到不會自動轉職。') : scene.kind === 'retirement' ? (scene.careerConfirmed ? '本人已選擇，等待主持人揭曉。' : '請本人在手機選擇退休、顧問、創業或延後；時間到不會替你選。') : '請抬頭看大螢幕共同討論，由主持人決定何時揭曉。'}
         </p>
       </section>
     </main>
