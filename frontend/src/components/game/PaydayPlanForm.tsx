@@ -225,7 +225,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
                 <div className="text-sm text-white font-semibold">股票定期定額{data.globalPayday ? '（本季一次配置）' : ''}</div>
                 {data.stockDCAPortfolioValue > 0 && (
                   <div className="text-xs text-green-400">
-                    目前持倉：${data.stockDCAPortfolioValue.toLocaleString()}（每發薪日 +0.5% 增值，+0.25% 現金股息）
+                    目前持倉：${data.stockDCAPortfolioValue.toLocaleString()}（每月 +0.9% 增值、+0.4% 現金股息，約年化 16%）
                   </div>
                 )}
               </div>

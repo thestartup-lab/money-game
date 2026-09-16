@@ -282,7 +282,7 @@ export const SMALL_DEALS: DealCard[] = [
       name: '科技公司股票',
       assetType: AssetType.Stock,
       cost: 15_000,
-      monthlyCashflow: 60,
+      monthlyCashflow: 120,
     },
   },
   {
@@ -369,7 +369,7 @@ export const SMALL_DEALS: DealCard[] = [
       name: '能源公司股票',
       assetType: AssetType.Stock,
       cost: 75_000,
-      monthlyCashflow: 600,
+      monthlyCashflow: 1_200,
     },
   },
   {
@@ -529,7 +529,7 @@ export const BIG_DEALS: DealCard[] = [
       name: '金融藍籌股組合',
       assetType: AssetType.Stock,
       cost: 600_000,
-      monthlyCashflow: 3_600,
+      monthlyCashflow: 7_200,
     },
   },
   {
@@ -541,7 +541,7 @@ export const BIG_DEALS: DealCard[] = [
       name: '半導體龍頭股',
       assetType: AssetType.Stock,
       cost: 750_000,
-      monthlyCashflow: 1_800,
+      monthlyCashflow: 3_600,
     },
   },
   {
@@ -553,7 +553,7 @@ export const BIG_DEALS: DealCard[] = [
       name: '美股 ETF',
       assetType: AssetType.Stock,
       cost: 450_000,
-      monthlyCashflow: 2_200,
+      monthlyCashflow: 4_400,
     },
   },
   {
@@ -771,7 +771,7 @@ export const SPECIAL_AUCTION_DEALS: DealCard[] = [
       name: '科技藍籌（折扣股）',
       assetType: AssetType.Stock,
       cost: 60_000,
-      monthlyCashflow: 800,
+      monthlyCashflow: 1_600,
     },
   },
   {

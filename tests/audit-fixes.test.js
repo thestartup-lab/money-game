@@ -4,7 +4,8 @@ const { createPlayer, triggerPayday, repayLoan, getAvailableLoan, applyEducation
 const { GameState } = require('../dist/gameDataModels');
 const { CRISIS_POOL_BY_STAGE, CRISIS_EVENTS, DOODADS, RELATIONSHIP_EVENTS, CHARITY_CARD, MARKET_CARDS } = require('../dist/gameCards');
 const { applyDoodadCard, applyCrisisCard, applyCharityDonation, applyRelationshipCard, applyMarketCard, getCharityDonationAmount, evaluateSecondLifeEligibility, previewCrisisCost } = require('../dist/cardSystem');
-const { takeLeverageLoan } = require('../dist/gameLogic');
+const { takeLeverageLoan, sellAsset } = require('../dist/gameLogic');
+const { syncHouseholdLoans, HOME_LOAN_MONTHS } = require('../dist/householdLoans');
 const { BIG_DEALS } = require('../dist/gameCards');
 const { LEVERAGE_RATE_MULTIPLIER, getLoanRate } = require('../dist/gameConfig');
 const { validateSocketPayload } = require('../dist/socketValidation');
@@ -153,4 +154,26 @@ test('危機費用預覽不改狀態；詐騙依現金比例扣款；槓桿利�
 
   const first = BIG_DEALS[0];
   assert.equal(first.asset.monthlyCashflow, 28800);
+});
+
+test('房貸車貸具象成資產＋負債，可提前還款且月付等比例下降，不占信用額度，不可出售', () => {
+  const p = createPlayer('h', '房貸族', 'teacher');
+  p.cash = 5000000;
+  syncHouseholdLoans(p);
+  const home = p.liabilities.find((l) => l.id === 'home-loan-h');
+  assert.ok(home, '應有房貸負債');
+  const payment = p.expenses.homeMortgagePayment;
+  assert.equal(home.totalDebt, payment * HOME_LOAN_MONTHS);
+  const asset = p.assets.find((a) => a.id === 'home-h');
+  assert.equal(asset.currentValue, home.totalDebt, '資產與負債同額，淨值不變');
+  assert.equal(getAvailableLoan(p), getAvailableLoan(createPlayer('x', '對照', 'teacher')), '房貸不占信用額度');
+  const half = Math.round(home.totalDebt / 2);
+  const r = repayLoan(p, 'home-loan-h', half);
+  assert.equal(r.success, true);
+  assert.equal(p.expenses.homeMortgagePayment, Math.round(payment / 2), '還一半本金，月付減半');
+  repayLoan(p, 'home-loan-h', home.totalDebt);
+  assert.equal(p.expenses.homeMortgagePayment, 0, '還清後月付歸零');
+  assert.ok(!p.liabilities.some((l) => l.id === 'home-loan-h'));
+  assert.ok(p.assets.some((a) => a.id === 'home-h'), '房子保留');
+  assert.equal(sellAsset(p, 'home-h').success, false, '自住房不可出售');
 });

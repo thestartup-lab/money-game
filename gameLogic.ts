@@ -28,6 +28,7 @@ import { FAST_TRACK_BOARD, FAST_TRACK_PAYDAY_LOCATIONS } from './gameCards';
 import { AdminGlobalEvent } from './adminEvents';
 import { applyAnnualTax, AnnualTaxResult } from './taxSystem';
 import { applyHPDecay, applyNTAutoGrowth } from './statsSystem';
+import { applyHouseholdRepayment, isHouseholdAsset } from './householdLoans';
 
 // ============================================================
 // 回傳型別
@@ -470,6 +471,7 @@ export interface SellAssetResult {
  */
 export function sellAsset(player: Player, assetId: string): SellAssetResult {
   if (assetId.startsWith('p2p-')) return { success: false, message: '玩家借貸債權不能直接出售，須由借款人還款結清。' };
+  if (isHouseholdAsset(assetId)) return { success: false, message: '自住房與自用車不能出售；想降低月付請用「提前還款」。' };
   const assetIndex = player.assets.findIndex((a) => a.id === assetId);
   if (assetIndex === -1) {
     return { success: false, message: `找不到資產 ID：${assetId}` };
@@ -707,6 +709,8 @@ export function repayLoan(
 
   liability.totalDebt -= repayAmount;
   player.cash -= repayAmount;
+  // 房貸／車貸：月付依剩餘本金等比例調降
+  applyHouseholdRepayment(player, liabilityId, debtBefore, liability.totalDebt);
   // 信用加分依還款佔債務比例計算：還 $1 不會得到整筆加分，避免刷信用
   const repaidShare = debtBefore > 0 ? Math.min(1, repayAmount / debtBefore) : 1;
   adjustCreditScore(player, Math.floor(CREDIT_CHANGE_REPAY * repaidShare));

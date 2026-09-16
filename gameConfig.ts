@@ -28,7 +28,7 @@ export const FAST_TRACK_TRACK_SIZE = 17;
 export const FAST_TRACK_PAYDAY_BONUS_RATE = 0.01;
 
 /** 股票定期定額每發薪日複利增長率（模擬指數基金長期報酬）*/
-export const STOCK_DCA_MONTHLY_RETURN_RATE = 0.005;
+export const STOCK_DCA_MONTHLY_RETURN_RATE = 0.009;
 
 /**
  * 股票定期定額每月配息率（模擬台股約 3% 年化殖利率）。
@@ -36,7 +36,7 @@ export const STOCK_DCA_MONTHLY_RETURN_RATE = 0.005;
  * 配息反映在 monthlyCashflow（每次 payday 動態更新），
  * 讓股票資產對 totalPassiveIncome 有實質貢獻、且受 FQ 乘數加成。
  */
-export const STOCK_DCA_MONTHLY_DIVIDEND_RATE = 0.0025;
+export const STOCK_DCA_MONTHLY_DIVIDEND_RATE = 0.004;
 
 /** 股票定期定額可選投入金額選項 */
 export const STOCK_DCA_AMOUNTS = [15_000, 30_000, 75_000] as const;

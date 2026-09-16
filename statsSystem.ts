@@ -402,8 +402,7 @@ export function executeCareerChange(
   // 更新職業與財務
   player.profession = newProfession;
   player.salary = newProfession.startingSalary;
-  player.expenses.homeMortgagePayment = newProfession.startingHomeMortgage;
-  player.expenses.carLoanPayment = newProfession.startingCarLoan;
+  // 房貸與車貸是玩家自己的，換工作不會換房子與車子；保留現有月付與本金
   player.expenses.creditCardPayment = newProfession.startingCreditCard;
   player.expenses.otherExpenses = newProfession.startingOtherExpenses;
   // taxes 在新系統由年度累進稅處理，不在此更新

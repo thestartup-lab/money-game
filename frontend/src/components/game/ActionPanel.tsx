@@ -129,6 +129,13 @@ export default function ActionPanel({
 
   const travelDisabled = player.isBedridden || player.stats.health < 50 || noTokensLeft;
   const socialDisabled = player.isBedridden || player.isMarried || noTokensLeft;
+  const tokenReason = '本次發薪的活動額度已用完（固定班表每次發薪 1 次，下次發薪重置）';
+  const travelReason = player.isBedridden ? '臥床中無法出遊'
+    : player.stats.health < 50 ? `健康值 ${player.stats.health} 未達 50，先投資健康`
+    : noTokensLeft ? tokenReason : '';
+  const socialReason = player.isBedridden ? '臥床中無法參加'
+    : player.isMarried ? '已婚，不再參加聯誼'
+    : noTokensLeft ? tokenReason : '';
 
   const availableDestinations = DESTINATIONS.filter((d) =>
     d.tier === 'inner' || (d.tier === 'outer' && player.isInFastTrack)
@@ -148,7 +155,8 @@ export default function ActionPanel({
     .filter((l) => !securedLiabilityIds.has(l.id) && !l.id.startsWith('edu-loan-'))
     .reduce((s, l) => s + l.totalDebt, 0);
   // 可主動提前還款的負債：應急、槓桿、玩家借貸、學貸（資產綁定的房貸等由賣出資產時清償）
-  const repayableLoans = (player.liabilities ?? []).filter((l) => !securedLiabilityIds.has(l.id) && l.totalDebt > 0);
+  const repayableLoans = (player.liabilities ?? []).filter((l) =>
+    (!securedLiabilityIds.has(l.id) || l.id.startsWith('home-loan-') || l.id.startsWith('car-loan-')) && l.totalDebt > 0);
   const availableLoan = Math.max(0, loanLimit - existingLoanTotal);
 
   const dcaPortfolioValue = player.assets?.find((a) => a.id === 'stock-dca')?.currentValue ?? 0;
@@ -215,22 +223,28 @@ export default function ActionPanel({
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-2">
-              <button
-                className="btn-secondary text-sm"
-                disabled={travelDisabled}
-                onClick={() => setShowTravelPanel(true)}
-                title={travelDisabled ? '臥床、健康值不足或本日已無活動次數' : '選擇目的地出遊'}
-              >
-                ✈️ 出國旅遊
-              </button>
-              <button
-                className="btn-secondary text-sm"
-                disabled={socialDisabled}
-                onClick={onSocialEvent}
-                title={socialDisabled ? '臥床、已婚或本日已無活動次數' : '累積深度關係值'}
-              >
-                💑 參加聯誼
-              </button>
+              <div className="space-y-1">
+                <button
+                  className="btn-secondary text-sm w-full"
+                  disabled={travelDisabled}
+                  onClick={() => setShowTravelPanel(true)}
+                  title={travelReason || '選擇目的地出遊'}
+                >
+                  ✈️ 出國旅遊
+                </button>
+                {travelReason && <p className="text-[11px] leading-snug text-orange-300">{travelReason}</p>}
+              </div>
+              <div className="space-y-1">
+                <button
+                  className="btn-secondary text-sm w-full"
+                  disabled={socialDisabled}
+                  onClick={onSocialEvent}
+                  title={socialReason || '累積深度關係值'}
+                >
+                  💑 參加聯誼
+                </button>
+                {socialReason && <p className="text-[11px] leading-snug text-orange-300">{socialReason}</p>}
+              </div>
             </div>
           )}
         </div>
@@ -353,7 +367,7 @@ export default function ActionPanel({
               );
             })}
           </div>
-          <p className="mt-2 text-[11px] text-gray-500">還款會依還款佔債務比例加信用分；還清另有加分。</p>
+          <p className="mt-2 text-[11px] text-gray-500">還款會依還款佔債務比例加信用分；還清另有加分。房貸、車貸還本金會等比例降低月付。</p>
         </div>
       )}
 
@@ -652,7 +666,7 @@ export default function ActionPanel({
         <div className="card">
           <p className="text-xs text-gray-400 mb-2">持有資產</p>
           <div className="space-y-2">
-            {player.assets.map((asset) => {
+            {player.assets.filter((asset) => !asset.id.startsWith('home-') && !asset.id.startsWith('car-')).map((asset) => {
               const isSellConfirming = sellConfirmId === asset.id;
               const netChange = (asset.currentValue ?? asset.cost) - (asset.linkedLiabilityId
                 ? (player.liabilities?.find((l) => l.id === asset.linkedLiabilityId)?.totalDebt ?? 0)

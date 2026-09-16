@@ -115,6 +115,14 @@ export interface Player {
   marriageType?: string;
   isBedridden: boolean;
   travelPenaltyRemaining: number;
+  /** 月現金流逐項組成（伺服器計算） */
+  cashflowBreakdown?: {
+    income: { label: string; amount: number; note?: string }[];
+    expenses: { label: string; amount: number; note?: string }[];
+    totalIncome: number; totalExpenses: number; net: number;
+  };
+  /** 最近的現金變動紀錄（新到舊） */
+  cashLedger?: { age: number; type: string; description: string; delta: number; cashAfter: number }[];
   salaryMultiplierPending?: number;
   salaryMultiplierMonths?: number;
   salaryBonus?: number;

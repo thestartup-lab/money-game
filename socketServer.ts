@@ -75,7 +75,9 @@ import {
   LIFE_INSURANCE_PREMIUM,
   PROPERTY_INSURANCE_PREMIUM,
   PER_CHILD_EXPENSE,
+  FQ_MULTIPLIERS, FAST_TRACK_INCOME_MULTIPLIER,
 } from './gameConstants';
+import { syncHouseholdLoans } from './householdLoans';
 import { ADMIN_GLOBAL_EVENTS, ADMIN_GLOBAL_EVENT_MAP, type AdminGlobalEvent } from './adminEvents';
 import { worldEventRestriction, hasFragilePlayers, describeWorldEvent, expireWorldEffects } from './worldEvents';
 import {
@@ -717,6 +719,7 @@ function autoCompletePre20(player: Player, gs: GameState, roomId: string): void 
       player.expenses.carLoanPayment = chosen.startingCarLoan;
       player.expenses.creditCardPayment = chosen.startingCreditCard;
       player.expenses.otherExpenses = chosen.startingOtherExpenses;
+      syncHouseholdLoans(player);
       player.actionTokensThisPayday = chosen.hasFlexibleSchedule ? Infinity : 1;
       player.startAge = 22;
       player.pre20Done = true;
@@ -1696,10 +1699,64 @@ function serializePlayer(p: Player, gs: GameState): object {
     .filter((l) => !_securedIds.has(l.id))
     .reduce((sum, l) => sum + (l.monthlyPayment ?? 0), 0);
 
+  // 月現金流逐項組成（手機點「月現金流」顯示）
+  const fqMultiplier = FQ_MULTIPLIERS[p.stats.financialIQ] ?? 1;
+  const ftMultiplier = p.isInFastTrack ? FAST_TRACK_INCOME_MULTIPLIER : 1;
+  const incomeItems: { label: string; amount: number; note?: string }[] = [];
+  incomeItems.push({ label: `薪資（${p.profession.name}）`, amount: p.salary,
+    note: p.downsizingTurnsLeft > 0 ? `裁員中，剩 ${p.downsizingTurnsLeft} 個月`
+      : p.salaryMultiplierMonths > 0 ? `薪資倍率 ×${p.salaryMultiplierPending}，剩 ${p.salaryMultiplierMonths} 個月` : undefined });
+  const positiveAssets = p.assets.filter((a) => a.monthlyCashflow > 0);
+  for (const a of positiveAssets) {
+    const worldFactor = p.worldEffects.reduce((factor, entry) =>
+      entry.effect.type === 'CashflowChange' && entry.effect.targetAssetType === a.type ? factor * (entry.effect.multiplier ?? 1) : factor, 1);
+    incomeItems.push({ label: a.name, amount: Math.round(a.monthlyCashflow * worldFactor),
+      note: worldFactor !== 1 ? `世界事件 ×${worldFactor.toFixed(2)}` : undefined });
+  }
+  const passiveMultiplier = fqMultiplier * ftMultiplier;
+  if (passiveMultiplier !== 1 && p.totalPassiveIncome > 0) {
+    incomeItems.push({ label: `被動收入乘數（財商 ×${fqMultiplier}${p.isInFastTrack ? `、外圈 ×${FAST_TRACK_INCOME_MULTIPLIER}` : ''}）`,
+      amount: Math.round(p.totalPassiveIncome * passiveMultiplier) - Math.max(0, p.totalPassiveIncome), note: '以被動收入總額乘算後的差額' });
+  }
+  if (p.marriageBonus) incomeItems.push({ label: '婚姻加成', amount: p.marriageBonus });
+  const expenseItems: { label: string; amount: number; note?: string }[] = [];
+  const pushExpense = (label: string, amount: number, note?: string) => { if (amount) expenseItems.push({ label, amount, note }); };
+  pushExpense('稅', p.expenses.taxes);
+  pushExpense('房貸月付', p.expenses.homeMortgagePayment, '可用「提前還款」降低');
+  pushExpense('車貸月付', p.expenses.carLoanPayment, '可用「提前還款」降低');
+  pushExpense('信用卡', p.expenses.creditCardPayment);
+  pushExpense('生活支出', p.expenses.otherExpenses);
+  pushExpense('世界事件調整', p.worldExpenseAdjustment);
+  if (p.insurance.hasMedicalInsurance) pushExpense('醫療險保費', MEDICAL_INSURANCE_PREMIUM);
+  if (p.insurance.hasLifeInsurance) pushExpense('壽險保費', LIFE_INSURANCE_PREMIUM);
+  if (p.insurance.hasPropertyInsurance) pushExpense('財產險保費', PROPERTY_INSURANCE_PREMIUM);
+  pushExpense(`子女支出（${p.numberOfChildren} 人）`, childExpenses);
+  for (const l of p.liabilities) {
+    if (_securedIds.has(l.id)) continue;
+    pushExpense(`${l.name} 月付`, l.monthlyPayment ?? 0, `餘額 $${l.totalDebt.toLocaleString()}`);
+  }
+  for (const a of p.assets.filter((x) => x.monthlyCashflow < 0)) pushExpense(`${a.name}（資產淨支出）`, -a.monthlyCashflow);
+  const cashflowBreakdown = {
+    income: incomeItems,
+    expenses: expenseItems,
+    totalIncome: p.totalIncome,
+    totalExpenses: p.totalExpenses,
+    net: p.monthlyCashflow,
+  };
+  // 手頭現金的來源：最近的現金變動紀錄
+  const cashLedger = [...p.eventLog].reverse()
+    .filter((e) => e.cashAfter !== e.cashBefore)
+    .slice(0, 20)
+    .map((e) => ({ age: e.age, type: e.type, description: e.description, delta: e.cashAfter - e.cashBefore, cashAfter: e.cashAfter }));
+  const startingCash = p.eventLog.length > 0 ? p.eventLog[0].cashBefore : p.cash;
+  cashLedger.push({ age: p.startAge ?? 20, type: 'game_start', description: '起始現金（職業起始資金 + 社會階層加成 + 資源點數）', delta: startingCash, cashAfter: startingCash });
+
   return {
     id: p.id,
     name: p.name,
     profession: p.profession,
+    cashflowBreakdown,
+    cashLedger,
     careerOptions: p.isAlive && p.stats.careerSkill >= SKILL_CAREER_CHANGE_THRESHOLD ? buildAvailableProfessions(p) : [],
     quadrant: p.profession.quadrant,
     salaryType: p.profession.salaryType,
@@ -3723,6 +3780,7 @@ io.on('connection', (socket: Socket) => {
     player.expenses.carLoanPayment = chosen.startingCarLoan;
     player.expenses.creditCardPayment = chosen.startingCreditCard;
     player.expenses.otherExpenses = chosen.startingOtherExpenses;
+    syncHouseholdLoans(player);
     player.actionTokensThisPayday = chosen.hasFlexibleSchedule ? Infinity : 1;
     player.startAge = hasEdu ? 25 : 22;
     player.pre20Done = true;

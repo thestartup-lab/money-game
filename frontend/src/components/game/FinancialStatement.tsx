@@ -1,12 +1,12 @@
 import type { Player } from '../../types/game';
 
-interface Props { player: Player; }
+interface Props { player: Player; onShowCash?: () => void; onShowFlow?: () => void; }
 
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
 const sign = (n: number) => (n >= 0 ? '+' : '') + fmt(n);
 const cls = (n: number) => (n >= 0 ? 'positive' : 'negative');
 
-export default function FinancialStatement({ player }: Props) {
+export default function FinancialStatement({ player, onShowCash, onShowFlow }: Props) {
   const netWorth =
     player.cash +
     player.assets.reduce((s, a) => s + (a.currentValue ?? a.cost), 0) -
@@ -17,14 +17,14 @@ export default function FinancialStatement({ player }: Props) {
       {/* 頂部摘要 */}
       <div className="grid grid-cols-2 gap-3">
         <div className="card text-center">
-          <p className="text-xs text-gray-400">月現金流</p>
-          <p className={`text-2xl font-bold ${cls(player.monthlyCashflow)}`}>
+          <p className="text-xs text-gray-400">月現金流{onShowFlow && <span className="text-emerald-400">（點我看組成）</span>}</p>
+          <button type="button" className={`text-2xl font-bold ${cls(player.monthlyCashflow)}`} onClick={onShowFlow}>
             ${fmt(player.monthlyCashflow)}
-          </p>
+          </button>
         </div>
         <div className="card text-center">
-          <p className="text-xs text-gray-400">手頭現金</p>
-          <p className="text-2xl font-bold text-yellow-300">${fmt(player.cash)}</p>
+          <p className="text-xs text-gray-400">手頭現金{onShowCash && <span className="text-emerald-400">（點我看來源）</span>}</p>
+          <button type="button" className="text-2xl font-bold text-yellow-300" onClick={onShowCash}>${fmt(player.cash)}</button>
         </div>
         <div className="card text-center">
           <p className="text-xs text-gray-400">月總收入</p>

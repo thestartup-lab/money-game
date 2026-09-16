@@ -8,6 +8,7 @@ import CareerStagePanel from '../components/game/CareerStagePanel';
 import AnalysisPage from './AnalysisPage';
 import EventCard from '../components/game/EventCard';
 import PaydayPlanForm from '../components/game/PaydayPlanForm';
+import MoneyDetailSheet from '../components/game/MoneyDetailSheet';
 import CollapsePanel from '../components/game/CollapsePanel';
 import DecisionCountdown from '../components/game/DecisionCountdown';
 import '../components/game/MobileClarity.css';
@@ -69,6 +70,7 @@ export default function PlayerPage() {
   const myNetworkRef = useRef(0);
   const [connected, setConnected] = useState(false);
   const [disconnectNotice, setDisconnectNotice] = useState<string | null>(null);
+  const [moneyDetail, setMoneyDetail] = useState<'cash' | 'flow' | null>(null);
   const [myId, setMyId] = useState<string>('');
   const [view, setView] = useState<View>('join');
   const [gameState, setGameState] = useState<GameState | null>(null);
@@ -1197,6 +1199,8 @@ export default function PlayerPage() {
           />
         )}
 
+        {moneyDetail && <MoneyDetailSheet player={myPlayer} mode={moneyDetail} onClose={() => setMoneyDetail(null)} />}
+
         {/* ── 轉職成功慶祝彈窗 ── */}
         {careerChangeCelebration && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
@@ -1238,9 +1242,9 @@ export default function PlayerPage() {
               人生輪 {Math.min(gameState.totalLifeRounds ?? 20, (gameState.completedLifeRounds ?? gameState.turnNumber) + 1)}/{gameState.totalLifeRounds ?? 20}
             </div>
             {gameState.isPaused ? <div className="text-orange-300 text-xs text-right font-bold">⏸ 暫停</div> : null}
-            <div className={`senior-cashflow ${myPlayer.monthlyCashflow >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+            <button type="button" className={`senior-cashflow underline decoration-dotted ${myPlayer.monthlyCashflow >= 0 ? 'text-green-300' : 'text-red-300'}`} onClick={() => setMoneyDetail('flow')} title="看月現金流的組成">
               {myPlayer.monthlyCashflow >= 0 ? '+' : ''}${fmt(myPlayer.monthlyCashflow)}/月
-            </div>
+            </button>
           </div>
           <div className="senior-screen-cue">📺 棋盤與公開結果，請抬頭看大螢幕</div>
         </header>
@@ -1393,7 +1397,7 @@ export default function PlayerPage() {
           {/* ── 可展開面板 ── */}
           <div className="mt-2">
             <CollapsePanel title="財務報表" badge={myPlayer.monthlyCashflow < 0 ? '!' : undefined}>
-              <FinancialStatement player={myPlayer} />
+              <FinancialStatement player={myPlayer} onShowCash={() => setMoneyDetail('cash')} onShowFlow={() => setMoneyDetail('flow')} />
             </CollapsePanel>
 
             {(!gameState.decisionPhase || (gameState.decisionPhase.rescue && gameState.decisionPhase.playerId === myId)) && !gameState.facilitatorScene && <CollapsePanel title="行動" defaultOpen={Boolean(gameState.decisionPhase?.rescue)}>
