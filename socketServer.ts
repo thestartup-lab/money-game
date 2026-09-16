@@ -1920,6 +1920,8 @@ function serializePlayer(p: Player, gs: GameState): object {
     actionInfo: buildActionInfo(p),
     cashLedger,
     careerOptions: p.isAlive && p.stats.careerSkill >= SKILL_CAREER_CHANGE_THRESHOLD ? buildAvailableProfessions(p) : [],
+    careerBlockReason: careerBlockReason(p, gs),
+    careerQueuePosition: gs.careerRequests.findIndex((r) => r.playerId === p.id) + 1,
     quadrant: p.profession.quadrant,
     salaryType: p.profession.salaryType,
     currentPosition: p.currentPosition,
@@ -2484,20 +2486,8 @@ function emitQuarterMilestones(
   player: Player,
   planResult: ReturnType<typeof applyPaydayPlan>,
 ): void {
-  if (player.stats.careerSkill >= SKILL_CAREER_CHANGE_THRESHOLD) {
-    emitClient(socket, 'careerChangeUnlocked', {
-      message: '恭喜！你的第二專長已達到頂峰，可以轉職了！',
-      availableProfessions: buildAvailableProfessions(player),
-    });
-    if (planResult.careerChangeUnlocked) {
-      emitToRoom(gs.gameId, 'milestoneAnnounced', {
-        playerId: player.id,
-        playerName: player.name,
-        milestone: '轉職解鎖',
-        description: `${player.name} 的技能值達到頂峰，可以轉職了！`,
-      });
-    }
-  }
+  void planResult;
+  announceCareerUnlock(gs, player);
 
   const ntLabels: Record<number, string> = {
     3: '人脈護盾解鎖 — 危機時可豁免一次！',
@@ -5764,6 +5754,7 @@ io.on('connection', (socket: Socket) => {
 
     console.log(`[admin] 房間 ${gs.gameId} 調整 ${target.name} 能力值：${JSON.stringify(changed)}`);
 
+    announceCareerUnlock(gs, target);
     emitClient(socket, 'setPlayerStatsResult', { success: true, targetPlayerId: target.id, stats: changed });
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
@@ -5786,6 +5777,7 @@ io.on('connection', (socket: Socket) => {
     }
 
     executeTravelAction(socket, gs, player, payload.destinationId);
+    announceCareerUnlock(gs, player);
   });
 
   // ----------------------------------------------------------
@@ -7395,17 +7387,54 @@ function buildAffordableOptions(player: Player, settlementMonths = 1): object {
   };
 }
 
+/** 已達 SK 100 但暫時不能申請轉職的原因（手機顯示，不再默默藏起清單） */
+function careerBlockReason(p: Player, gs: GameState): string | null {
+  if (!p.isAlive || p.stats.careerSkill < SKILL_CAREER_CHANGE_THRESHOLD) return null;
+  if (p.isBedridden) return '臥床中無法轉職，先恢復健康';
+  if (p.stats.health < HP_ACTIVITY_THRESHOLDS.careerChange) return `健康值 ${p.stats.health} 未達 ${HP_ACTIVITY_THRESHOLDS.careerChange}，先在發薪規劃投資健康`;
+  if (gs.facilitatorScene?.kind === 'career' && gs.facilitatorScene.careerPlayerId === p.id) return null;
+  if (gs.careerRequests.some((r) => r.playerId === p.id)) return null;
+  return null;
+}
+
+/** SK 首次達 100 時通知本人一次（發薪、旅遊、主持人調數值都可能觸發） */
+function announceCareerUnlock(gs: GameState, player: Player): void {
+  if (!player.isAlive || player.careerUnlockAnnounced || player.stats.careerSkill < SKILL_CAREER_CHANGE_THRESHOLD) return;
+  player.careerUnlockAnnounced = true;
+  const socket = getPlayerSocket(player.id);
+  const blocked = careerBlockReason(player, gs);
+  if (socket) emitClient(socket, 'careerChangeUnlocked', {
+    message: blocked
+      ? `第二專長已達 100，可以轉職！但目前${blocked}。手機「🎯 申請轉職」區會列出所有職業。`
+      : '第二專長已達 100，可以轉職！打開手機「🎯 申請轉職」區，點職業看薪資與代價，送出申請後由主持人在大螢幕開舞台。',
+    availableProfessions: buildAvailableProfessions(player),
+    blockReason: blocked,
+  });
+  emitToRoom(gs.gameId, 'milestoneAnnounced', {
+    playerId: player.id, playerName: player.name, milestone: '轉職解鎖',
+    description: `${player.name} 的第二專長達到頂峰，可以申請轉職了！`,
+  });
+}
+
 function buildAvailableProfessions(player: Player): object[] {
   const { getCareerChangeAssetCost } = require('./statsSystem');
   return PROFESSIONS
     .filter((p) => p.id !== player.profession.id)
     .map((p) => {
       const assetCost = getCareerChangeAssetCost(p.id);
+      const startingCashflow = (p.startingAssets ?? []).reduce((sum, a) => sum + a.monthlyCashflow, 0);
       return {
         id: p.id,
         name: p.name,
         quadrant: p.quadrant,
+        salaryType: p.salaryType,
         salary: p.startingSalary,
+        salaryRange: p.salaryType === 'random' ? [p.minSalary ?? 0, p.maxSalary ?? 0] : undefined,
+        salaryPerNT: p.salaryPerNT, salaryBase: p.salaryBase, salaryPerSK: p.salaryPerSK,
+        startingCashflow,
+        otherExpenses: p.startingOtherExpenses,
+        creditCard: p.startingCreditCard,
+        flexible: p.hasFlexibleSchedule,
         startingFQ: p.startingFQ,
         assetCost, // 轉職到 B/I 需從現金扣除的「自有資產成本」
         canAfford: assetCost === 0 || player.cash >= assetCost,

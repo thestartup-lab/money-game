@@ -617,8 +617,8 @@ export default function PlayerPage() {
       }
     });
 
-    s.on('careerChangeUnlocked', () => {
-      addNotification('🎯 已解鎖轉職申請！選擇新職業後等待主持人開啟舞台，再由你確認。');
+    s.on('careerChangeUnlocked', (p: { message?: string }) => {
+      addNotification(`🎯 ${p?.message ?? '已解鎖轉職申請！打開「🎯 申請轉職」區選職業。'}`);
     });
     s.on('careerChangeResult', (p: { success: boolean; message: string; newProfession?: string; previousProfession?: string; salaryChange?: number; staged?: boolean }) => {
       if (p.success) {

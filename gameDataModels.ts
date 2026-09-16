@@ -599,6 +599,8 @@ export class Player {
   recurringExpenses: { id: string; label: string; monthly: number; monthsLeft: number }[];
   /** 已被裁員總月數（復盤用） */
   layoffMonthsTotal: number;
+  /** 轉職解鎖通知只發一次 */
+  careerUnlockAnnounced: boolean;
 
   constructor(id: string, name: string, profession: Profession) {
     this.id = id;
@@ -689,6 +691,7 @@ export class Player {
     this.housing = 'rent';
     this.recurringExpenses = [];
     this.layoffMonthsTotal = 0;
+    this.careerUnlockAnnounced = false;
   }
 
   /** 目前人生階段（依 currentAge） */

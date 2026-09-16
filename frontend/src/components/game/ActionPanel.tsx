@@ -76,20 +76,6 @@ interface Props {
   onShowDetail?: (mode: MoneyDetailMode) => void;
   onRequestAnalysis: () => void;
   isGameOver: boolean;
-  careerChangeData?: {
-    message: string;
-    availableProfessions: {
-      id: string;
-      name: string;
-      salary?: number;
-      quadrant?: string;
-      description?: string;
-      assetCost?: number;
-      canAfford?: boolean;
-      startingFQ?: number;
-    }[];
-  } | null;
-  onCareerChange?: (professionId: string) => void;
 }
 
 export default function ActionPanel({
@@ -111,8 +97,6 @@ export default function ActionPanel({
   onShowDetail,
   onRequestAnalysis,
   isGameOver,
-  careerChangeData,
-  onCareerChange,
 }: Props) {
   const [showTravelPanel, setShowTravelPanel] = useState(false);
   const [insuranceConfirm, setInsuranceConfirm] = useState<'medical' | 'life' | 'property' | null>(null);
@@ -137,7 +121,6 @@ export default function ActionPanel({
   const [dcaPreview, setDcaPreview] = useState<number | null>(null);
   const [loanPreview, setLoanPreview] = useState<number | null>(null);
   const [leveragePreview, setLeveragePreview] = useState<number | null>(null);
-  const [careerPreview, setCareerPreview] = useState<string | null>(null);
   const info = player.actionInfo;
   const tokenNote = player.hasFlexibleSchedule ? '自由行程職業不限次數' : '消耗本輪 1 次活動額度（固定班表每輪 1 次）';
 
@@ -886,70 +869,6 @@ export default function ActionPanel({
                     >賣出</button>
                   )}
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ── 轉職 ──────────────────────── */}
-      {careerChangeData && onCareerChange && (
-        <div className="card border-2 border-yellow-500">
-          <p className="text-xs text-yellow-400 font-bold mb-1">🎯 技能巔峰 — 可以轉職！</p>
-          <p className="text-xs text-gray-300 mb-2">{careerChangeData.message}</p>
-          <p className="text-[11px] text-amber-300 mb-2">轉職至 B/I 象限需以現金買入起始事業/投資資產（自有資金部分）。</p>
-          {careerPreview && (() => {
-            const prof = careerChangeData.availableProfessions.find((x) => x.id === careerPreview);
-            if (!prof) return null;
-            const cost = prof.assetCost ?? 0;
-            return <EffectPreview title={`轉職為 ${prof.name}：效果與價值`} rows={[
-              { label: '月薪', value: `$${fmt(player.salary)} → ${prof.salary !== undefined ? `$${fmt(prof.salary)}` : '依新職業'}${prof.quadrant === 'S' ? '（動態薪）' : ''}`, tone: 'neutral' },
-              ...(cost ? [{ label: '買入起始事業／投資資產', value: `-$${fmt(cost)}`, tone: 'bad' as const }] : []),
-              ...(prof.startingFQ ? [{ label: '財商 FQ', value: `${player.stats.financialIQ} → ${Math.max(player.stats.financialIQ, prof.startingFQ)}`, tone: 'good' as const }] : []),
-              { label: '第二專長 SK', value: `${player.stats.careerSkill} → 0（重新累積）`, tone: 'bad' },
-              { label: '年資加薪倍率', value: `×${(player.salaryGrowthMultiplier ?? 1).toFixed(2)} 保留`, tone: 'good' },
-              { label: '生命體驗', value: '+10', tone: 'good' },
-            ]} notes={['信用卡與生活支出改依新職業；房租／房貸、車貸、保險、資產、負債、人脈都保留', 'B／I 象限：薪資低或為零，收入來自起始事業或投資組合的現金流', '主持人會在大螢幕開轉職舞台，你確認後才生效']}
-              confirmLabel="送出轉職申請" onCancel={() => setCareerPreview(null)}
-              onConfirm={() => { onCareerChange(prof.id); setCareerPreview(null); }} />;
-          })()}
-          <div className="space-y-1">
-            {careerChangeData.availableProfessions.map((prof) => {
-              const cost = prof.assetCost ?? 0;
-              const affordable = prof.canAfford !== false;
-              const isBI = prof.quadrant === 'B' || prof.quadrant === 'I';
-              return (
-                <button
-                  key={prof.id}
-                  disabled={!affordable}
-                  className={`w-full text-left text-xs px-3 py-2 rounded-xl border transition-colors ${
-                    affordable
-                      ? 'bg-yellow-900/40 hover:bg-yellow-900/70 border-yellow-700 text-yellow-200'
-                      : 'bg-gray-800 border-gray-700 text-gray-500 cursor-not-allowed'
-                  }`}
-                  onClick={() => affordable && setCareerPreview(prof.id)}
-                  title={cost > 0 ? `需付資產成本 $${cost.toLocaleString()}` : ''}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold">{prof.name}</span>
-                    {prof.quadrant && (
-                      <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded-full ${
-                        prof.quadrant === 'I' ? 'bg-emerald-700 text-white' :
-                        prof.quadrant === 'B' ? 'bg-amber-700 text-white' :
-                        prof.quadrant === 'S' ? 'bg-purple-700 text-white' :
-                        'bg-blue-700 text-white'
-                      }`}>{prof.quadrant}</span>
-                    )}
-                  </div>
-                  {isBI && cost > 0 && (
-                    <span className={`block text-[10px] mt-0.5 ${affordable ? 'text-emerald-300' : 'text-red-400'}`}>
-                      需付資產成本 ${cost.toLocaleString()}
-                      {!affordable && '（現金不足）'}
-                      {prof.startingFQ ? ` ｜ FQ→${prof.startingFQ}` : ''}
-                    </span>
-                  )}
-                  {prof.description && <span className="block text-gray-400 text-xs mt-0.5">{prof.description}</span>}
-                </button>
               );
             })}
           </div>

@@ -92,6 +92,12 @@ export interface HomeOffer {
   transactionCost: number; cashNeeded: number; affordable: boolean; reason?: string; monthlyDelta: number;
 }
 
+export interface CareerOption {
+  id: string; name: string; quadrant?: string; salaryType?: string; salary?: number; salaryRange?: [number, number];
+  salaryPerNT?: number; salaryBase?: number; salaryPerSK?: number; startingCashflow?: number; otherExpenses?: number; creditCard?: number;
+  flexible?: boolean; startingFQ?: number; assetCost?: number; canAfford?: boolean;
+}
+
 export interface SecondLifeRouteProgress {
   label: string;
   coverageRequired: number;
@@ -123,7 +129,11 @@ export interface SecondLifeProgress {
 }
 
 export interface Player {
-  careerOptions?: { id: string; name: string; assetCost?: number; canAfford?: boolean }[];
+  careerOptions?: CareerOption[];
+  /** SK 已達 100 但暫時不能申請的原因 */
+  careerBlockReason?: string | null;
+  /** 在轉職申請隊列中的順位（0 = 沒有申請） */
+  careerQueuePosition?: number;
   id: string;
   name: string;
   profession: Profession;
