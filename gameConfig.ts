@@ -73,6 +73,8 @@ export const ROUNDS_PER_GLOBAL_PAYDAY = 3;
 export const MONTHS_PER_GLOBAL_PAYDAY = 6;
 /** 每個完整輪視為一年薪資：結算月數 = 經過輪數 × 12（至少一輪）。 */
 export const MONTHS_PER_ROUND = 24;
+/** 計時發薪的保底：距上次發薪超過這麼多輪就一定發薪（避免計時太長整場沒發薪） */
+export const PAYDAY_MAX_ROUNDS = 3;
 /** 主持人可選的每輪結算月數（1 結算月 ≈ 4/24×12 個真實月） */
 export const MONTHS_PER_ROUND_OPTIONS = [12, 24, 48] as const;
 /** 計時發薪預設間隔（主持人可調 5–20 分鐘）；到期後排在目前玩家行動結束時執行，且至少要經過一輪。 */

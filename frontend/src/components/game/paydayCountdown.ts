@@ -7,6 +7,9 @@ export interface PaydayTimerInfo {
   roundsSince: number;
   settlementMonths: number;
   due: boolean;
+  /** 只有主持人手動暫停與發薪進行中為 true */
+  frozen?: boolean;
+  maxRounds?: number;
 }
 
 export function formatCountdown(ms: number): string {
@@ -17,7 +20,7 @@ export function formatCountdown(ms: number): string {
 }
 
 /**
- * 依伺服器給的剩餘毫秒在本地每秒倒數；時鐘暫停（決策、舞台、手動暫停）時凍結。
+ * 依伺服器給的剩餘毫秒在本地每秒倒數；只在主持人手動暫停與發薪進行中凍結（決策與舞台照常倒數）。
  * 每次伺服器送新狀態就重新對時，避免累積漂移。
  */
 export function usePaydayCountdown(timer: PaydayTimerInfo | undefined, frozen: boolean): number {

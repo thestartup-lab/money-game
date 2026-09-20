@@ -314,7 +314,7 @@ function QuarterDial({
   paydayTimer?: PaydayTimerInfo;
   clockFrozen: boolean;
 }) {
-  const remaining = usePaydayCountdown(paydayTimer, clockFrozen);
+  const remaining = usePaydayCountdown(paydayTimer, Boolean(paydayTimer?.frozen));
   const rounds = paydayTimer ? Math.max(0, paydayTimer.roundsSince) : Math.max(0, completedRounds);
   const years = Math.max(1, rounds);
   const timerOn = paydayTimer?.enabled ?? false;

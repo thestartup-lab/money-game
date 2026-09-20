@@ -65,7 +65,7 @@ import {
   SECOND_LIFE_CELL,
   SECOND_LIFE_MIN_PAYDAYS, SECOND_LIFE_FINANCIAL_COVERAGE_RATIO, SECOND_LIFE_BALANCED_COVERAGE_RATIO,
   SECOND_LIFE_FINANCIAL_INDICATORS_REQUIRED, SECOND_LIFE_BALANCED_INDICATORS_REQUIRED,
-  MONTHS_PER_GLOBAL_PAYDAY,
+  MONTHS_PER_GLOBAL_PAYDAY, PAYDAY_MAX_ROUNDS,
   MONTHS_PER_ROUND,
   RETIREMENT_ROUND, RETIREMENT_STARTUP_AMOUNTS, RETIREMENT_STARTUP_SUCCESS_ROLL, RETIREMENT_STARTUP_RETURN_RATE,
   RETIREMENT_STARTUP_FAILURE_LOSS, RETIREMENT_DEFER_HP_COST, RETIREMENT_MAX_DEFERRALS, CONSULTANT_HP_COST_PER_CYCLE,
@@ -2054,6 +2054,8 @@ function serializeGameState(gs: GameState): object {
       roundsSince: gs.turnNumber - gs.roundsAtLastPayday,
       settlementMonths: paydaySettlementMonths(gs),
       due: isPaydayDue(gs) || gs.globalPaydayPending,
+      frozen: gs.paydayPausedAt !== null,
+      maxRounds: PAYDAY_MAX_ROUNDS,
     },
     globalPaydayPending: gs.globalPaydayPending,
     globalPaydayInProgress: gs.globalPaydayInProgress,
@@ -2622,10 +2624,26 @@ function paydaySettlementMonths(gs: GameState): number {
   return roundsSinceLastPayday(gs) * (gs.monthsPerRound || MONTHS_PER_ROUND);
 }
 
-/** 計時發薪的剩餘毫秒數（時鐘暫停時凍結）。 */
+/**
+ * 發薪計時用的經過時間：只扣主持人手動暫停與發薪進行中的時間。
+ * 決策、落格說明、舞台都照常計時——工作坊大部分時間都在這些階段，若也暫停會整場等不到發薪。
+ */
+function getPaydayElapsedMs(gs: GameState): number {
+  if (!gs.gameStartTime) return 0;
+  const pausedNow = gs.paydayPausedAt ? Date.now() - gs.paydayPausedAt.getTime() : 0;
+  return Math.max(0, Date.now() - gs.gameStartTime.getTime() - gs.paydayPausedMs - pausedNow);
+}
+function pausePaydayClock(gs: GameState): void { if (!gs.paydayPausedAt) gs.paydayPausedAt = new Date(); }
+function resumePaydayClock(gs: GameState): void {
+  if (!gs.paydayPausedAt) return;
+  gs.paydayPausedMs += Date.now() - gs.paydayPausedAt.getTime();
+  gs.paydayPausedAt = null;
+}
+
+/** 計時發薪的剩餘毫秒數（只在手動暫停與發薪中凍結）。 */
 function paydayRemainingMs(gs: GameState): number {
   if (!gs.paydayTimerEnabled) return -1;
-  return Math.max(0, gs.paydayIntervalMs - (getActiveElapsedMs(gs) - gs.lastPaydayActiveMs));
+  return Math.max(0, gs.paydayIntervalMs - (getPaydayElapsedMs(gs) - gs.lastPaydayActiveMs));
 }
 
 /**
@@ -2634,7 +2652,10 @@ function paydayRemainingMs(gs: GameState): number {
  */
 function isPaydayDue(gs: GameState): boolean {
   if (!gs.paydayTimerEnabled || gs.gamePhase === GamePhase.GameOver || gs.finalRoundStarted) return false;
-  if (gs.turnNumber - gs.roundsAtLastPayday < 1) return false;
+  const rounds = gs.turnNumber - gs.roundsAtLastPayday;
+  if (rounds < 1) return false;
+  // 保底：不管計時器，超過 PAYDAY_MAX_ROUNDS 輪一定發薪
+  if (rounds >= PAYDAY_MAX_ROUNDS) return true;
   return paydayRemainingMs(gs) <= 0;
 }
 
@@ -2662,6 +2683,7 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
   const roomId = gs.gameId;
   const wasPaused = gs.pausedAt !== null;
   if (!wasPaused) pauseGameClock(gs);
+  pausePaydayClock(gs);
 
   gs.globalPaydayPending = false;
   const playerIds = gs.playerOrder.filter((id) => gs.players.get(id)?.isAlive);
@@ -2835,7 +2857,8 @@ async function runGlobalPayday(gs: GameState): Promise<void> {
 
   gs.roundsSinceGlobalPayday = 0;
   gs.roundsAtLastPayday = gs.turnNumber;
-  gs.lastPaydayActiveMs = getActiveElapsedMs(gs);
+  resumePaydayClock(gs);
+  gs.lastPaydayActiveMs = getPaydayElapsedMs(gs);
   gs.globalPaydayNumber += 1;
   gs.globalPaydayInProgress = false;
   const expiredWorldEvents = expireWorldEffects(gs);
@@ -4949,6 +4972,8 @@ io.on('connection', (socket: Socket) => {
     gs.roundsSinceGlobalPayday = 0;
     gs.roundsAtLastPayday = 0;
     gs.lastPaydayActiveMs = 0;
+    gs.paydayPausedMs = 0;
+    gs.paydayPausedAt = null;
     gs.retirementQueue = [];
     gs.globalPaydayPending = false;
     gs.globalPaydayInProgress = false;
@@ -5092,6 +5117,7 @@ io.on('connection', (socket: Socket) => {
     }
 
     pauseGameClock(gs);
+    pausePaydayClock(gs);
     console.log(`[pauseGame] 房間 ${roomId} 時鐘暫停`);
 
     emitToRoom(roomId, 'gamePaused', {
@@ -5125,6 +5151,7 @@ io.on('connection', (socket: Socket) => {
     }
 
     resumeGameClock(gs);
+    resumePaydayClock(gs);
     const currentAge = getCurrentAge(gs);
     console.log(`[resumeGame] 房間 ${roomId} 時鐘恢復，目前年齡：${currentAge.toFixed(1)} 歲`);
 

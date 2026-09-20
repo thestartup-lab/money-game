@@ -867,6 +867,9 @@ export class GameState {
   /** 計時發薪：開關、間隔、上次發薪時的「有效經過時間」與輪數 */
   paydayTimerEnabled = true;
   paydayIntervalMs = 10 * 60 * 1000;
+  /** 發薪計時只扣「主持人手動暫停」與「發薪進行中」的時間；決策與舞台照常計時 */
+  paydayPausedMs = 0;
+  paydayPausedAt: Date | null = null;
   lastPaydayActiveMs = 0;
   roundsAtLastPayday = 0;
   /** 本輪行動時間已按「完成」的玩家 */

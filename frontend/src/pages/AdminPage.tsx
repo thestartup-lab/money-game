@@ -63,7 +63,7 @@ export default function AdminPage() {
   const [playerFeedback, setPlayerFeedback] = useState<Record<string, string>>({});
   const pendingTargetRef = useRef<string>('');
   const [marriageGiftInput, setMarriageGiftInput] = useState('');
-  const paydayRemaining = usePaydayCountdown(gameState?.paydayTimer, Boolean(gameState?.isPaused));
+  const paydayRemaining = usePaydayCountdown(gameState?.paydayTimer, Boolean(gameState?.paydayTimer?.frozen));
   const [adminCodeInput, setAdminCodeInput] = useState('');
 
   const [adaptiveDirector, setAdaptiveDirector] = useState<AdaptiveDirectorStatus | null>(null);
@@ -682,7 +682,7 @@ export default function AdminPage() {
                     <button className="rounded-lg bg-amber-700 px-2 py-1 font-bold text-white hover:bg-amber-600"
                       onClick={() => { if (window.confirm('立即安排發薪？會在目前玩家行動結束後開始。')) emit('triggerPaydayNow'); }}>立即發薪</button>
                   </div>
-                  <p className="mt-1 text-[11px] text-gray-500">時間到就排在目前玩家行動結束後發薪；結算月數 = 距上次發薪經過的輪數 × {gameState?.monthsPerRound ?? 24}。舞台、決策與暫停時計時停止。已累積 {gameState?.paydayTimer?.roundsSince ?? 0} 輪。</p>
+                  <p className="mt-1 text-[11px] text-gray-500">時間到就排在目前玩家行動結束後發薪（至少要完成一輪）；超過 {gameState?.paydayTimer?.maxRounds ?? 3} 輪沒發薪會自動發。決策與舞台期間照常計時，只有你按暫停與發薪進行中會停。結算月數 = 經過輪數 × {gameState?.monthsPerRound ?? 24}。已累積 {gameState?.paydayTimer?.roundsSince ?? 0} 輪。</p>
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <span className="font-bold text-gray-200">每輪結算月數</span>
                     <div className="flex gap-1">

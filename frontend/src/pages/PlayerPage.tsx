@@ -708,7 +708,7 @@ export default function PlayerPage() {
     setPaydayForm(null);
   }
 
-  const paydayRemaining = usePaydayCountdown(gameState?.paydayTimer, Boolean(gameState?.isPaused));
+  const paydayRemaining = usePaydayCountdown(gameState?.paydayTimer, Boolean(gameState?.paydayTimer?.frozen));
   const myPlayer: Player | undefined = gameState?.players.find((p) => p.id === myId);
   const isMyTurn = gameState?.currentPlayerTurnId === myId;
   const isGameOver = gameState?.gamePhase === 'GameOver';
