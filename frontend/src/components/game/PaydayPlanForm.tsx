@@ -48,7 +48,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
     for (const t of buyIns) cost += activationFee(t);
     if (lifeChoice.type === 'travel') {
       const dest = data.travelDestinations?.find((d) => d.id === (lifeChoice as { type: 'travel'; destinationId: string; destinationName: string }).destinationId);
-      if (dest) cost += dest.cost;
+      if (dest) cost += dest.cost + (dest.leaveCost ?? 0);
     }
     return cost;
   })();
@@ -411,8 +411,14 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
               </label>
               {showTravelList && (data.travelDestinations ?? []).length > 0 && (
                 <div className="mt-2 space-y-1 pl-2">
+                  {data.actionInfo?.travelOnPayroll ? (
+                    <p className="rounded-lg border border-amber-600 bg-amber-950/60 px-2 py-1.5 text-[11px] leading-snug text-amber-100">💼 固定班表的受僱者出國要請假：出發時扣「月薪 × 請假月數」，加旅費一起付。自僱、企業主、投資者不扣薪。</p>
+                  ) : (
+                    <p className="text-[11px] text-emerald-300">🗓️ 自由行程：出國只付旅費，不扣薪。</p>
+                  )}
                   {(data.travelDestinations ?? []).map((dest) => {
-                    const canAffordTravel = remaining + (lifeChoice.type === 'travel' && (lifeChoice as { type: 'travel'; destinationId: string; destinationName: string }).destinationId === dest.id ? dest.cost : 0) >= dest.cost;
+                    const tripTotal = dest.cost + (dest.leaveCost ?? 0);
+                    const canAffordTravel = remaining + (lifeChoice.type === 'travel' && (lifeChoice as { type: 'travel'; destinationId: string; destinationName: string }).destinationId === dest.id ? tripTotal : 0) >= tripTotal;
                     return (
                       <button
                         key={dest.id}
@@ -423,8 +429,9 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
                         }`}
                       >
                         <span className="font-semibold">{dest.name}</span>
-                        <span className="ml-2 text-gray-400">{dest.region} ｜ ${dest.cost.toLocaleString()} ｜ 體驗 +{dest.lifeExpGained}</span>
-                        {(() => { const t = data.actionInfo?.travel.find((x) => x.id === dest.id); if (!t) return null; const fx = t.statEffect ?? {}; const parts = [`體驗 +${t.lifeExp}${t.visited ? '（去過減半）' : ''}`, t.hpCost ? `HP −${t.hpCost}` : '', fx.hp ? `HP +${fx.hp}` : '', fx.nt ? `人脈 +${fx.nt}` : '', fx.fq ? `財商 +${fx.fq}` : '', fx.sk ? `專長 +${fx.sk}` : '', fx.legacyScore ? `傳承 +${fx.legacyScore}` : '', t.salaryPenalty < 1 ? `下次薪水 ×${t.salaryPenalty}` : ''].filter(Boolean); return <span className="block text-[11px] text-emerald-300">價值：{parts.join('、')}</span>; })()}
+                        <span className="ml-2 text-gray-400">{dest.region} ｜ 旅費 ${dest.cost.toLocaleString()} ｜ 體驗 +{dest.lifeExpGained}</span>
+                        {(dest.leaveCost ?? 0) > 0 && <span className="block text-[11px] font-bold text-amber-300">請假 {dest.leaveMonths} 個月，扣薪 −${(dest.leaveCost ?? 0).toLocaleString()}（合計 ${tripTotal.toLocaleString()}）</span>}
+                        {(() => { const t = data.actionInfo?.travel.find((x) => x.id === dest.id); if (!t) return null; const fx = t.statEffect ?? {}; const parts = [`體驗 +${t.lifeExp}${t.visited ? '（去過減半）' : ''}`, t.hpCost ? `HP −${t.hpCost}` : '', fx.hp ? `HP +${fx.hp}` : '', fx.nt ? `人脈 +${fx.nt}` : '', fx.fq ? `財商 +${fx.fq}` : '', fx.sk ? `專長 +${fx.sk}` : '', fx.legacyScore ? `傳承 +${fx.legacyScore}` : ''].filter(Boolean); return <span className="block text-[11px] text-emerald-300">價值：{parts.join('、')}</span>; })()}
                       </button>
                     );
                   })}

@@ -35,8 +35,12 @@ test('行動時段限制與發薪後共同抉擇投票', { timeout: 60_000 }, as
   const started = await send(admin, 'startGame', { force: true }, 'gameStateUpdate', (g) => g.decisionPhase?.kind === 'actions');
   assert.equal(started.communityChoiceAuto, true, '預設開啟');
 
-  // 行動時間內可以操作
+  // 行動時間內可以操作（旅遊、聯誼也要能用：行動時間本身是決策階段，不能被當成「決策中」擋掉）
   await send(a, 'buyInsurance', { insuranceType: 'life' }, 'insuranceUpdated');
+  const trip = await send(b, 'goTravel', { destinationId: 'taiwan_cycling' }, 'travelResult');
+  assert.ok(trip.success || /現金不足/.test(trip.message), `旅遊應被受理：${trip.message}`);
+  const social = await send(b, 'attendSocialEvent', undefined, 'socialEventResult');
+  assert.ok(social.success || /現金不足|健康|已婚|空閒/.test(social.message), `聯誼應被受理：${social.message}`);
   // 行動時間結束後（輪到擲骰時）不行
   await send(a, 'finishActionPhase', undefined, 'gameStateUpdate', (g) => (g.actionPhaseDone ?? []).includes(sa.playerId));
   await send(b, 'finishActionPhase', undefined, 'gameStateUpdate', (g) => !g.decisionPhase);

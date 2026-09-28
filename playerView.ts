@@ -3,7 +3,7 @@ import { GameState, Player } from './gameDataModels';
 import { BASIC_INVESTMENTS } from './basicInvestments';
 import { getHomeOffers } from './householdLoans';
 import { BOND_FUND_ID } from './bondFund';
-import { naturalDeathProbability } from './gameLogic';
+import { naturalDeathProbability, travelLeaveCost, isOnPayrollSchedule } from './gameLogic';
 import { LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS, CHILD_EXPENSE_BY_AGE, SOCIAL_INSURANCE_RATE, PREMIUM_MULT_BY_STAGE } from './gameConfig';
 import { getAvailableLoan, getCurrentAge, getRemainingActivityTimeMs, getLifeStage } from './gameLogic';
 import { RELATIONSHIP_MARRIAGE_THRESHOLD, HP_ACTIVITY_THRESHOLDS, PROFESSIONS, SECOND_LIFE_MIN_PAYDAYS, SECOND_LIFE_FINANCIAL_COVERAGE_RATIO, SECOND_LIFE_BALANCED_COVERAGE_RATIO, SECOND_LIFE_FINANCIAL_INDICATORS_REQUIRED, SECOND_LIFE_BALANCED_INDICATORS_REQUIRED, PAYDAY_MAX_ROUNDS, MONTHS_PER_ROUND, YEARS_PER_COMPLETED_ROUND, TOTAL_LIFE_ROUNDS, STOCK_DCA_MONTHLY_RETURN_RATE, STOCK_DCA_MONTHLY_DIVIDEND_RATE, SKILL_CAREER_CHANGE_THRESHOLD, getLoanLimit, getLoanRate } from './gameConfig';
@@ -88,7 +88,8 @@ export function buildActionInfo(p: Player): object {
       .filter((d) => d.tier === 'both' || d.tier === (p.isInFastTrack ? 'outer' : 'inner'))
       .map((d) => ({ id: d.id, name: d.name, region: d.region, tier: d.tier, cost: d.cost, description: d.description,
         lifeExp: p.visitedDestinations.includes(d.id) ? Math.floor(d.lifeExpGained / 2) : d.lifeExpGained,
-        visited: p.visitedDestinations.includes(d.id), hpCost: d.hpCost, salaryPenalty: d.salaryPenalty, statEffect: d.statEffect ?? null })),
+        visited: p.visitedDestinations.includes(d.id), hpCost: d.hpCost, leaveMonths: d.leaveMonths, leaveCost: travelLeaveCost(p, d), statEffect: d.statEffect ?? null })),
+    travelOnPayroll: isOnPayrollSchedule(p),
     travelMinHp: HP_ACTIVITY_THRESHOLDS.travel,
     social: { cost: cfg.SOCIAL_EVENT_COST, drsMin: cfg.SOCIAL_EVENT_DRS_MIN, drsMax: inPeak ? cfg.SOCIAL_EVENT_DRS_PEAK_MAX : cfg.SOCIAL_EVENT_DRS_MAX, inPeak,
       peakStart: marriageWindow.peakStart, peakEnd: marriageWindow.peakEnd, threshold: RELATIONSHIP_MARRIAGE_THRESHOLD, currentDrs: p.relationshipPoints, active: p.relationshipActive, minHp: HP_ACTIVITY_THRESHOLDS.socialEvent },
@@ -129,7 +130,6 @@ export function buildSalaryItems(p: Player): { label: string; note?: string }[] 
   if (habit && habit.salaryMultiplier !== 1) items.push({ label: `× 健康習慣「${habit.label}」${habit.salaryMultiplier}`, note: habit.desc });
   if (p.salaryBonus) items.push({ label: `+ 永久加薪 $${p.salaryBonus.toLocaleString()}`, note: '決策回聲等事件' });
   if (p.salaryMultiplierMonths > 0) items.push({ label: `× 暫時倍率 ${p.salaryMultiplierPending}（剩 ${p.salaryMultiplierMonths} 個月）`, note: '升遷 ×1.2／職場霸凌 ×0.9' });
-  if (p.travelPenaltyRemaining > 0) items.push({ label: '× 旅遊請假 0.7（下次發薪）', note: '出國旅遊後下次薪水打七折' });
   if (p.downsizingTurnsLeft > 0) items.push({ label: `裁員中：薪資 $0，剩 ${p.downsizingTurnsLeft} 個月`, note: '職涯轉折格；月數依年齡，SK ≥ 60 減半' });
   items.push({ label: `＝ 目前月薪 $${p.salary.toLocaleString()}`, note: `另扣勞健保 ${Math.round(cfg.SOCIAL_INSURANCE_RATE * 100)}% = $${p.socialInsurance.toLocaleString()}（列在支出）` });
   return items;

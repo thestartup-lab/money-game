@@ -153,6 +153,14 @@ export default function ActionPanel({
               {player.isInFastTrack && (
                 <p className="text-xs text-yellow-400">✨ 外圈玩家可前往全球頂級目的地</p>
               )}
+              {info?.travelOnPayroll ? (
+                <div className="rounded-lg border border-amber-600 bg-amber-950/60 px-3 py-2 text-xs leading-snug text-amber-100">
+                  <p className="font-bold">💼 你是固定班表的受僱者：出國要請假</p>
+                  <p className="mt-0.5">出發時扣「月薪 × 請假月數」（近程半個月、遠程一個半到兩個月），加上旅費一起付；每輪只能安排一次旅遊或聯誼。自僱、企業主、投資者與退休者出國不扣薪。</p>
+                </div>
+              ) : (
+                <p className="text-xs text-emerald-300">🗓️ 你是自由行程：出國只付旅費，不扣薪、不限次數。</p>
+              )}
               {travelPreview && (() => {
                 const t = info?.travel.find((x) => x.id === travelPreview);
                 const d = availableDestinations.find((x) => x.id === travelPreview);
@@ -167,17 +175,23 @@ export default function ActionPanel({
                   ...(fx.fq ? [{ label: '財商 FQ', value: `+${fx.fq}`, tone: 'good' as const }] : []),
                   ...(fx.sk ? [{ label: '第二專長 SK', value: `+${fx.sk}`, tone: 'good' as const }] : []),
                   ...(fx.legacyScore ? [{ label: '傳承加分', value: `+${fx.legacyScore}`, tone: 'good' as const }] : []),
-                  ...(t && t.salaryPenalty < 1 ? [{ label: '下次發薪薪水', value: `×${t.salaryPenalty}`, tone: 'bad' as const }] : []),
-                  { label: '剩餘現金', value: `$${fmt(player.cash - d.cost)}`, tone: 'neutral' as const },
+                  ...(t && t.leaveCost > 0
+                    ? [{ label: `請假扣薪（${t.leaveMonths} 個月薪水）`, value: `-$${fmt(t.leaveCost)}`, tone: 'bad' as const }]
+                    : [{ label: '薪水', value: '不受影響（自由行程）', tone: 'good' as const }]),
+                  { label: '剩餘現金', value: `$${fmt(player.cash - d.cost - (t?.leaveCost ?? 0))}`, tone: 'neutral' as const },
                 ];
-                return <EffectPreview title={`✈️ ${d.name}：效果與價值`} rows={rows} notes={[tokenNote, '體驗值提高人生評分並計入人生指標「體驗」（≥ 45）', d.desc]}
-                  confirmLabel="確認出發" onCancel={() => setTravelPreview(null)} disabled={player.cash < d.cost} disabledReason="現金不足"
+                const leave = t?.leaveCost ?? 0;
+                return <EffectPreview title={`✈️ ${d.name}：效果與價值`} rows={rows} notes={[
+                    leave > 0 ? `受僱者出國要請假：這趟請 ${t?.leaveMonths} 個月，出發時扣 $${fmt(leave)}（月薪 $${fmt(player.salary)} × ${t?.leaveMonths}）` : '自由行程：出國不扣薪',
+                    tokenNote, '體驗值提高人生評分並計入人生指標「體驗」（≥ 45）', d.desc]}
+                  confirmLabel={leave > 0 ? `確認出發（共付 $${fmt(d.cost + leave)}）` : '確認出發'} onCancel={() => setTravelPreview(null)} disabled={player.cash < d.cost + leave} disabledReason="現金不足（旅費＋請假扣薪）"
                   onConfirm={() => { onTravel(d.id); setTravelPreview(null); setShowTravelPanel(false); }} />;
               })()}
               <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
                 {availableDestinations.map((d) => {
                   const alreadyVisited = visited.has(d.id);
-                  const canAfford = player.cash >= d.cost;
+                  const leave = info?.travel.find((x) => x.id === d.id)?.leaveCost ?? 0;
+                  const canAfford = player.cash >= d.cost + leave;
                   return (
                     <button
                       key={d.id}
@@ -193,8 +207,13 @@ export default function ActionPanel({
                         <span className={`font-semibold text-sm ${d.tier === 'outer' ? 'text-yellow-200' : 'text-white'}`}>
                           {d.name} {alreadyVisited ? '✓' : ''}
                         </span>
-                        <span className="text-xs text-gray-400">${fmt(d.cost)}</span>
+                        <span className="text-xs text-gray-400">旅費 ${fmt(d.cost)}</span>
                       </div>
+                      {leave > 0 && (
+                        <div className="mt-0.5 text-[11px] font-bold text-amber-300">
+                          請假 {info?.travel.find((x) => x.id === d.id)?.leaveMonths} 個月，扣薪 −${fmt(leave)}（合計 ${fmt(d.cost + leave)}）
+                        </div>
+                      )}
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-[10px] text-emerald-400">+{alreadyVisited ? Math.floor(d.lifeExp / 2) : d.lifeExp} 體驗值</span>
                         {d.special && <span className="text-[10px] text-blue-300">{d.special}</span>}

@@ -219,3 +219,39 @@ test('房東風險：空置期間沒有租金且逐月恢復、大修扣房價 2
   assert.equal(homeRepair.kind, 'repair');
   assert.equal(owner.cash, 500_000 - 60_000);
 });
+
+test('出國請假：固定班表的在職受僱者扣「月薪 × 請假月數」；自由行程、退休者只付旅費', () => {
+  const { goTravel, travelLeaveCost, isOnPayrollSchedule } = require('../dist/gameLogic');
+  const tokyo = cfg.TRAVEL_DESTINATIONS.find((d) => d.id === 'japan_tokyo');
+  const taiwan = cfg.TRAVEL_DESTINATIONS.find((d) => d.id === 'taiwan_cycling');
+  assert.equal(tokyo.leaveMonths, 1.5);
+  assert.equal(taiwan.leaveMonths, 0.5);
+
+  const teacher = createPlayer('e', '老師', 'teacher');
+  teacher.salary = 49_000; teacher.cash = 200_000; teacher.stats.health = 80;
+  assert.equal(isOnPayrollSchedule(teacher), true);
+  const leave = travelLeaveCost(teacher, tokyo);
+  assert.equal(leave, Math.round(49_000 * 1.5));
+  const r = goTravel(teacher, 'japan_tokyo');
+  assert.equal(r.success, true);
+  assert.equal(r.leaveCost, leave);
+  assert.equal(teacher.cash, 200_000 - tokyo.cost - leave);
+  assert.equal(teacher.travelPenaltyRemaining, 0, '不再用下次薪水打折');
+
+  const poor = createPlayer('p', '受僱者', 'teacher');
+  poor.salary = 49_000; poor.cash = tokyo.cost + 1_000; poor.stats.health = 80;
+  const denied = goTravel(poor, 'japan_tokyo');
+  assert.equal(denied.success, false);
+  assert.match(denied.message, /請假扣薪/);
+
+  const owner = createPlayer('b', '老闆', 'restaurant_owner');
+  owner.cash = 200_000; owner.stats.health = 80;
+  assert.equal(isOnPayrollSchedule(owner), false);
+  assert.equal(travelLeaveCost(owner, tokyo), 0);
+  goTravel(owner, 'japan_tokyo');
+  assert.equal(owner.cash, 200_000 - tokyo.cost, '企業主只付旅費');
+
+  const retiree = createPlayer('r', '退休老師', 'teacher');
+  retiree.retirementStatus = 'retired'; retiree.salary = 20_000;
+  assert.equal(travelLeaveCost(retiree, tokyo), 0, '退休者不用請假');
+});

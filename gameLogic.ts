@@ -1191,6 +1191,8 @@ export function resumeGameClock(gameState: GameState): void {
 // ============================================================
 
 export interface GoTravelResult {
+  /** 受僱者請假扣薪 */
+  leaveCost?: number;
   success: boolean;
   message: string;
   lifeExperienceGained?: number;
@@ -1204,6 +1206,17 @@ export interface GoTravelResult {
  * @param destinationId 目的地 ID（來自 TRAVEL_DESTINATIONS）
  * @returns GoTravelResult
  */
+/** 固定班表、仍在職的受僱者：出國要請假，會被扣薪 */
+export function isOnPayrollSchedule(player: Player): boolean {
+  return !player.profession.hasFlexibleSchedule && player.retirementStatus === 'working';
+}
+
+/** 這趟旅行的請假扣薪（非受僱者為 0） */
+export function travelLeaveCost(player: Player, dest: { leaveMonths: number }): number {
+  if (!isOnPayrollSchedule(player) || player.salary <= 0) return 0;
+  return Math.round(player.salary * dest.leaveMonths);
+}
+
 export function goTravel(player: Player, destinationId: string): GoTravelResult {
   const dest = TRAVEL_DESTINATIONS.find((d) => d.id === destinationId);
   if (!dest) {
@@ -1227,17 +1240,20 @@ export function goTravel(player: Player, destinationId: string): GoTravelResult 
       message: `健康值不足（需要 ${HP_ACTIVITY_THRESHOLDS.travel}，目前 ${player.stats.health}）。`,
     };
   }
-  if (player.cash < dest.cost) {
+  const leaveCost = travelLeaveCost(player, dest);
+  if (player.cash < dest.cost + leaveCost) {
     return {
       success: false,
-      message: `現金不足（需要 $${dest.cost}，目前 $${player.cash}）。`,
+      message: leaveCost > 0
+        ? `現金不足：旅費 $${dest.cost.toLocaleString()} ＋ 請假扣薪 $${leaveCost.toLocaleString()}，目前 $${player.cash.toLocaleString()}。`
+        : `現金不足（需要 $${dest.cost.toLocaleString()}，目前 $${player.cash.toLocaleString()}）。`,
     };
   }
   if (!player.profession.hasFlexibleSchedule && player.actionTokensThisPayday <= 0) {
     return { success: false, message: '本發薪日已無空閒時間，無法出遊（固定班表職業每發薪日只能安排 1 次活動）。' };
   }
 
-  player.cash -= dest.cost;
+  player.cash -= dest.cost + leaveCost;
   // 旅遊扣 HP（透過 applyHPChange 同步 isBedridden）
   {
     const { applyHPChange } = require('./statsSystem');
@@ -1250,10 +1266,6 @@ export function goTravel(player: Player, destinationId: string): GoTravelResult 
   player.lifeExperience += expGained;
   if (!alreadyVisited) player.visitedDestinations.push(dest.id);
 
-  // 薪水懲罰（外圈環遊世界無懲罰）
-  if (dest.salaryPenalty < 1.0) {
-    player.travelPenaltyRemaining = 1;
-  }
 
   // 特殊屬性加成
   const fx = dest.statEffect;
@@ -1273,7 +1285,8 @@ export function goTravel(player: Player, destinationId: string): GoTravelResult 
 
   return {
     success: true,
-    message: `前往「${dest.name}」！獲得 ${expGained} 點生命體驗值${alreadyVisited ? '（重複造訪，減半）' : ''}。`,
+    message: `前往「${dest.name}」！獲得 ${expGained} 點生命體驗值${alreadyVisited ? '（重複造訪，減半）' : ''}${leaveCost > 0 ? `；請假 ${dest.leaveMonths} 個月，扣薪 $${leaveCost.toLocaleString()}` : ''}。`,
+    leaveCost,
     lifeExperienceGained: expGained,
     destination: {
       name: dest.name,

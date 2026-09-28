@@ -9,7 +9,7 @@ import { BASIC_INVESTMENTS, buyBasicInvestment } from './basicInvestments';
 import { writeSnapshot, readSnapshots, deleteSnapshot, resolveStateDir, isPersistentVolume, SNAPSHOT_VERSION } from './roomPersistence';
 import { getHomeOffers, buyHome } from './householdLoans';
 import { investBondFund, BOND_FUND_ID } from './bondFund';
-import { syncPlayerAges, getLayoffMonths, createSpouse, checkNaturalDeath, naturalDeathProbability } from './gameLogic';
+import { syncPlayerAges, getLayoffMonths, createSpouse, checkNaturalDeath, naturalDeathProbability, travelLeaveCost } from './gameLogic';
 import { LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS, MONTHS_PER_ROUND_OPTIONS, CHILD_EXPENSE_BY_AGE, SOCIAL_INSURANCE_RATE, PREMIUM_MULT_BY_STAGE } from './gameConfig';
 import {
   createPlayer,
@@ -1016,7 +1016,7 @@ export function advanceTurn(gs: GameState): void {
 }
 
 export function getQuarterTravelDestinations(player: Player): Array<{
-  id: string; name: string; region: string; cost: number; lifeExpGained: number; salaryPenalty: number;
+  id: string; name: string; region: string; cost: number; lifeExpGained: number; leaveMonths: number; leaveCost: number;
 }> {
   const { TRAVEL_DESTINATIONS } = require('./gameConfig') as typeof import('./gameConfig');
   return TRAVEL_DESTINATIONS
@@ -1031,7 +1031,8 @@ export function getQuarterTravelDestinations(player: Player): Array<{
       region: destination.region,
       cost: destination.cost,
       lifeExpGained: destination.lifeExpGained,
-      salaryPenalty: destination.salaryPenalty,
+      leaveMonths: destination.leaveMonths,
+      leaveCost: travelLeaveCost(player, destination),
     }));
 }
 
@@ -1093,6 +1094,13 @@ export const financialActions = new Set(['sellAsset', 'buyInsurance', 'cancelIns
   'takeEmergencyLoan', 'investStockDCA', 'investBond', 'buyHome', 'takeLeverageLoan', 'repayLoan', 'buyFranchise',
   'partnershipOffer', 'partnershipResponse', 'loanOffer', 'loanResponse', 'loanRequest', 'loanRequestResponse',
   'goTravel', 'attendSocialEvent']);
+/** 可以做主動行動的時段：全體行動時間，或沒有任何決策、舞台、發薪的回合空檔（時段的總開關在連線中介層） */
+export function isActionWindowOpen(gs: GameState): boolean {
+  if (gs.facilitatorScene) return false;
+  if (gs.decisionPhase) return gs.decisionPhase.kind === 'actions';
+  return gs.pausedAt === null && !gs.turnInProgress && !gs.globalPaydayInProgress;
+}
+
 /** 回覆別人的邀約：不限行動時間（只要沒有決策或舞台），避免邀約卡在兩個時段之間 */
 export const responseActions = new Set(['partnershipResponse', 'loanResponse', 'loanRequestResponse']);
 export const setupActions = new Set(['rollSocialClass', 'allocateGrowthStats', 'continueEducation', 'selectQuadrant']);

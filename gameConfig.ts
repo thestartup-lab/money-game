@@ -1245,7 +1245,6 @@ export type TravelStatEffect = Partial<{
   hp: number;    // 健康值加成（正數為回復）
   legacyScore: number;      // 直接加傳承分
   unlockEntrepreneur: boolean; // 解鎖創業者事件
-  salaryPenaltyOverride: number; // 覆蓋薪水懲罰係數
 }>;
 
 export interface TravelDestination {
@@ -1256,8 +1255,11 @@ export interface TravelDestination {
   tier: 'inner' | 'outer' | 'both';
   cost: number;
   lifeExpGained: number;
-  /** 薪水懲罰係數（1.0=無懲罰, 0.7=七折） */
-  salaryPenalty: number;
+  /**
+   * 受僱者出國要請的假（月數）。固定班表的在職受僱者出發時扣「月薪 × 請假月數」；
+   * 自僱、企業主、投資者、退休者不扣薪，只付旅費。
+   */
+  leaveMonths: number;
   hpCost: number;
   statEffect?: TravelStatEffect;
   description: string;
@@ -1272,7 +1274,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'inner',
     cost: 15_000,
     lifeExpGained: 8,
-    salaryPenalty: 0.9,
+    leaveMonths: 0.5,
     hpCost: 5,
     description: '騎單車環島，感受台灣之美。',
   },
@@ -1283,7 +1285,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'inner',
     cost: 38_000,
     lifeExpGained: 12,
-    salaryPenalty: 0.7,
+    leaveMonths: 1.5,
     hpCost: 8,
     statEffect: { nt: 1 },
     description: '繁華都市，開拓人際視野。',
@@ -1295,7 +1297,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'inner',
     cost: 22_000,
     lifeExpGained: 10,
-    salaryPenalty: 0.8,
+    leaveMonths: 1,
     hpCost: 6,
     description: '平價旅遊，體驗東南亞文化。',
   },
@@ -1306,7 +1308,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'inner',
     cost: 30_000,
     lifeExpGained: 10,
-    salaryPenalty: 0.75,
+    leaveMonths: 1,
     hpCost: 7,
     description: '流行文化前線，感受韓流。',
   },
@@ -1317,7 +1319,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'inner',
     cost: 22_000,
     lifeExpGained: 9,
-    salaryPenalty: 0.8,
+    leaveMonths: 1,
     hpCost: 5,
     description: '多元文化交融的美食天堂。',
   },
@@ -1328,7 +1330,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'inner',
     cost: 18_000,
     lifeExpGained: 8,
-    salaryPenalty: 0.85,
+    leaveMonths: 0.5,
     hpCost: 4,
     statEffect: { fq: 1 },
     description: '國際金融中心，拓展財商視野。',
@@ -1340,7 +1342,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'inner',
     cost: 15_000,
     lifeExpGained: 8,
-    salaryPenalty: 0.9,
+    leaveMonths: 0.5,
     hpCost: 4,
     description: '歷史古城，感受不同的生活節奏。',
   },
@@ -1351,7 +1353,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'inner',
     cost: 30_000,
     lifeExpGained: 11,
-    salaryPenalty: 0.75,
+    leaveMonths: 1,
     hpCost: 3,
     statEffect: { hp: 5 },
     description: '靈性島嶼，身心靈療癒之旅。',
@@ -1363,7 +1365,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'inner',
     cost: 38_000,
     lifeExpGained: 10,
-    salaryPenalty: 0.75,
+    leaveMonths: 1,
     hpCost: 5,
     statEffect: { fq: 1 },
     description: '亞洲金融樞紐，開拓財務視野。',
@@ -1375,7 +1377,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'inner',
     cost: 60_000,
     lifeExpGained: 14,
-    salaryPenalty: 0.7,
+    leaveMonths: 1.5,
     hpCost: 8,
     description: '南半球大都市，體驗多元文化。',
   },
@@ -1388,7 +1390,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'outer',
     cost: 120_000,
     lifeExpGained: 20,
-    salaryPenalty: 0.85,
+    leaveMonths: 0.5,
     hpCost: 8,
     statEffect: { nt: 2 },
     description: '藝術之都，結識國際精英。',
@@ -1400,7 +1402,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'outer',
     cost: 135_000,
     lifeExpGained: 20,
-    salaryPenalty: 0.8,
+    leaveMonths: 1,
     hpCost: 9,
     statEffect: { fq: 2 },
     description: '全球金融中心，深化財務洞察。',
@@ -1412,7 +1414,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'outer',
     cost: 225_000,
     lifeExpGained: 30,
-    salaryPenalty: 0.7,
+    leaveMonths: 1.5,
     hpCost: 12,
     statEffect: { sk: 1 },
     description: '壯闊草原，拓展人生格局。',
@@ -1424,7 +1426,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'outer',
     cost: 450_000,
     lifeExpGained: 50,
-    salaryPenalty: 0.6,
+    leaveMonths: 2,
     hpCost: 15,
     statEffect: { legacyScore: 10 },
     description: '地球最南端，極少數人能到達的地方。傳承分直接加成。',
@@ -1436,7 +1438,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'outer',
     cost: 150_000,
     lifeExpGained: 22,
-    salaryPenalty: 0.8,
+    leaveMonths: 1,
     hpCost: 7,
     statEffect: { nt: 2 },
     description: '千年文藝復興，滋養人文素養。',
@@ -1448,7 +1450,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'outer',
     cost: 180_000,
     lifeExpGained: 22,
-    salaryPenalty: 0.8,
+    leaveMonths: 1,
     hpCost: 8,
     statEffect: { fq: 1 },
     description: '現代奇蹟之城，感受財富的另一種面貌。',
@@ -1460,7 +1462,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'outer',
     cost: 180_000,
     lifeExpGained: 25,
-    salaryPenalty: 0.7,
+    leaveMonths: 1.5,
     hpCost: 12,
     description: '印加古文明，感受歷史的重量。',
   },
@@ -1471,7 +1473,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'outer',
     cost: 750_000,
     lifeExpGained: 80,
-    salaryPenalty: 1.0, // 外圈無薪水懲罰
+    leaveMonths: 3,
     hpCost: 10,
     statEffect: { nt: 1, fq: 1, sk: 1, hp: 5 },
     description: '人生最終夢想之旅，環遊世界一圈。所有屬性提升。',
@@ -1483,7 +1485,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'outer',
     cost: 75_000,
     lifeExpGained: 18,
-    salaryPenalty: 0.85,
+    leaveMonths: 0.5,
     hpCost: 5,
     statEffect: { hp: 10 },
     description: '靈峰朝聖，精神深度修復。',
@@ -1495,7 +1497,7 @@ export const TRAVEL_DESTINATIONS: readonly TravelDestination[] = [
     tier: 'outer',
     cost: 150_000,
     lifeExpGained: 20,
-    salaryPenalty: 0.85,
+    leaveMonths: 0.5,
     hpCost: 6,
     statEffect: { fq: 3, unlockEntrepreneur: true },
     description: '走訪創業聖地，可能觸發創業者機會事件。',

@@ -571,7 +571,11 @@ export interface AffordableOption {
 
 export interface ActionTravelInfo {
   id: string; name: string; region: string; tier: string; cost: number; description: string;
-  lifeExp: number; visited: boolean; hpCost: number; salaryPenalty: number;
+  lifeExp: number; visited: boolean; hpCost: number;
+  /** 受僱者要請的假（月） */
+  leaveMonths: number;
+  /** 這位玩家去這裡的請假扣薪（非受僱者為 0） */
+  leaveCost: number;
   statEffect: { nt?: number; fq?: number; sk?: number; hp?: number; legacyScore?: number } | null;
 }
 export interface ActionInsuranceInfo {
@@ -581,6 +585,8 @@ export interface ActionInsuranceInfo {
 export interface ActionInfo {
   travel: ActionTravelInfo[];
   travelMinHp: number;
+  /** 固定班表的在職受僱者：出國要請假扣薪 */
+  travelOnPayroll: boolean;
   social: { cost: number; drsMin: number; drsMax: number; inPeak: boolean; peakStart: number; peakEnd: number; threshold: number; currentDrs: number; active: boolean; minHp: number };
   insurance: { medical: ActionInsuranceInfo; life: ActionInsuranceInfo; property: ActionInsuranceInfo };
   premiumMultiplier: number;
@@ -639,7 +645,7 @@ export interface PaydayFormData {
   stockDCAPortfolioValue: number;
   timeoutMs: number;
   controlledByHost?: boolean;
-  travelDestinations?: Array<{ id: string; name: string; region: string; cost: number; lifeExpGained: number }>;
+  travelDestinations?: Array<{ id: string; name: string; region: string; cost: number; lifeExpGained: number; leaveMonths?: number; leaveCost?: number }>;
   /** 股市內幕（FQ ≥ 7 才會收到）：下一張將觸發的市場行情卡預告 */
   marketTip?: {
     title: string;

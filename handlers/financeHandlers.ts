@@ -8,6 +8,7 @@ import { FRANCHISE_CASH_THRESHOLD, PROFESSIONS } from '../gameConfig';
 import {
   OnSafe, announceCareerUnlock, calcNetWorth, emitCellEvent, emitClient, emitToRoom,
   executeSocialAction, executeTravelAction, getRoomState, logPlayerEvent, playerIdentity, serializeGameState,
+  isActionWindowOpen,
 } from '../socketServer';
 
 export function registerFinanceHandlers(socket: Socket, onSafe: OnSafe): void {
@@ -286,7 +287,7 @@ export function registerFinanceHandlers(socket: Socket, onSafe: OnSafe): void {
       emitClient(socket, 'error', { message: '你已經是加盟主，不能重複申請加盟。' });
       return;
     }
-    if (gs.decisionPhase || gs.facilitatorScene || gs.turnInProgress || gs.globalPaydayInProgress) {
+    if (!isActionWindowOpen(gs)) {
       emitClient(socket, 'error', { message: '請等目前的決策或結算結束後再申請加盟。' });
       return;
     }
@@ -362,7 +363,7 @@ export function registerFinanceHandlers(socket: Socket, onSafe: OnSafe): void {
       emitClient(socket, 'error', { message: '玩家不存在或已出局。' });
       return;
     }
-    if (gs.decisionPhase || gs.facilitatorScene || gs.pausedAt !== null) {
+    if (!isActionWindowOpen(gs)) {
       emitClient(socket, 'error', { message: '決策階段中請先完成目前選擇，主持人揭曉後再行動。' });
       return;
     }
@@ -383,7 +384,7 @@ export function registerFinanceHandlers(socket: Socket, onSafe: OnSafe): void {
       emitClient(socket, 'error', { message: '玩家不存在或已出局。' });
       return;
     }
-    if (gs.decisionPhase || gs.facilitatorScene || gs.pausedAt !== null) {
+    if (!isActionWindowOpen(gs)) {
       emitClient(socket, 'error', { message: '決策階段中請先完成目前選擇，主持人揭曉後再行動。' });
       return;
     }
