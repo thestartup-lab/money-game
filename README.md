@@ -64,6 +64,15 @@ npm run dev
 
 若需要從額外網域連線後端，可用 `ALLOWED_ORIGINS` 設定以逗號分隔的 HTTPS 網址。正式網域、Vercel 預覽網址與本機開發網址已內建允許。
 
+**遊戲進度存檔（伺服器重啟不丟遊戲）**：每個房間在「沒人在行動、沒有決策或舞台」的時候自動存檔；伺服器重開（部署、當機）後會還原、暫停，主持人後台會出現「已還原」提示，玩家手機自動重連，大家回來後按「▶ 繼續」。進行到一半的那一步會回到開始前。
+
+| 變數 | 說明 |
+|---|---|
+| `STATE_DIR` | 存檔資料夾；沒設時用 Railway volume（`RAILWAY_VOLUME_MOUNT_PATH`），再沒有就用 `./data` |
+| `PERSIST_ROOMS` | `1` 在本機也存檔；`0` 關閉。正式環境（Railway）預設開啟，本機與測試預設關閉 |
+
+> Railway 容器的本機硬碟在**重新部署時會被清空**。要跨部署保留存檔，請在 Railway 後端服務加一個 Volume（掛載路徑例如 `/data`），系統會自動使用。`/health` 的 `persistence` 欄位會顯示 `volume`（已跨部署保留）或 `container-disk`（只撐得過程式重啟）。
+
 ### 前端（`frontend/` 目錄）
 
 複製 `frontend/.env.example` 為 `frontend/.env.local` 並填入：
@@ -133,7 +142,17 @@ VITE_SERVER_URL=http://localhost:3001
 
 ```
 money-game/
-├── socketServer.ts      # 主伺服器（Socket.io + 遊戲邏輯）
+├── socketServer.ts      # 主伺服器：連線、房間狀態、回合推進、存檔還原；其他模組的共用函式由這裡統一匯出
+├── handlers/            # 每條連線的事件處理，依功能分檔（房間、回合、財務、轉職、互動、主持人、舞台、復盤…）
+├── landingSquare.ts     # 落在每一種格子的處理
+├── paydayFlow.ts        # 全體發薪：計時、全員規劃、依序結算
+├── decisionPhases.ts    # 主持人控制的決策階段與危機自救
+├── facilitatorScenes.ts # 大螢幕舞台（婚姻、家庭、社區選擇、合作、傳承）
+├── lifeProgress.ts      # 里程碑、第二人生、65 歲轉折、死亡與終局
+├── adaptiveDirector.ts  # 自動導演與世界事件
+├── playerView.ts        # 送給前端的狀態與說明資料
+├── roomPersistence.ts   # 房間存檔格式與讀寫
+├── bondFund.ts / basicInvestments.ts / householdLoans.ts  # 債券基金、基本投資、住房與房貸
 ├── gameDataModels.ts    # 資料模型（Player, GameState 等）
 ├── gameLogic.ts         # 核心邏輯（移動、發薪、年齡計算）
 ├── gameCards.ts         # 棋盤與卡牌定義（含 RelationshipCard）

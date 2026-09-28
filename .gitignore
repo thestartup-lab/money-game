@@ -15,3 +15,7 @@ node_modules/
 
 # 房間存檔（本機測試用；正式環境寫在 Railway volume）
 data/
+
+# 簡報輸出（學員前導說明 pptx 與其建置檔，不進版控）
+outputs/
+.presentation-build/
