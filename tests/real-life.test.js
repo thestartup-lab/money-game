@@ -224,14 +224,14 @@ test('出國請假：固定班表的在職受僱者扣「月薪 × 請假月數�
   const { goTravel, travelLeaveCost, isOnPayrollSchedule } = require('../dist/gameLogic');
   const tokyo = cfg.TRAVEL_DESTINATIONS.find((d) => d.id === 'japan_tokyo');
   const taiwan = cfg.TRAVEL_DESTINATIONS.find((d) => d.id === 'taiwan_cycling');
-  assert.equal(tokyo.leaveMonths, 1.5);
-  assert.equal(taiwan.leaveMonths, 0.5);
+  assert.equal(tokyo.leaveMonths, 1);
+  assert.equal(taiwan.leaveMonths, 0.25);
 
   const teacher = createPlayer('e', '老師', 'teacher');
   teacher.salary = 49_000; teacher.cash = 200_000; teacher.stats.health = 80;
   assert.equal(isOnPayrollSchedule(teacher), true);
   const leave = travelLeaveCost(teacher, tokyo);
-  assert.equal(leave, Math.round(49_000 * 1.5));
+  assert.equal(leave, Math.round(49_000 * 1));
   const r = goTravel(teacher, 'japan_tokyo');
   assert.equal(r.success, true);
   assert.equal(r.leaveCost, leave);
