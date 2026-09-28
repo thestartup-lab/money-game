@@ -36,6 +36,7 @@ import {
   CAPITAL_GAINS_TAX_RATE, NATURAL_DEATH_MIN_AGE, NATURAL_DEATH_BASE_PROBABILITY, NATURAL_DEATH_HP_FACTOR,
 } from './gameConfig';
 import { sellHome } from './householdLoans';
+import { tickVacancies } from './propertyRisks';
 import { applyHouseholdRepayment, isHouseholdAsset } from './householdLoans';
 
 // ============================================================
@@ -246,6 +247,7 @@ export function triggerPayday(player: Player, gameState: GameState, maintenanceD
   // 暫時性狀態逐月遞減：配偶失業、奉養父母等
   if (player.spouse && player.spouse.unemployedMonthsLeft > 0) player.spouse.unemployedMonthsLeft -= 1;
   for (const r of player.recurringExpenses) if (r.monthsLeft > 0) r.monthsLeft -= 1;
+  tickVacancies(player);
   player.recurringExpenses = player.recurringExpenses.filter((r) => r.monthsLeft > 0);
 
   if (growthCycle) {

@@ -146,6 +146,7 @@ import {
 // 各功能模組（handlers/*、landingSquare、paydayFlow…）從這支檔案匯入共用函式；
 // 這裡再把它們匯出的函式重新匯出，讓所有模組都只需要從 socketServer 取用。
 // 模組之間互相引用只在執行期發生（連線事件、回合推進），所以循環引用是安全的。
+import { runAutoHost, AUTO_HOST_TICK_MS } from './autoHost';
 import { registerRoomHandlers } from './handlers/roomHandlers';
 import { registerTurnHandlers } from './handlers/turnHandlers';
 import { registerCareerHandlers } from './handlers/careerHandlers';
@@ -989,6 +990,19 @@ export function getQuarterTravelDestinations(player: Player): Array<{
 export type SecondLifeEntry = { playerId: string; eligibility: ReturnType<typeof evaluateSecondLifeEligibility> };
 export const secondLifeQueue = new WeakMap<GameState, SecondLifeEntry[]>();
 
+
+/** 全自動主持：每秒幫開啟的房間代按繼續（規則見 autoHost.ts） */
+setInterval(() => {
+  for (const gs of rooms.values()) {
+    if (!gs.autoHost) continue;
+    try {
+      const action = runAutoHost(gs);
+      if (action) console.log(`[autoHost] ${gs.gameId}：${action}`);
+    } catch (error) {
+      console.error(`[autoHost] ${gs.gameId} 失敗：`, (error as Error).message);
+    }
+  }
+}, AUTO_HOST_TICK_MS).unref();
 
 /** 空檔時（沒人在行動、沒有決策或舞台）到期就直接發薪；每 5 秒檢查一次。 */
 setInterval(() => {

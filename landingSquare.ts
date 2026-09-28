@@ -5,6 +5,7 @@ import { getLayoffMonths } from './gameLogic';
 import { rollDice, triggerPayday, takeLeverageLoan, getAvailableLoan, getCurrentAge, getLifeStage, applyFastTrackAppreciation, applyFastTrackPaydayBonus } from './gameLogic';
 import { HP_ACTIVITY_THRESHOLDS, CRISIS_FREQ_BY_STAGE, CONSULTANT_SK_RATE, CONSULTANT_NT_RATE } from './gameConfig';
 import { applyHPChange } from './statsSystem';
+import { rollPropertyEvent } from './propertyRisks';
 import { getSquareType, SquareType, DealCard, CharityCard, CHARITY_CARD, getFastTrackSquareType, FastTrackSquareType, FAST_TRACK_BOARD, CRISIS_POOL_BY_STAGE, CRISIS_EVENTS, RELATIONSHIP_EVENTS, BIG_DEALS, MARKET_CARDS, LUCKY_CARDS } from './gameCards';
 import { applyDoodadCard, applyDownsizingCard, applyMarketCard, acceptDealCard, applyCharityDonation, applyCrisisCard, applyRelationshipCard, applyLuckyCard, getCharityDonationAmount } from './cardSystem';
 import {
@@ -388,6 +389,17 @@ export async function handleLandingSquare(
     }
 
     case SquareType.Doodad: {
+      // 有房子的人：有機會改遇到房東的真實風險（空置、大修、調漲租金）
+      const cashBeforeProperty = player.cash; const flowBeforeProperty = player.monthlyCashflow; const worthBeforeProperty = calcNetWorth(player);
+      const propertyEvent = rollPropertyEvent(player);
+      if (propertyEvent) {
+        const icon = propertyEvent.kind === 'rentRaise' ? '📈' : propertyEvent.kind === 'vacancy' ? '🏚️' : '🔧';
+        emitCellEvent(socket, roomId, player.name, '房東的日常', `${icon} ${propertyEvent.title}：${propertyEvent.description}`);
+        emitToRoom(roomId, 'cardApplied', { playerId: player.id, playerName: player.name, squareType, effect: { type: 'propertyEvent', ...propertyEvent } });
+        logPlayerEvent(player, gs, 'property_event', `${propertyEvent.title}（${propertyEvent.assetName}）`, cashBeforeProperty, flowBeforeProperty, worthBeforeProperty,
+          { propertyEvent: propertyEvent.kind, assetId: propertyEvent.assetId, months: propertyEvent.months });
+        break;
+      }
       const card = gs.doodadDeck.draw();
       if (!card) {
         emitCellEvent(socket, roomId, player.name, '意外支出', '✅ 本次意外支出牌庫已空，平安通過。');

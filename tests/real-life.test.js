@@ -184,3 +184,38 @@ test('債券基金：不限額、配息算被動收入、本金不受股市卡�
   assert.equal(p.cash, cashBefore + 4_000_000);
   assert.ok(cfg.BOND_FUND_MONTHLY_YIELD * 12 < 0.11, '報酬低於定期定額');
 });
+
+test('房東風險：空置期間沒有租金且逐月恢復、大修扣房價 2%、租屋族不受影響、自住房也要修', () => {
+  const { rollPropertyEvent, rentalProperties } = require('../dist/propertyRisks');
+  const seq = (...values) => { let i = 0; return () => values[i++ % values.length]; };
+  const p = createPlayer('l', '房東', 'teacher');
+  p.cash = 1_000_000;
+  assert.equal(rollPropertyEvent(p, seq(0)), null, '沒有房子的人不會遇到');
+  p.assets.push({ id: 'r1', name: '出租套房', type: 'RealEstate', cost: 675_000, currentValue: 675_000, monthlyCashflow: 2_500 });
+  assert.equal(rentalProperties(p).length, 1);
+  assert.equal(rollPropertyEvent(p, seq(0.9)), null, '沒擲中就照常抽意外支出卡');
+  const passiveBefore = p.totalPassiveIncome;
+  // 擲中（0）→ 事件類型 0.1（空置）→ 選第一間（0）
+  const vacancy = rollPropertyEvent(p, seq(0, 0.1, 0));
+  assert.equal(vacancy.kind, 'vacancy');
+  assert.equal(p.totalPassiveIncome, passiveBefore - 2_500, '空置時被動收入少了這間的租金');
+  const game = new GameState('L');
+  for (let m = 0; m < cfg.PROPERTY_VACANCY_MONTHS; m++) triggerPayday(p, game, false, false);
+  assert.equal(p.totalPassiveIncome, passiveBefore, '空置期滿恢復租金');
+  // 大修：事件類型 0.5
+  const cashBefore = p.cash;
+  const repair = rollPropertyEvent(p, seq(0, 0.5, 0));
+  assert.equal(repair.kind, 'repair');
+  assert.equal(p.cash, cashBefore - Math.max(cfg.PROPERTY_REPAIR_MIN, Math.round(675_000 * cfg.PROPERTY_REPAIR_RATE)));
+  // 調漲租金：事件類型 0.9
+  const raise = rollPropertyEvent(p, seq(0, 0.9, 0));
+  assert.equal(raise.kind, 'rentRaise');
+  assert.equal(p.assets.find((a) => a.id === 'r1').monthlyCashflow, 2_500 + Math.round(2_500 * cfg.PROPERTY_RENT_RAISE_RATE));
+  // 自住房也要修，但不會空置或調漲
+  const owner = createPlayer('o', '屋主', 'teacher');
+  owner.cash = 500_000;
+  owner.assets.push({ id: 'home-o', name: '自住房', type: 'RealEstate', cost: 3_000_000, currentValue: 3_000_000, monthlyCashflow: 0, isResidence: true });
+  const homeRepair = rollPropertyEvent(owner, seq(0, 0.1, 0));
+  assert.equal(homeRepair.kind, 'repair');
+  assert.equal(owner.cash, 500_000 - 60_000);
+});

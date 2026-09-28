@@ -380,7 +380,7 @@ export default function HostControlPage() {
               ))}
               <button onClick={() => emit('setDecisionReminder', { phaseId: decisionPhase.id, addSeconds: 30 })}>+30 秒</button>
             </div>
-            <p className="host-help">倒數歸零只會提醒，不會替玩家做決定。</p>
+            <p className="host-help">{gameState?.autoHost ? '🤖 全自動主持中：倒數歸零會自動收束（沒送出的視為放棄）。' : '倒數歸零只會提醒，不會替玩家做決定。'}</p>
             {decisionPhase.kind === 'auction' ? (
               <div className="host-bid-list">
                 {(gameState?.activeAuctions ?? []).map((auction) => (
@@ -460,6 +460,13 @@ export default function HostControlPage() {
               <button className="host-pause-button" onClick={() => emit('pauseGame', { reason: '主持人手機暫停' })}>⏸ 暫停遊戲</button>
             )
           ) : null}
+          {isRunning ? (
+            <button className={gameState?.autoHost ? 'host-primary-button' : 'host-secondary-button'}
+              onClick={() => emit('setAutoHost', { enabled: !gameState?.autoHost })}>
+              {gameState?.autoHost ? '🤖 全自動主持中（點此改回手動）' : '🤖 開啟全自動主持'}
+            </button>
+          ) : null}
+          {gameState?.autoHost ? <p className="host-help">倒數結束自動繼續、系統舞台自動揭曉；你按暫停時不會動作。</p> : null}
           {canSkipTurn ? (
             <button
               className="host-secondary-button"

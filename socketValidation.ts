@@ -13,7 +13,7 @@ const required: Record<string, string[]> = {
   triggerRelationship: ['targetPlayerId'], setPlayerStats: ['targetPlayerId', 'stats'], goTravel: ['destinationId'],
   submitCardDecision: ['phaseId'], submitPaydayPlan: ['phaseId'],
   startCareerScene: ['requestId'], cancelCareerRequest: ['requestId'],
-  confirmCareerScene: ['sceneId', 'accepted'], buyHome: ['optionId'], investBond: ['amount'], setMonthsPerRound: ['months'],
+  confirmCareerScene: ['sceneId', 'accepted'], buyHome: ['optionId'], investBond: ['amount'], setAutoHost: ['enabled'], setMonthsPerRound: ['months'],
 };
 const numeric = new Set(['amount', 'monthlyRate', 'bidAmount', 'academic', 'health', 'social', 'resource',
   'seconds', 'addSeconds', 'durationMinutes', 'diceCount', 'cash', 'hp', 'mp', 'fq', 'creditScore', 'basicInvestmentQuantity', 'minutes', 'startupAmount', 'months']);

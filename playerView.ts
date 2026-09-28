@@ -173,8 +173,9 @@ export function serializePlayer(p: Player, gs: GameState): object {
   for (const a of positiveAssets) {
     const worldFactor = p.worldEffects.reduce((factor, entry) =>
       entry.effect.type === 'CashflowChange' && entry.effect.targetAssetType === a.type ? factor * (entry.effect.multiplier ?? 1) : factor, 1);
-    incomeItems.push({ label: a.name, amount: Math.round(a.monthlyCashflow * worldFactor),
-      note: worldFactor !== 1 ? `世界事件 ×${worldFactor.toFixed(2)}` : undefined });
+    const vacant = (a.vacantMonthsLeft ?? 0) > 0;
+    incomeItems.push({ label: a.name, amount: vacant ? 0 : Math.round(a.monthlyCashflow * worldFactor),
+      note: vacant ? `空置中，還要 ${a.vacantMonthsLeft} 個月才有新租客（原租金 $${a.monthlyCashflow.toLocaleString()}）` : worldFactor !== 1 ? `世界事件 ×${worldFactor.toFixed(2)}` : undefined });
   }
   const passiveMultiplier = fqMultiplier * ftMultiplier;
   if (passiveMultiplier !== 1 && p.totalPassiveIncome > 0) {
@@ -351,6 +352,7 @@ export function serializeGameState(gs: GameState): object {
     restoredAt: gs.restoredAt,
     monthsPerRound: gs.monthsPerRound || MONTHS_PER_ROUND,
     autoRevealOnSubmit: gs.autoRevealOnSubmit,
+    autoHost: gs.autoHost,
     actionPhaseDone: gs.decisionPhase?.playerId === '__all_players__' && (gs.decisionPhase.kind === 'actions' || gs.decisionPhase.kind === 'payday') ? [...gs.actionPhaseDone] : [],
     actionPhaseEnabled: gs.actionPhaseEnabled,
     activeAuctions: Object.entries(gs.activeAuctions ?? {}).map(([auctionId, a]) => ({

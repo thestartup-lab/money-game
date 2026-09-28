@@ -1603,3 +1603,13 @@ export const NATURAL_DEATH_HP_FACTOR = 0.0025;
 /** 奉養父母：成家／轉型期危機池的父母事件 */
 export const PARENT_CARE_MONTHS = 24;
 export const PARENT_CARE_FAMILY_SUPPORT_NT = 5;
+
+/** 房東風險：落在意外支出格時，有房產者 45% 改抽房東事件 */
+export const PROPERTY_EVENT_CHANCE = 0.45;
+/** 租客退租後空置的結算月數 */
+export const PROPERTY_VACANCY_MONTHS = 6;
+/** 大修費用 = 房價 × 2%，至少 $20,000 */
+export const PROPERTY_REPAIR_RATE = 0.02;
+export const PROPERTY_REPAIR_MIN = 20_000;
+/** 續約調漲租金 5% */
+export const PROPERTY_RENT_RAISE_RATE = 0.05;

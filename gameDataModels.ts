@@ -143,6 +143,8 @@ export interface Asset {
   linkedLiabilityId?: string;
   /** 自住房：不算被動收入、不配息、出售免資本利得稅 */
   isResidence?: boolean;
+  /** 出租房空置剩餘結算月數；空置期間沒有租金 */
+  vacantMonthsLeft?: number;
 }
 
 /** 負債 */
@@ -356,6 +358,7 @@ export type PlayerEventType =
   | 'bucket_goal_achieved'
   | 'life_milestone'
   | 'lucky_card'
+  | 'property_event'
   | 'community_choice'
   | 'decision_echo'
   | 'cooperation'
@@ -764,7 +767,7 @@ export class Player {
   /** 所有資產的每月現金流總和 */
   get totalPassiveIncome(): number {
     return this.assets.reduce((sum, asset) => {
-      if (asset.isResidence) return sum;
+      if (asset.isResidence || (asset.vacantMonthsLeft ?? 0) > 0) return sum;
       const multiplier = this.worldEffects.reduce((factor, entry) =>
         entry.effect.type === 'CashflowChange' && entry.effect.targetAssetType === asset.type
           ? factor * (entry.effect.multiplier ?? 1) : factor, 1);
@@ -856,6 +859,8 @@ export class GameState {
   readingAutoContinueMs = 10_000;
   /** 玩家送出選擇後是否自動揭曉（不必等主持人按）；競標仍由主持人結束。 */
   autoRevealOnSubmit = true;
+  /** 全自動主持：系統代按繼續、揭曉舞台、開轉職（見 autoHost.ts） */
+  autoHost = false;
   /** 已跑過「全體行動時間」的輪數（turnNumber）；每輪開始只跑一次 */
   /** 每輪開始是否開「全體行動時間」（主持人可關） */
   actionPhaseEnabled = true;

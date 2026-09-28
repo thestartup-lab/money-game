@@ -1,5 +1,6 @@
 /** 轉職申請與舞台、65 歲人生轉折（由 socketServer 註冊到每條連線） */
 import type { Socket } from 'socket.io';
+import type { GameState } from '../gameDataModels';
 import { randomBytes } from 'crypto';
 import { GamePhase } from '../gameDataModels';
 import { previewCareerChange } from '../careerStage';
@@ -50,26 +51,7 @@ export function registerCareerHandlers(socket: Socket, onSafe: OnSafe): void {
   onSafe('startCareerScene', (payload: { requestId: string }) => {
     const gs = getRoomState(socket);
     if (!gs || !isRoomAdmin(socket, gs)) { emitClient(socket, 'error', { message: '只有主持人可以開啟轉職舞台。' }); return; }
-    if (![GamePhase.RatRace, GamePhase.FastTrack].includes(gs.gamePhase) || gs.turnInProgress || gs.decisionPhase || gs.facilitatorScene || gs.globalPaydayPending || gs.globalPaydayInProgress) {
-      emitClient(socket, 'error', { message: '請先完成目前回合、舞台或全體發薪，再開啟轉職。' }); return;
-    }
-    gs.careerRequests = gs.careerRequests.filter(r => gs.players.get(r.playerId)?.isAlive);
-    const request = gs.careerRequests[0];
-    if (!request || request.id !== payload.requestId) { emitClient(socket, 'error', { message: '請依申請順序開啟舞台。' }); return; }
-    const player = gs.players.get(request.playerId);
-    const preview = player && previewCareerChange(player, request.professionId);
-    if (!player || !preview || preview.error) {
-      gs.careerRequests.shift();
-      emitClient(socket, 'error', { message: preview?.error ?? '申請者已離開。' });
-      emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs)); return;
-    }
-    gs.careerRequests.shift();
-    beginFacilitatorScene(gs, {
-      kind: 'career', kicker: '人生職涯轉折', title: `${player.name} 的轉職選擇`,
-      description: preview.description!, participantNames: [player.name],
-      careerPlayerId: player.id, careerConfirmed: false,
-      reminderEndsAt: Date.now() + 60_000, options: [],
-    }, { playerId: player.id, professionId: request.professionId, previewDescription: preview.description });
+    openCareerScene(gs, payload.requestId, (message) => emitClient(socket, 'error', { message }));
   });
 
   onSafe('confirmCareerScene', (payload: { sceneId: string; accepted: boolean }) => {
@@ -112,4 +94,29 @@ export function registerCareerHandlers(socket: Socket, onSafe: OnSafe): void {
     scene.options = [{ id: 'reveal', label: `本人已選：${labels[choice]}・揭曉`, description: '正式套用選擇，再由主持人繼續遊戲。' }];
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
+}
+
+/** 依申請順序開啟轉職舞台（主持人按鈕與自動主持共用）。 */
+export function openCareerScene(gs: GameState, requestId: string, fail: (message: string) => void): boolean {
+  if (![GamePhase.RatRace, GamePhase.FastTrack].includes(gs.gamePhase) || gs.turnInProgress || gs.decisionPhase || gs.facilitatorScene || gs.globalPaydayPending || gs.globalPaydayInProgress) {
+    fail('請先完成目前回合、舞台或全體發薪，再開啟轉職。'); return false;
+  }
+  gs.careerRequests = gs.careerRequests.filter(r => gs.players.get(r.playerId)?.isAlive);
+  const request = gs.careerRequests[0];
+  if (!request || request.id !== requestId) { fail('請依申請順序開啟舞台。'); return false; }
+  const player = gs.players.get(request.playerId);
+  const preview = player && previewCareerChange(player, request.professionId);
+  if (!player || !preview || preview.error) {
+    gs.careerRequests.shift();
+    fail(preview?.error ?? '申請者已離開。');
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs)); return false;
+  }
+  gs.careerRequests.shift();
+  beginFacilitatorScene(gs, {
+    kind: 'career', kicker: '人生職涯轉折', title: `${player.name} 的轉職選擇`,
+    description: preview.description!, participantNames: [player.name],
+    careerPlayerId: player.id, careerConfirmed: false,
+    reminderEndsAt: Date.now() + 60_000, options: [],
+  }, { playerId: player.id, professionId: request.professionId, previewDescription: preview.description });
+  return true;
 }

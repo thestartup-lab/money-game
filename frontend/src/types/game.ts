@@ -33,6 +33,9 @@ export interface Asset {
   downPayment?: number;
   monthlyCashflow: number;
   linkedLiabilityId?: string;
+  /** 出租房空置剩餘月數 */
+  vacantMonthsLeft?: number;
+  isResidence?: boolean;
 }
 
 export interface Liability {
@@ -274,6 +277,8 @@ export interface GameState {
   restoredAt?: string | null;
   /** 玩家送出選擇後自動揭曉（預設開） */
   autoRevealOnSubmit?: boolean;
+  /** 全自動主持 */
+  autoHost?: boolean;
   /** 全體行動時間已按完成的玩家 */
   actionPhaseDone?: string[];
   actionPhaseEnabled?: boolean;

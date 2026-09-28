@@ -40,6 +40,17 @@ export function registerHostHandlers(socket: Socket, onSafe: OnSafe): void {
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 
+  // 全自動主持 (setAutoHost)
+  onSafe('setAutoHost', (payload: { enabled: boolean }) => {
+    const gs = getRoomState(socket);
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    if (!isRoomAdmin(socket, gs)) { emitClient(socket, 'error', { message: '只有管理員可以切換自動主持。' }); return; }
+    gs.autoHost = payload.enabled === true;
+    console.log(`[setAutoHost] 房間 ${gs.gameId} 全自動主持：${gs.autoHost ? '開' : '關'}`);
+    emitToRoom(gs.gameId, 'notification', { message: gs.autoHost ? '🤖 已開啟全自動主持：倒數結束會自動繼續，舞台會自動揭曉。' : '🎙 已改回主持人控制。' });
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
   onSafe('startGame', (payload?: { durationMinutes?: number; force?: boolean }) => {
     const gs = getRoomState(socket);
     if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }

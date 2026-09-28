@@ -608,7 +608,7 @@ export default function AdminPage() {
                   </button>
                 </div>
                 <p className="text-xs leading-relaxed text-indigo-300">
-                  倒數只提醒節奏，不會自動送出。可以依本次發薪日內容加時，最後由你統一結束並揭曉。
+                  {gameState?.autoHost ? '🤖 全自動主持中：倒數歸零會自動收束（沒送出的用空白方案或視為放棄）。要自己控制請先關閉全自動主持。' : '倒數只提醒節奏，不會自動送出。可以依本次發薪日內容加時，最後由你統一結束並揭曉。'}
                 </p>
                 <button
                   className="w-full rounded-xl bg-indigo-500 px-4 py-3 text-base font-black text-white transition-colors hover:bg-indigo-400"
@@ -650,6 +650,14 @@ export default function AdminPage() {
                   >{gameState?.autoRevealOnSubmit !== false ? '開啟中（點此改為手動揭曉）' : '關閉中（點此開啟）'}</button>
                 </div>
                 <p className="mt-1 text-[11px] text-gray-500">開啟時玩家一送出就在 1.5 秒後揭曉；競標仍由你按「結束競標」。</p>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="font-bold text-gray-200">🤖 全自動主持</span>
+                  <button
+                    className={`rounded-lg px-2 py-1 font-bold ${gameState?.autoHost ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+                    onClick={() => emit('setAutoHost', { enabled: !gameState?.autoHost })}
+                  >{gameState?.autoHost ? '開啟中（點此改回手動）' : '關閉中（點此開啟）'}</button>
+                </div>
+                <p className="mt-1 text-[11px] text-gray-500">適合小場次：倒數結束自動收束決策與競標、系統舞台停留 8 秒後自動揭曉、結果 8 秒後關閉、轉職申請自動依序開啟。轉職與 65 歲轉折仍等本人選，逾時轉職取消、轉折預設退休。你自己開的舞台（全場抉擇、合作、傳承）與暫停仍由你控制。</p>
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <span className="font-bold text-gray-200">每輪開始的全體行動時間</span>
                   <button

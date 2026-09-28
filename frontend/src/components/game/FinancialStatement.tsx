@@ -56,8 +56,8 @@ export default function FinancialStatement({ player, onShowCash, onShowFlow, onS
           <div className="space-y-1">
             {player.assets.map((a) => (
               <div key={a.id} className="flex justify-between text-sm">
-                <span className="text-gray-300 truncate max-w-[60%]">{a.name}</span>
-                <span className={cls(a.monthlyCashflow)}>{sign(a.monthlyCashflow)}/月</span>
+                <span className="text-gray-300 truncate max-w-[60%]">{a.name}{(a.vacantMonthsLeft ?? 0) > 0 && <span className="ml-1 text-xs text-amber-300">空置 {a.vacantMonthsLeft} 月</span>}</span>
+                <span className={(a.vacantMonthsLeft ?? 0) > 0 ? 'text-gray-500 line-through' : cls(a.monthlyCashflow)}>{sign(a.monthlyCashflow)}/月</span>
               </div>
             ))}
           </div>

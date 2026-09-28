@@ -91,7 +91,7 @@ export default function MoneyDetailSheet({ player, mode, onClose }: Props) {
               {(player.assets ?? []).filter((a) => a.monthlyCashflow !== 0).length === 0 && <p className="text-gray-400">還沒有會產生現金流的資產。交易卡、基本投資、定期定額配息、租金都算被動收入。</p>}
               {(player.assets ?? []).filter((a) => a.monthlyCashflow !== 0).map((a) => (
                 <div key={a.id} className="flex justify-between py-0.5">
-                  <span className="text-gray-200">{a.name}<span className="block text-[11px] text-gray-500">市值 ${fmt(a.currentValue ?? a.cost)}</span></span>
+                  <span className="text-gray-200">{a.name}<span className="block text-[11px] text-gray-500">市值 ${fmt(a.currentValue ?? a.cost)}{(a.vacantMonthsLeft ?? 0) > 0 ? `；空置中，還要 ${a.vacantMonthsLeft} 個月才有租金` : ''}</span></span>
                   <span className={a.monthlyCashflow >= 0 ? 'text-emerald-200' : 'text-red-200'}>{signed(a.monthlyCashflow)}/月</span>
                 </div>
               ))}
