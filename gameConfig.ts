@@ -1141,6 +1141,19 @@ export const LIFE_SCORE_WEIGHTS = {
  */
 export const LEGACY_FULL_SCORE_AMOUNT = 1_500_000;
 
+/**
+ * 人生評分改看「比例」，跟金額大小與每輪結算月數無關：
+ * - 淨資產／遺產：能支付幾個月生活費；滿分 = 25 輪的結算月數（每輪 24 個月時是 600 個月）
+ * - 被動收入：有效被動收入 ÷ 月支出；2 倍滿分
+ */
+export const SCORE_RUNWAY_FULL_ROUNDS = 25;
+export const SCORE_PASSIVE_COVERAGE_FULL = 2;
+/** 成就門檻：智慧投資 = 滿分生活費的一半；被動收入王 = 1.5 倍支出 */
+export const ACHIEVEMENT_RUNWAY_SHARE = 0.5;
+export const ACHIEVEMENT_PASSIVE_COVERAGE = 1.5;
+/** 人脈自然成長上限；再往上要靠投資人脈、旅遊、人際事件 */
+export const NETWORK_AUTO_GROWTH_CAP = 6;
+
 // =============================================================================
 // HP 老化與旅遊系統
 // =============================================================================

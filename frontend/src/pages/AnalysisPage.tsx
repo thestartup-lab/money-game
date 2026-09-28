@@ -3,15 +3,10 @@ import LifeTimeline from '../components/analysis/LifeTimeline';
 import FinalScoreRadar from '../components/analysis/FinalScoreRadar';
 import DecisionImpactCard from '../components/analysis/DecisionImpactCard';
 import VictoryRouteReview from '../components/analysis/VictoryRouteReview';
+import { EVENT_ICONS } from '../components/analysis/eventMeta';
 
 interface Props { analysis: PlayerAnalysis }
 
-const EVENT_ICONS: Record<string, string> = {
-  asset_buy: '🏠', asset_sell: '💰', travel: '✈️',
-  marriage: '💑', child: '👶', crisis: '⚠️',
-  career_change: '🔄', education: '🎓', rat_race_escaped: '🚀',
-  payday: '💵', loan_taken: '🏦', bedridden: '🛏', death: '⚰️',
-};
 
 const GRADE_CONFIG: Record<string, { label: string; color: string; bg: string; border: string }> = {
   S: { label: '百歲智者', color: 'text-yellow-300', bg: 'bg-yellow-950',  border: 'border-yellow-600' },

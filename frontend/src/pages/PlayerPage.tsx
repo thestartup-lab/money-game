@@ -260,7 +260,7 @@ export default function PlayerPage() {
         };
       });
       const amIInGame = gs.players.some((p) => p.id === playerIdRef.current);
-      if (gs.gamePhase === 'GameOver' && amIInGame) setView('gameover');
+      if (gs.gamePhase === 'GameOver' && amIInGame) setView((v) => v === 'analysis' ? v : 'gameover');
       else if (amIInGame && gs.gamePhase === 'Pre20') setView((v) => v === 'join' ? 'pre20' : v);
       else if (amIInGame && ['RatRace', 'FastTrack'].includes(gs.gamePhase)) setView((v) => (v === 'pre20' || v === 'join') ? 'game' : v);
       // 輪到自己時解除擲骰鎖定（以防 rollResult 沒有正確觸發）
@@ -1590,6 +1590,19 @@ export default function PlayerPage() {
           ← 返回
         </button>
         <AnalysisPage analysis={analysis} />
+      </div>
+    );
+  }
+  if (view === 'analysis') {
+    // 分析還沒回來（或伺服器回錯誤）：給返回與重試，不要卡在載入中
+    return (
+      <div className="senior-mobile min-h-screen flex flex-col items-center justify-center gap-3 text-gray-300 p-6 text-center">
+        <div>正在整理你的人生分析…</div>
+        <div className="text-xs text-gray-500">等太久沒出現，可以按重試；也可以先返回。</div>
+        <div className="flex gap-2">
+          <button className="btn-secondary text-sm" onClick={() => setView(isGameOver ? 'gameover' : 'game')}>← 返回</button>
+          <button className="btn-primary text-sm" onClick={() => emit('requestPlayerAnalysis')}>重試</button>
+        </div>
       </div>
     );
   }

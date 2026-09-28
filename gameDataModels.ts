@@ -366,7 +366,9 @@ export type PlayerEventType =
   | 'community_choice'
   | 'decision_echo'
   | 'cooperation'
-  | 'legacy';
+  | 'legacy'
+  | 'payday_plan'
+  | 'insurance';
 
 /**
  * 記錄玩家人生中每個關鍵決策與事件的快照。

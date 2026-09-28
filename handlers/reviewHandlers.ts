@@ -48,7 +48,7 @@ export function registerReviewHandlers(socket: Socket, onSafe: OnSafe): void {
     const travelCount = eventLog.filter((e) => e.type === 'travel').length;
     const paydayCount = eventLog.filter((e) => e.type === 'payday').length;
     const firstAssetAge = eventLog.find((e) =>
-      e.type === 'asset_buy' &&
+      (e.type === 'asset_buy' || e.type === 'payday_plan') &&
       (e.cashflowAfter > e.cashflowBefore || Number(e.meta?.monthlyCashflow ?? 0) > 0)
     )?.age ?? null;
     const escapeAge = eventLog.find((e) => e.type === 'rat_race_escaped')?.age ?? null;
@@ -76,7 +76,7 @@ export function registerReviewHandlers(socket: Socket, onSafe: OnSafe): void {
     const deathAge = target.isAlive
       ? Math.round(getCurrentAge(gs))
       : (eventLog.find((e) => e.type === 'death')?.age ?? Math.round(getCurrentAge(gs)));
-    const finalScore = calculateLifeScore(target, deathAge);
+    const finalScore = calculateLifeScore(target, deathAge, gs.monthsPerRound);
 
     emitClient(socket, 'playerAnalysis', {
       playerId: target.id,
@@ -162,7 +162,7 @@ export function registerReviewHandlers(socket: Socket, onSafe: OnSafe): void {
 
     const players = Array.from(gs.players.values()).map((p) => {
       const deathAge = p.isAlive ? currentAge : (p.eventLog.find((e) => e.type === 'death')?.age ?? currentAge);
-      const score = calculateLifeScore(p, deathAge);
+      const score = calculateLifeScore(p, deathAge, gs.monthsPerRound);
       return {
         playerId: p.id,
         playerName: p.name,
@@ -182,7 +182,7 @@ export function registerReviewHandlers(socket: Socket, onSafe: OnSafe): void {
         finalNetwork: p.stats.network,
         insuranceCount: Object.values(p.insurance).filter(Boolean).length,
         firstAssetAge: p.eventLog.find((e) =>
-          e.type === 'asset_buy' &&
+          (e.type === 'asset_buy' || e.type === 'payday_plan') &&
           (e.cashflowAfter > e.cashflowBefore || Number(e.meta?.monthlyCashflow ?? 0) > 0)
         )?.age ?? null,
         escapeAge: p.eventLog.find((e) => e.type === 'rat_race_escaped')?.age ?? null,
@@ -192,7 +192,7 @@ export function registerReviewHandlers(socket: Socket, onSafe: OnSafe): void {
           .filter((e) => e.type === 'payday')
           .map((e) => ({ age: e.age, cashflow: e.cashflowAfter, netWorth: e.netWorthAfter })),
         eventLog: p.eventLog
-          .filter((e) => ['asset_buy','asset_sell','travel','marriage','child','crisis','career_change','education','rat_race_escaped','loan_taken','franchise','relationship','community_choice','decision_echo','cooperation','legacy','global_event'].includes(e.type))
+          .filter((e) => ['asset_buy','asset_sell','travel','marriage','child','crisis','career_change','education','rat_race_escaped','loan_taken','franchise','relationship','community_choice','decision_echo','cooperation','legacy','global_event','payday_plan','insurance','property_event','bucket_goal_achieved','life_milestone'].includes(e.type))
           .map((e) => ({
             age: e.age,
             type: e.type,

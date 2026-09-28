@@ -1,17 +1,10 @@
 import type { RoomPlayerSummary } from '../../types/game';
+import { EVENT_ICONS } from './eventMeta';
 
 interface Props {
   analysis: { roomId: string; players: RoomPlayerSummary[]; currentAge: number };
 }
 
-const EVENT_ICONS: Record<string, string> = {
-  global_event: '🌍',
-  asset_buy: '🏠', asset_sell: '💰', travel: '✈️',
-  marriage: '💑', child: '👶', crisis: '⚠️',
-  career_change: '🔄', education: '🎓', rat_race_escaped: '🚀',
-  loan_taken: '🏦', franchise: '🏪', relationship: '🤝',
-  community_choice: '🗳️', decision_echo: '🔁', cooperation: '🤝', legacy: '🌟',
-};
 
 const EVENT_COLORS: Record<string, string> = {
   global_event: 'border-orange-600 bg-orange-950',

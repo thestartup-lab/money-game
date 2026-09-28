@@ -11,6 +11,7 @@ import {
   SKILL_TRAINING_GAIN,
   SKILL_CAREER_CHANGE_THRESHOLD,
   NETWORK_AUTO_GAIN_INTERVAL,
+  NETWORK_AUTO_GROWTH_CAP,
   NETWORK_INVEST_COST,
   NETWORK_INVEST_GAIN,
   STOCK_DCA_MONTHLY_RETURN_RATE,
@@ -353,7 +354,8 @@ export function applyHPChange(player: Player, delta: number): boolean {
  * @param player 玩家物件（直接修改 stats.network）
  */
 export function applyNTAutoGrowth(player: Player, growthCount = player.paydayCount): void {
-  const ntCap = player.profession.salaryType === 'nt_driven' ? Infinity : 10;
+  // 自然成長只到 NETWORK_AUTO_GROWTH_CAP，更高要主動經營
+  const ntCap = NETWORK_AUTO_GROWTH_CAP;
   if (
     growthCount > 0 &&
     growthCount % NETWORK_AUTO_GAIN_INTERVAL === 0 &&

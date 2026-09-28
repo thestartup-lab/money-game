@@ -112,12 +112,22 @@ test('慈善以薪資或被動收入較高者計算；人生評分計入現金�
   investor.salary = 0;
   assert.ok(getCharityDonationAmount(investor, CHARITY_CARD) > 0);
 
+  // 評分看比例：淨資產能支付的生活費月數（每輪 24 個月時 600 個月滿分）、被動收入 ÷ 支出（2 倍滿分）
   const rich = createPlayer('r', '有錢人', 'teacher');
-  rich.cash = 5000000; rich.assets = []; rich.liabilities = [];
+  rich.assets = []; rich.liabilities = [];
   rich.isMarried = true; rich.numberOfChildren = 3;
-  const score = calculateLifeScore(rich, 100);
+  rich.cash = rich.totalExpenses * 600;
+  const score = calculateLifeScore(rich, 100, 24);
   assert.equal(score.netWorth, 100);
+  assert.equal(score.runwayTarget, 600);
   assert.equal(score.family, 100);
+  rich.cash = rich.totalExpenses * 300;
+  assert.equal(calculateLifeScore(rich, 100, 24).netWorth, 50, '一半生活費月數 = 50 分');
+  assert.equal(calculateLifeScore(rich, 100, 12).netWorth, 100, '每輪 12 個月時滿分門檻減半');
+  rich.assets = [{ id: 'x', name: '收租', type: 'RealEstate', cost: 1, currentValue: 0, monthlyCashflow: rich.totalExpenses * 2 }];
+  const withPassive = calculateLifeScore(rich, 100, 24);
+  assert.ok(withPassive.passiveIncome >= 100 && withPassive.passiveCoverage >= 2, '被動收入是支出兩倍 = 滿分');
+  assert.ok(withPassive.achievements.includes('被動收入王'));
 });
 
 test('卡牌決策允許 null 的 Id 代表略過，其他事件仍拒絕', () => {

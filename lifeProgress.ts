@@ -226,7 +226,7 @@ export function eliminatePlayer(
     { cause, deathAge },
   );
 
-  const finalScore = calculateLifeScore(player, deathAge);
+  const finalScore = calculateLifeScore(player, deathAge, gs.monthsPerRound);
   const deathEvent = player.eventLog[player.eventLog.length - 1];
   if (deathEvent?.type === 'death') deathEvent.meta = { ...deathEvent.meta, finalScore };
   handlePlayerDeath(player, gs);
@@ -284,7 +284,7 @@ export function finishGame(gs: GameState, reason: 'finalRoundComplete' | 'allPla
       playerId: player.id,
       playerName: player.name,
       deathAge,
-      score: !player.isAlive && frozenScore ? frozenScore : calculateLifeScore(player, deathAge),
+      score: !player.isAlive && frozenScore ? frozenScore : calculateLifeScore(player, deathAge, gs.monthsPerRound),
       isAlive: player.isAlive,
       profession: player.profession.name,
       quadrant: player.profession.quadrant,

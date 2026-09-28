@@ -9,7 +9,9 @@ export type PlayerEventType =
   | 'travel' | 'marriage' | 'child' | 'crisis'
   | 'career_change' | 'education' | 'rat_race_escaped'
   | 'loan_taken' | 'loan_repaid' | 'bedridden' | 'relationship' | 'death'
-  | 'community_choice' | 'decision_echo' | 'cooperation' | 'legacy';
+  | 'community_choice' | 'decision_echo' | 'cooperation' | 'legacy'
+  | 'franchise' | 'bucket_goal_achieved' | 'life_milestone' | 'lucky_card' | 'property_event'
+  | 'payday_plan' | 'insurance';
 
 export interface PlayerEvent {
   age: number;

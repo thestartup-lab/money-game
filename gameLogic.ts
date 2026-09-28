@@ -22,7 +22,7 @@ import {
   ARRANGED_MARRIAGE_BASE_COST, ARRANGED_MARRIAGE_COST_STEP, ARRANGED_MARRIAGE_MAX_COST,
   MARRIAGE_BONUS_BY_TYPE,
   LIFE_EVENT_WINDOWS,
-  LEGACY_FULL_SCORE_AMOUNT,
+  LEGACY_FULL_SCORE_AMOUNT, FQ_MULTIPLIERS, SCORE_RUNWAY_FULL_ROUNDS, SCORE_PASSIVE_COVERAGE_FULL, ACHIEVEMENT_RUNWAY_SHARE, ACHIEVEMENT_PASSIVE_COVERAGE, MONTHS_PER_ROUND,
   TRAVEL_DESTINATIONS,
 } from './gameConfig';
 import { FAST_TRACK_BOARD, FAST_TRACK_PAYDAY_LOCATIONS } from './gameCards';
@@ -1041,6 +1041,10 @@ export interface LifeScoreBreakdown {
   total:               number;
   grade:               string;
   achievements:        string[];
+  /** 評分依據（復盤說明用）：淨資產可支付的生活費月數、滿分月數、被動收入覆蓋倍數 */
+  runwayMonths?:       number;
+  runwayTarget?:       number;
+  passiveCoverage?:    number;
 }
 
 /**
@@ -1060,11 +1064,18 @@ export interface LifeScoreBreakdown {
  * @param player   結算玩家
  * @param deathAge 玩家死亡或遊戲結束時的年齡
  */
-export function calculateLifeScore(player: Player, deathAge: number): LifeScoreBreakdown {
+export function calculateLifeScore(player: Player, deathAge: number, monthsPerRound: number = MONTHS_PER_ROUND): LifeScoreBreakdown {
   const totalDebt = player.liabilities.reduce((s, l) => s + l.totalDebt, 0);
   const totalAssetValue = player.assets.reduce((s, a) => s + a.currentValue, 0);
   // 淨值含現金，與 calcNetWorth / 願望清單一致
   const netWorth = totalAssetValue + player.cash - totalDebt;
+
+  // 比例基準：月支出與「滿分生活費月數」（隨每輪結算月數調整）
+  const monthlyExpenses = Math.max(1, player.totalExpenses);
+  const runwayTarget = SCORE_RUNWAY_FULL_ROUNDS * Math.max(1, monthsPerRound);
+  const runwayMonths = Math.max(0, netWorth) / monthlyExpenses;
+  const effectivePassive = Math.max(0, player.totalPassiveIncome) * (FQ_MULTIPLIERS[player.stats.financialIQ] ?? 1);
+  const passiveCoverage = effectivePassive / monthlyExpenses;
 
   // 傳承分：死後淨遺產（壽險可抵消負債）
   let netEstate: number;
@@ -1078,7 +1089,7 @@ export function calculateLifeScore(player: Player, deathAge: number): LifeScoreB
   if (player.numberOfChildren === 0) {
     legacyRaw = 50;
   } else {
-    legacyRaw = Math.min(100, Math.max(0, (netEstate / LEGACY_FULL_SCORE_AMOUNT) * 100));
+    legacyRaw = Math.min(100, Math.max(0, (netEstate / monthlyExpenses / runwayTarget) * 100));
   }
   // 慈善累積加成：每 $100K +5 點傳承（最多 +30）
   const charityBonus = Math.min(30, Math.floor((player.charityTotal ?? 0) / 100_000) * 5);
@@ -1087,9 +1098,9 @@ export function calculateLifeScore(player: Player, deathAge: number): LifeScoreB
   legacyRaw = Math.min(100, Math.max(0, legacyRaw + charityBonus + eventBonus));
 
   // ── 7 維度原始分（0–100）──
-  // 數值已放大 15 倍：淨值 $1,500,000 = 100 分；年被動收入 $750,000（月 $62,500）= 100 分
-  const netWorth_raw        = Math.min(100, Math.max(0, netWorth / 15_000));
-  const passiveIncome_raw   = Math.min(100, Math.max(0, (player.totalPassiveIncome * 12) / 7_500));
+  // 淨資產：能支付的生活費月數 ÷ 滿分月數；被動收入：有效被動收入 ÷ 月支出，2 倍滿分
+  const netWorth_raw        = Math.min(100, Math.max(0, (runwayMonths / runwayTarget) * 100));
+  const passiveIncome_raw   = Math.min(100, Math.max(0, (passiveCoverage / SCORE_PASSIVE_COVERAGE_FULL) * 100));
   const lifeExperience_raw  = Math.min(100, player.lifeExperience / 2);
   const hp_raw              = player.stats.health;
   const ageScore_raw        = Math.min(100, ((deathAge - GAME_START_AGE) / (GAME_END_AGE - GAME_START_AGE)) * 100);
@@ -1135,10 +1146,10 @@ export function calculateLifeScore(player: Player, deathAge: number): LifeScoreB
   if ((player.visitedDestinations?.length ?? 0) >= 5) achievements.push('世界旅人');
   if (player.isMarried && player.numberOfChildren >= 2) achievements.push('家庭至上');
   if (player.stats.health >= 80)                     achievements.push('鐵打身體');
-  if (netWorth >= 750_000)                           achievements.push('智慧投資');
-  if (player.totalPassiveIncome >= 45_000)           achievements.push('被動收入王');
+  if (runwayMonths >= runwayTarget * ACHIEVEMENT_RUNWAY_SHARE) achievements.push('智慧投資');
+  if (passiveCoverage >= ACHIEVEMENT_PASSIVE_COVERAGE) achievements.push('被動收入王');
   if (totalDebt === 0)                               achievements.push('無債一身輕');
-  if (netEstate >= 1_500_000)                        achievements.push('傳承者');
+  if (netEstate / monthlyExpenses >= runwayTarget)   achievements.push('傳承者');
   if (player.stats.network >= 8)                     achievements.push('人脈大師');
   if ((player.charityTotal ?? 0) >= 200_000)         achievements.push('慈善家');
   if ((player.bucketList ?? []).length > 0
@@ -1153,6 +1164,9 @@ export function calculateLifeScore(player: Player, deathAge: number): LifeScoreB
     financialHealth:     Math.round(ageScore_raw),
     family:              Math.round(family_raw),
     legacyScore:         Math.round(legacyRaw),
+    runwayMonths:        Math.round(runwayMonths),
+    runwayTarget,
+    passiveCoverage:     Math.round(passiveCoverage * 100) / 100,
     lifeExperienceIndex,
     achievementIndex,
     relationshipIndex,

@@ -1,18 +1,12 @@
 import ReactECharts from './GameChart';
 import type { PlayerEvent } from '../../types/game';
+import { EVENT_ICONS } from './eventMeta';
 
 interface Props {
   eventLog: PlayerEvent[];
   playerName: string;
 }
 
-const EVENT_ICONS: Record<string, string> = {
-  asset_buy: '🏠', asset_sell: '💰', travel: '✈️',
-  marriage: '💑', child: '👶', crisis: '⚠️',
-  career_change: '💼', education: '🎓', rat_race_escaped: '🚀',
-  payday: '💵', loan_taken: '🏦', bedridden: '🛏', death: '⚰️',
-  relationship: '🤝',
-};
 
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));

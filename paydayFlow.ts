@@ -337,9 +337,15 @@ export async function runGlobalPayday(gs: GameState): Promise<void> {
     });
 
     const quarterlyPlan = { ...plan, settlementMonths, growthCycles };
+    const planCash = player.cash;
+    const planFlow = player.monthlyCashflow;
+    const planWorth = calcNetWorth(player);
+    const lifestyleBefore = player.lifestyle;
+    const habitBefore = player.healthHabit;
     if (quarterlyPlan.lifestyle && LIFESTYLE_OPTIONS[quarterlyPlan.lifestyle]) player.lifestyle = quarterlyPlan.lifestyle;
     if (quarterlyPlan.healthHabit && HEALTH_HABIT_OPTIONS[quarterlyPlan.healthHabit]) player.healthHabit = quarterlyPlan.healthHabit;
     const planResult = applyPaydayPlan(player, quarterlyPlan);
+    logPaydayPlan(gs, player, planResult, lifestyleBefore, habitBefore, planCash, planFlow, planWorth);
     const maintenanceCovered =
       planResult.investments.healthBoost.executed ||
       planResult.investments.healthMaintenance.executed;
@@ -417,4 +423,54 @@ export async function runGlobalPayday(gs: GameState): Promise<void> {
   evaluateAndMaybeTriggerAdaptiveEvent(gs);
   tryOpenWorldEvent(gs);
   emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+}
+
+const INSURANCE_LABELS: Record<string, string> = { medical: '醫療險', life: '壽險', property: '產險' };
+
+/**
+ * 把一次發薪日的個人規劃寫進事件紀錄，復盤時間軸才看得到定期定額、債券、保險與成長投資。
+ * meta.monthlyCashflow 是這次新增的被動收入估計，讓「第一筆資產」的年齡能被算到。
+ */
+export function logPaydayPlan(
+  gs: GameState,
+  player: Player,
+  result: ReturnType<typeof applyPaydayPlan>,
+  lifestyleBefore: Player['lifestyle'],
+  habitBefore: Player['healthHabit'],
+  cashBefore: number,
+  cashflowBefore: number,
+  netWorthBefore: number,
+): void {
+  const parts: string[] = [];
+  let passiveAdded = 0;
+  if (result.stockDCA.executed && result.stockDCA.amount > 0) {
+    parts.push(`股票定期定額 $${result.stockDCA.amount.toLocaleString()}`);
+    passiveAdded += Math.round(result.stockDCA.amount * STOCK_DCA_MONTHLY_DIVIDEND_RATE);
+  }
+  if (result.bond.executed && result.bond.amount > 0) {
+    parts.push(`債券基金 $${result.bond.amount.toLocaleString()}（月配息 +$${Math.round(result.bond.monthlyIncome).toLocaleString()}）`);
+    passiveAdded += Math.round(result.bond.monthlyIncome);
+  }
+  const growth = Object.values(result.investments).filter((item) => item.executed).map((item) => item.description);
+  parts.push(...growth);
+  const insurance = result.insurancePurchases.filter((item) => item.success).map((item) => INSURANCE_LABELS[item.type] ?? item.type);
+  if (insurance.length > 0) parts.push(`投保 ${insurance.join('、')}`);
+  if (player.lifestyle !== lifestyleBefore) {
+    parts.push(`生活方式 ${LIFESTYLE_OPTIONS[lifestyleBefore]?.label ?? lifestyleBefore} → ${LIFESTYLE_OPTIONS[player.lifestyle]?.label ?? player.lifestyle}`);
+  }
+  if (player.healthHabit !== habitBefore) {
+    parts.push(`健康習慣 ${HEALTH_HABIT_OPTIONS[habitBefore]?.label ?? habitBefore} → ${HEALTH_HABIT_OPTIONS[player.healthHabit]?.label ?? player.healthHabit}`);
+  }
+  if (parts.length === 0) return;
+  logPlayerEvent(player, gs, 'payday_plan', `發薪規劃：${parts.join('；')}`, cashBefore, cashflowBefore, netWorthBefore, {
+    globalPaydayNumber: gs.globalPaydayNumber + 1,
+    stockDCA: result.stockDCA.executed ? result.stockDCA.amount : 0,
+    bond: result.bond.executed ? result.bond.amount : 0,
+    growth,
+    insurance,
+    lifestyle: player.lifestyle,
+    healthHabit: player.healthHabit,
+    monthlyCashflow: passiveAdded,
+    totalCost: result.totalCostDeducted,
+  });
 }

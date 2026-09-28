@@ -1,4 +1,5 @@
 import type { PlayerAnalysis } from '../../types/game';
+import { eventLabel } from './eventMeta';
 
 interface Props { analysis: PlayerAnalysis }
 
@@ -6,11 +7,6 @@ const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 
 const sign = (n: number) => (n >= 0 ? '+' : '') + fmt(n);
 const cls = (n: number) => n >= 0 ? 'text-emerald-400' : 'text-red-400';
 
-const EVENT_TYPE_LABEL: Record<string, string> = {
-  asset_buy: '投資', asset_sell: '出售資產', travel: '旅遊',
-  marriage: '婚姻', child: '生育', crisis: '危機',
-  career_change: '轉職', education: '進修', rat_race_escaped: '脫出老鼠賽跑',
-};
 
 export default function DecisionImpactCard({ analysis }: Props) {
   const { keyDecisions, summary } = analysis;
@@ -61,7 +57,7 @@ export default function DecisionImpactCard({ analysis }: Props) {
                 <div className="flex justify-between items-start">
                   <div>
                     <span className="text-gray-500 mr-1">{d.age.toFixed(0)} 歲</span>
-                    <span className="text-xs text-gray-400 bg-gray-700 px-1 rounded">{EVENT_TYPE_LABEL[d.type] ?? d.type}</span>
+                    <span className="text-xs text-gray-400 bg-gray-700 px-1 rounded">{eventLabel(d.type)}</span>
                   </div>
                   <div className="text-right">
                     <div className={`font-bold ${cls(d.cashflowDelta)}`}>

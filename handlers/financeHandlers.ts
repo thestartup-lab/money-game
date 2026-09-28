@@ -4,7 +4,7 @@ import { repayRoomLoan } from '../playerLoans';
 import { buyHome } from '../householdLoans';
 import { investBondFund } from '../bondFund';
 import { createPlayer, sellAsset, buyInsurance, cancelInsurance, takeEmergencyLoan, takeLeverageLoan, repayLoan, InsuranceType, goTravel, attendSocialEvent } from '../gameLogic';
-import { FRANCHISE_CASH_THRESHOLD, PROFESSIONS } from '../gameConfig';
+import { FRANCHISE_CASH_THRESHOLD, PROFESSIONS, STOCK_DCA_MONTHLY_DIVIDEND_RATE } from '../gameConfig';
 import {
   OnSafe, announceCareerUnlock, calcNetWorth, emitCellEvent, emitClient, emitToRoom,
   executeSocialAction, executeTravelAction, getRoomState, logPlayerEvent, playerIdentity, serializeGameState,
@@ -59,11 +59,17 @@ export function registerFinanceHandlers(socket: Socket, onSafe: OnSafe): void {
       return;
     }
 
+    const insCash = player.cash;
+    const insFlow = player.monthlyCashflow;
+    const insWorth = calcNetWorth(player);
     const result = buyInsurance(player, payload.insuranceType);
     if (!result.success) {
       emitClient(socket, 'error', { message: result.message });
       return;
     }
+    const insuranceLabel = ({ medical: '醫療險', life: '壽險', property: '產險' } as Record<string, string>)[payload.insuranceType] ?? payload.insuranceType;
+    logPlayerEvent(player, gs, 'insurance', `投保 ${insuranceLabel}（啟動費 $${(result.activationFee ?? 0).toLocaleString()}，每月保費計入支出）`, insCash, insFlow, insWorth,
+      { insuranceType: payload.insuranceType, activationFee: result.activationFee });
 
     emitClient(socket, 'insuranceUpdated', {
       insuranceType: payload.insuranceType,
@@ -185,6 +191,9 @@ export function registerFinanceHandlers(socket: Socket, onSafe: OnSafe): void {
     if (amount <= 0) { emitClient(socket, 'error', { message: '投資金額必須大於 0。' }); return; }
     if (player.cash < amount) { emitClient(socket, 'error', { message: '現金不足，無法投資。' }); return; }
 
+    const dcaCash = player.cash;
+    const dcaFlow = player.monthlyCashflow;
+    const dcaWorth = calcNetWorth(player);
     player.cash -= amount;
     const existing = player.assets.find((a) => a.id === 'stock-dca');
     if (existing) {
@@ -201,6 +210,8 @@ export function registerFinanceHandlers(socket: Socket, onSafe: OnSafe): void {
       });
     }
     const updated = player.assets.find((a) => a.id === 'stock-dca');
+    logPlayerEvent(player, gs, 'asset_buy', `股票定期定額 $${amount.toLocaleString()}（持股市值 $${Math.round(updated?.currentValue ?? amount).toLocaleString()}）`, dcaCash, dcaFlow, dcaWorth,
+      { source: 'stock_dca', amount, monthlyCashflow: Math.round(amount * STOCK_DCA_MONTHLY_DIVIDEND_RATE) });
     emitClient(socket, 'stockDCAResult', {
       amount,
       newPortfolioValue: updated?.currentValue ?? amount,
