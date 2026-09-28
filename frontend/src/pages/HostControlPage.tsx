@@ -14,6 +14,7 @@ import {
 import { saveClassicReview } from '../lib/classicReviews';
 import type { GameState, Player, RoomAnalysis } from '../types/game';
 import './HostControl.css';
+import ReviewControls from '../components/review/ReviewControls';
 
 interface RoomSummary {
   roomId: string;
@@ -307,13 +308,8 @@ export default function HostControlPage() {
           <section className="host-review-card" aria-label="賽後復盤控制">
             <p className="host-eyebrow">POST-GAME REVIEW</p>
             <h1>帶領全場復盤</h1>
-            <p className="host-muted">點一下就切換大螢幕。建議依序進行，不在過程中給玩家答案。</p>
-            <div className="host-review-grid">
-              <button onClick={() => emit('setReviewView', { view: 'intro' })}>1. 復盤原則</button>
-              <button onClick={() => emit('setReviewView', { view: 'analysis' })}>2. 全場分析</button>
-              <button onClick={() => emit('setReviewView', { view: 'history' })}>3. 決策歷程</button>
-              <button onClick={() => emit('setReviewView', { view: 'game' })}>最終棋盤</button>
-            </div>
+            <p className="host-muted">點一下就切換大螢幕。依序進行，排名留到最後，先讓大家談選擇。</p>
+            <ReviewControls gameState={gameState} awardsCount={roomAnalysis?.awards?.length ?? 0} emit={emit} />
             <div className="host-save-review">
               <strong>本場不會自動保存</strong>
               <span>覺得經典時再手動保留，而且只存在這台裝置。</span>

@@ -21,6 +21,7 @@ import {
 } from '../lib/classicReviews';
 import './AdminClarity.css';
 import { formatCountdown, usePaydayCountdown } from '../components/game/paydayCountdown';
+import ReviewControls from '../components/review/ReviewControls';
 
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
 
@@ -818,18 +819,13 @@ export default function AdminPage() {
                 <div>
                   <p className="admin-kicker">POST-GAME REVIEW</p>
                   <h2 className="text-xl font-black text-white">主持大螢幕復盤</h2>
-                  <p className="mt-1 text-sm text-gray-400">依序帶大家回顧原則、比較全場，再討論每個人的關鍵選擇。</p>
+                  <p className="mt-1 text-sm text-gray-400">依序切換大螢幕：先看曲線與共同抉擇，逐一揭曉獎項、投影個人分析，最後才看排名。</p>
                 </div>
                 <span className={`rounded-full px-3 py-1 text-xs font-bold ${currentReviewSaved ? 'bg-emerald-950 text-emerald-200' : 'bg-indigo-950 text-indigo-200'}`}>
                   {currentReviewSaved ? '已保存於這台裝置' : '遊戲紀錄尚未保存'}
                 </span>
               </div>
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                <button className="rounded-xl bg-emerald-800 px-4 py-3 font-black text-white hover:bg-emerald-700" onClick={() => emit('setReviewView', { view: 'intro' })}>1. 復盤原則</button>
-                <button className="rounded-xl bg-purple-800 px-4 py-3 font-black text-white hover:bg-purple-700" onClick={() => emit('setReviewView', { view: 'analysis' })}>2. 全場分析</button>
-                <button className="rounded-xl bg-blue-800 px-4 py-3 font-black text-white hover:bg-blue-700" onClick={() => emit('setReviewView', { view: 'history' })}>3. 決策歷程</button>
-                <button className="rounded-xl bg-slate-700 px-4 py-3 font-black text-white hover:bg-slate-600" onClick={() => emit('setReviewView', { view: 'game' })}>返回最終棋盤</button>
-              </div>
+              <ReviewControls gameState={gameState} awardsCount={roomAnalysis?.awards?.length ?? 0} emit={(event, payload) => emit(event, payload)} />
               <div className="rounded-xl border border-amber-700 bg-amber-950/50 p-4">
                 <p className="text-sm font-bold text-amber-100">本場結束後不會自動保存</p>
                 <p className="mt-1 text-xs leading-relaxed text-amber-200/80">如果這場值得留下，再按下方按鈕。資料只會存在目前這台裝置的瀏覽器，清除網站資料時也會消失。</p>

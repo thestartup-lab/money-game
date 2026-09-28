@@ -1,5 +1,5 @@
 /** 送給前端的狀態：玩家與房間的序列化、手機說明用的效果與組成資料 */
-import { GameState, Player } from './gameDataModels';
+import { GameState, Player, GamePhase } from './gameDataModels';
 import { BASIC_INVESTMENTS } from './basicInvestments';
 import { getHomeOffers } from './householdLoans';
 import { BOND_FUND_ID } from './bondFund';
@@ -354,6 +354,7 @@ export function serializeGameState(gs: GameState): object {
     autoRevealOnSubmit: gs.autoRevealOnSubmit,
     autoHost: gs.autoHost,
     communityChoiceAuto: gs.communityChoiceAuto,
+    reviewView: gs.gamePhase === GamePhase.GameOver ? (gs.reviewView ?? null) : null,
     actionPhaseDone: gs.decisionPhase?.playerId === '__all_players__' && (gs.decisionPhase.kind === 'actions' || gs.decisionPhase.kind === 'payday') ? [...gs.actionPhaseDone] : [],
     actionPhaseEnabled: gs.actionPhaseEnabled,
     activeAuctions: Object.entries(gs.activeAuctions ?? {}).map(([auctionId, a]) => ({

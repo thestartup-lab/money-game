@@ -11,10 +11,10 @@ interface Props {
 const DIMENSIONS = [
   { key: 'netWorth', label: '淨資產' },
   { key: 'passiveIncome', label: '被動收入' },
-  { key: 'financialHealth', label: '財務健康' },
+  { key: 'financialHealth', label: '壽命' },
   { key: 'family', label: '家庭' },
   { key: 'lifeExperience', label: '生命體驗' },
-  { key: 'hp', label: '健康長壽' },
+  { key: 'hp', label: '健康' },
   { key: 'legacyScore', label: '傳承' },
 ] as const;
 

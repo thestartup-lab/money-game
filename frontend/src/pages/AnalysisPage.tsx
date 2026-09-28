@@ -27,6 +27,8 @@ const ACHIEVEMENT_CONFIG: Record<string, { icon: string; category: string }> = {
   '無債一身輕': { icon: '🕊', category: '人生成就' },
   '傳承者':     { icon: '🏛', category: '人生成就' },
   '人脈大師':   { icon: '🤝', category: '人際關係' },
+  '慈善家':     { icon: '🎗️', category: '人際關係' },
+  '夢想成真':   { icon: '🌈', category: '生命體驗' },
 };
 const ALL_ACHIEVEMENTS = Object.keys(ACHIEVEMENT_CONFIG);
 
@@ -48,7 +50,8 @@ function IndexBar({ label, icon, value, color }: { label: string; icon: string; 
 }
 
 export default function AnalysisPage({ analysis }: Props) {
-  const isAlive = analysis.deathAge >= 99;
+  // 走到終局才算在世；舊資料沒有這個欄位時，用年齡推斷
+  const isAlive = analysis.isAlive ?? analysis.deathAge >= 99;
   const score = analysis.finalScore;
   const grade = score.grade ?? 'C';
   const gradeConf = GRADE_CONFIG[grade] ?? GRADE_CONFIG.C;
@@ -61,7 +64,7 @@ export default function AnalysisPage({ analysis }: Props) {
         <h2 className="text-xl font-bold text-white">{analysis.playerName} 的人生</h2>
         <p className="text-gray-400 text-sm">
           {analysis.profession}（{analysis.quadrant} 象限） •
-          {isAlive ? ' 活到百歲 🎉' : ` ${analysis.deathAge} 歲離世`}
+          {isAlive ? (analysis.deathAge >= 99 ? ' 活到百歲 🎉' : ` ${Math.round(analysis.deathAge)} 歲・走到終局`) : ` ${Math.round(analysis.deathAge)} 歲離世`}
         </p>
         <div className="flex justify-center gap-4 text-sm">
           {analysis.isMarried && <span className="text-pink-300">💑 已婚</span>}
@@ -101,6 +104,12 @@ export default function AnalysisPage({ analysis }: Props) {
           <IndexBar label="人生成就指數" icon="🏆" value={score.achievementIndex ?? 0}    color="text-amber-400" />
           <IndexBar label="人際關係指數" icon="💞" value={score.relationshipIndex ?? 0}   color="text-pink-400" />
         </div>
+        {score.runwayMonths !== undefined && (
+          <p className="text-xs leading-relaxed text-gray-400">
+            財務分數看的是「相對你的生活支出」：淨資產夠付 {Math.round(score.runwayMonths).toLocaleString('zh-TW')} 個月生活
+            （{Math.round(score.runwayTarget ?? 0).toLocaleString('zh-TW')} 個月得滿分），被動收入是月支出的 {(score.passiveCoverage ?? 0).toFixed(1)} 倍（2 倍得滿分）。
+          </p>
+        )}
       </div>
 
       {/* 成就徽章 */}

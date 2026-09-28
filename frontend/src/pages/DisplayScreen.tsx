@@ -3,10 +3,14 @@ import { PLAYER_COLORS, playerColor, playerColorIndex } from '../components/game
 import { io, Socket } from 'socket.io-client';
 import ReactECharts from '../components/analysis/GameChart';
 import { QRCodeSVG } from 'qrcode.react';
-import type { GameState, RoomAnalysis, LifeScoreBreakdown } from '../types/game';
+import type { GameState, RoomAnalysis, LifeScoreBreakdown, PlayerAnalysis, ReviewView, ReviewViewState } from '../types/game';
+import ReviewGuide from '../components/review/ReviewGuide';
+import LifeCurvesView from '../components/review/LifeCurvesView';
+import CommunityRecapView from '../components/review/CommunityRecapView';
+import AwardsRevealView from '../components/review/AwardsRevealView';
+import AnalysisPage from './AnalysisPage';
 import { GameBoard } from '../components/game/GameBoard';
 import type { BoardPlayer } from '../components/game/GameBoard';
-import IntroSheet from '../components/game/IntroSheet';
 import DecisionHistoryView from '../components/analysis/DecisionHistoryView';
 import DiceRollOverlay, { type DiceRollData } from '../components/game/DiceRollOverlay';
 import DecisionCountdown from '../components/game/DecisionCountdown';
@@ -30,10 +34,10 @@ const PHASE_LABELS: Record<string, string> = {
 const RADAR_DIMENSIONS = [
   { key: 'netWorth', label: '淨資產' },
   { key: 'passiveIncome', label: '被動收入' },
-  { key: 'financialHealth', label: '財務健康' },
+  { key: 'financialHealth', label: '壽命' },
   { key: 'family', label: '家庭' },
   { key: 'lifeExperience', label: '生命體驗' },
-  { key: 'hp', label: '健康長壽' },
+  { key: 'hp', label: '健康' },
   { key: 'legacyScore', label: '傳承' },
 ] as const;
 
@@ -45,7 +49,11 @@ export default function DisplayScreen() {
   const [connected, setConnected] = useState(false);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [roomAnalysis, setRoomAnalysis] = useState<RoomAnalysis | null>(null);
-  const requestedReviewViewRef = useRef<'analysis' | 'history'>('analysis');
+  // 復盤：主持人控制的步驟、獎項揭曉進度、投影中的玩家
+  const [reviewStep, setReviewStep] = useState(0);
+  const [screenAnalysis, setScreenAnalysis] = useState<PlayerAnalysis | null>(null);
+  const reviewPlayerIdRef = useRef<string | undefined>(undefined);
+  const appliedReviewKeyRef = useRef('');
   const [roomCode, setRoomCode] = useState(() => {
     // 支援從 URL ?display&room=ROOMID 直接帶入
     const params = new URLSearchParams(window.location.search);
@@ -54,7 +62,7 @@ export default function DisplayScreen() {
   const [joined, setJoined] = useState(false);
   const [joinError, setJoinError] = useState('');
   const [joining, setJoining] = useState(false);
-  const [view, setView] = useState<'game' | 'analysis' | 'intro' | 'history'>('game');
+  const [view, setView] = useState<ReviewView>('game');
   const [ticker, setTicker] = useState<string[]>([]);
   // 置中大字幕：落地事件與里程碑
   type CellEvent = { playerName: string; cellName: string; message: string; isMilestone?: boolean };
@@ -169,9 +177,26 @@ export default function DisplayScreen() {
       }
     });
     // 若後端尚未支援 joinDisplay，收到 gameStateUpdate 也視為成功
+    // 套用主持人選的復盤步驟；同一步驟不重複請求資料
+    const applyReviewView = (state: ReviewViewState | null | undefined) => {
+      if (!state?.view) return;
+      const key = JSON.stringify(state);
+      if (key === appliedReviewKeyRef.current) return;
+      appliedReviewKeyRef.current = key;
+      setView(state.view);
+      setReviewStep(state.step ?? 0);
+      if (state.view === 'player' && state.playerId) {
+        if (reviewPlayerIdRef.current !== state.playerId) setScreenAnalysis(null);
+        reviewPlayerIdRef.current = state.playerId;
+        s.emit('requestPlayerAnalysis', { targetPlayerId: state.playerId });
+      } else if (state.view !== 'game' && state.view !== 'guide') {
+        s.emit('requestRoomAnalysis');
+      }
+    };
     s.on('gameStateUpdate', (gs: GameState) => {
       playerOrderRef.current = gs.playerOrder ?? [];
       setGameState(gs);
+      if (gs.gamePhase === 'GameOver') applyReviewView(gs.reviewView);
       const previousTurnId = prevTurnIdRef.current;
       const previousPhase = prevGamePhaseRef.current;
       const isPlaying = gs.gamePhase === 'RatRace' || gs.gamePhase === 'FastTrack';
@@ -212,20 +237,11 @@ export default function DisplayScreen() {
         joinedRoomRef.current = gs.roomId;
       }
     });
-    s.on('roomAnalysis', (data: RoomAnalysis) => {
-      setRoomAnalysis(data);
-      setView(requestedReviewViewRef.current);
+    s.on('roomAnalysis', (data: RoomAnalysis) => setRoomAnalysis(data));
+    s.on('playerAnalysis', (data: PlayerAnalysis) => {
+      if (data.playerId === reviewPlayerIdRef.current) setScreenAnalysis(data);
     });
-    s.on('reviewViewChanged', (payload: { view?: 'game' | 'intro' | 'analysis' | 'history' }) => {
-      const nextView = payload?.view;
-      if (!nextView) return;
-      if (nextView === 'analysis' || nextView === 'history') {
-        requestedReviewViewRef.current = nextView;
-        s.emit('requestRoomAnalysis');
-        return;
-      }
-      setView(nextView);
-    });
+    s.on('reviewViewChanged', (payload: ReviewViewState) => applyReviewView(payload));
     s.on('ratRaceEscaped', (p: { playerId: string; playerName: string; routeLabel?: string }) => {
       addTicker(`🚀 ${p.playerName} 完成「${p.routeLabel ?? '第二人生'}」，正式進入外圈！`);
       setBoardFocusPlayerId(p.playerId);
@@ -625,47 +641,26 @@ export default function DisplayScreen() {
         {/* 右：控制按鈕 + 連線狀態 */}
         <div className="flex items-center gap-2 min-w-0 justify-end">
           {gameState.gamePhase === 'GameOver' && (
-            <button
-              className={`text-sm px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${view === 'intro' ? 'bg-emerald-700 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
-              onClick={() => setView(view === 'intro' ? 'game' : 'intro')}
-            >
-              復盤原則
-            </button>
-          )}
-          {gameState.gamePhase === 'GameOver' && (
             <>
-              <button
-                className="text-sm px-3 py-1.5 rounded-lg bg-purple-800 hover:bg-purple-700 transition-colors whitespace-nowrap"
-                onClick={() => {
-                  requestedReviewViewRef.current = 'analysis';
-                  emit('requestRoomAnalysis');
-                }}
-              >
-                顯示分析
-              </button>
-              <button
-                className={`text-sm px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${view === 'history' ? 'bg-blue-700 text-white' : 'bg-blue-900 hover:bg-blue-800 text-blue-200'}`}
-                onClick={() => {
-                  if (view === 'history') {
-                    setView('game');
-                    return;
-                  }
-                  requestedReviewViewRef.current = 'history';
-                  if (roomAnalysis) setView('history');
-                  else emit('requestRoomAnalysis');
-                }}
-              >
-                決策歷程
-              </button>
+              {([['guide', '復盤引導'], ['ranking', '顯示分析'], ['history', '決策歷程']] as const).map(([target, label]) => (
+                <button
+                  key={target}
+                  className={`text-sm px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${view === target ? 'bg-emerald-700 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
+                  onClick={() => {
+                    if (view === target) { setView('game'); return; }
+                    setView(target);
+                    if (target !== 'guide' && !roomAnalysis) emit('requestRoomAnalysis');
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+              {view !== 'game' && (
+                <button className="text-sm px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors whitespace-nowrap" onClick={() => setView('game')}>
+                  返回棋盤
+                </button>
+              )}
             </>
-          )}
-          {(view === 'analysis' || view === 'history') && (
-            <button
-              className="text-sm px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors whitespace-nowrap"
-              onClick={() => setView('game')}
-            >
-              返回棋盤
-            </button>
           )}
           <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
         </div>
@@ -674,17 +669,28 @@ export default function DisplayScreen() {
       {/* 主體 */}
       {gameState.facilitatorScene && !diceAnim && !activeTurnIntro ? (
         <FacilitatorSceneOverlay scene={gameState.facilitatorScene} />
-      ) : view === 'intro' && gameState.gamePhase === 'GameOver' ? (
-        <div className="flex-1 overflow-hidden">
-          <IntroSheet mode="fullscreen" />
-        </div>
-      ) : view === 'history' && roomAnalysis ? (
-        <div className="flex-1 overflow-y-auto p-4">
-          <DecisionHistoryView analysis={roomAnalysis} />
-        </div>
-      ) : view === 'analysis' && roomAnalysis ? (
-        <div className="flex-1 overflow-y-auto p-4">
-          <RoomAnalysisView analysis={roomAnalysis} />
+      ) : gameState.gamePhase === 'GameOver' && view !== 'game' ? (
+        // key 讓每換一步都從頂端開始看
+        <div key={`${view}-${reviewStep}`} className="flex-1 overflow-y-auto">
+          {view === 'guide' ? (
+            <ReviewGuide />
+          ) : view === 'player' ? (
+            screenAnalysis ? (
+              <div className="mx-auto max-w-3xl p-4"><AnalysisPage analysis={screenAnalysis} /></div>
+            ) : <ReviewLoading />
+          ) : !roomAnalysis ? (
+            <ReviewLoading />
+          ) : view === 'curves' ? (
+            <LifeCurvesView analysis={roomAnalysis} colorOf={(playerId: string) => playerColor(playerColorIndex(gameState.playerOrder, playerId, Math.max(0, gameState.players.findIndex((p) => p.id === playerId))))} />
+          ) : view === 'community' ? (
+            <CommunityRecapView analysis={roomAnalysis} />
+          ) : view === 'awards' ? (
+            <AwardsRevealView analysis={roomAnalysis} step={reviewStep} />
+          ) : view === 'history' ? (
+            <div className="p-4"><DecisionHistoryView analysis={roomAnalysis} /></div>
+          ) : (
+            <div className="p-4"><RoomAnalysisView analysis={roomAnalysis} /></div>
+          )}
         </div>
       ) : (
         <div className="flex flex-1 overflow-hidden relative">
@@ -1006,14 +1012,21 @@ export default function DisplayScreen() {
   );
 }
 
+function ReviewLoading() {
+  return <div className="flex h-full items-center justify-center p-10 text-xl text-gray-400">正在整理復盤資料…</div>;
+}
+
 // ── 遊戲結束：全組分析視圖 ──
 function RoomAnalysisView({ analysis }: { analysis: RoomAnalysis }) {
   const [selected, setSelected] = useState<string | null>(null);
   const players = analysis.players;
   const winner = players[0];
-  const winnerTurningPoints = (winner?.eventLog ?? [])
-    .filter((event) => ['asset_buy', 'career_change', 'rat_race_escaped', 'crisis', 'travel', 'marriage'].includes(event.type))
-    .slice(0, 5);
+  // 冠軍影響最大的決定（依影響力挑出，再照年齡排）
+  const winnerTurningPoints = winner?.keyDecisions?.length
+    ? [...winner.keyDecisions].sort((a, b) => a.age - b.age)
+    : (winner?.eventLog ?? [])
+      .filter((event) => ['asset_buy', 'payday_plan', 'career_change', 'rat_race_escaped', 'crisis', 'travel', 'marriage'].includes(event.type))
+      .slice(0, 5);
 
   const indicator = RADAR_DIMENSIONS.map((d) => ({ name: d.label, max: 100 }));
 
@@ -1065,7 +1078,7 @@ function RoomAnalysisView({ analysis }: { analysis: RoomAnalysis }) {
                   {p.escapedRatRace && <span className="text-xs text-emerald-400">🚀</span>}
                 </div>
                 <div className="text-xs text-gray-400">
-                  {p.isAlive ? '活到百歲 🎉' : `${p.deathAge} 歲離世`} •
+                  {p.isAlive ? (p.deathAge >= 99 ? '活到百歲 🎉' : `${Math.round(p.deathAge)} 歲・仍在世`) : `${Math.round(p.deathAge)} 歲離世`} •
                   {p.isMarried ? ' 💑' : ''} 👶×{p.numberOfChildren} •
                   體驗 {p.lifeExperience}
                 </div>

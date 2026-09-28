@@ -340,6 +340,27 @@ const DEFAULT_EXPENSES: Expenses = {
 // 玩家事件日誌（用於遊戲結束後的決策反思分析）
 // ============================================================
 
+export interface CommunityChoiceRecord {
+  age: number;
+  cardId: string;
+  title: string;
+  optionLabel: string;
+  /** 各選項票數（選項名稱 → 票數） */
+  votes: Array<{ label: string; count: number }>;
+  votedCount: number;
+  voterCount: number;
+  byMajority: boolean;
+  result: string;
+}
+
+export interface ReviewViewState {
+  view: 'game' | 'guide' | 'curves' | 'community' | 'awards' | 'ranking' | 'player' | 'analysis' | 'history';
+  /** awards：目前揭曉到第幾個（0 起算） */
+  step?: number;
+  /** player：大螢幕顯示哪位玩家的個人分析 */
+  playerId?: string;
+}
+
 export type PlayerEventType =
   | 'global_event'
   | 'game_start'
@@ -872,6 +893,10 @@ export class GameState {
   lastCommunityChoicePayday = 0;
   /** 已出現過的共同抉擇卡（依出現順序），用來輪替不重複 */
   communityChoiceHistory: string[] = [];
+  /** 每次共同抉擇的結果（終局復盤回顧用） */
+  communityChoiceLog: CommunityChoiceRecord[] = [];
+  /** 大螢幕復盤目前停在哪一步（主持人控制；大螢幕重新整理後可接續） */
+  reviewView: ReviewViewState | null = null;
   /** 已跑過「全體行動時間」的輪數（turnNumber）；每輪開始只跑一次 */
   /** 每輪開始是否開「全體行動時間」（主持人可關） */
   actionPhaseEnabled = true;

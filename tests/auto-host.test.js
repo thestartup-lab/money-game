@@ -60,5 +60,32 @@ test('全自動主持：主持人不按任何按鈕、玩家不送任何決策�
   assert.ok(latest.globalPaydayNumber >= 3, `至少發薪 3 次（實際 ${latest.globalPaydayNumber}）`);
   assert.match(autoLog, /共同抉擇依多數決揭曉/, '發薪後的全場共同抉擇沒人投票也會依多數決揭曉');
   assert.match(autoLog, /倒數結束，收束/, '決策沒人送出時會在倒數結束收束');
+
+  // ── 終局復盤 ──
+  // 玩家手機不能拿全場完整紀錄
+  const denied = await send(players[0], 'requestRoomAnalysis', undefined, 'error');
+  assert.match(denied.message, /主持人/);
+  const roomAnalysis = await send(admin, 'requestRoomAnalysis', undefined, 'roomAnalysis');
+  assert.ok(roomAnalysis.communityChoices.length >= 1, '共同抉擇結果要能在復盤回顧');
+  assert.ok(roomAnalysis.communityChoices[0].votes.length >= 2);
+  for (const p of roomAnalysis.players) assert.ok(Array.isArray(p.keyDecisions), '每位玩家都有關鍵決策');
+  // 個人分析與全場排名用同一份分數（離世者都用死亡時凍結的分數）
+  const own = await send(players[0], 'requestPlayerAnalysis', undefined, 'playerAnalysis');
+  assert.equal(own.finalScore.total, roomAnalysis.players.find((p) => p.playerId === ids[0]).score.total);
+  assert.equal(typeof own.isAlive, 'boolean');
+  // 大螢幕只能看主持人選來投影的那位玩家
+  const display = await conn();
+  await send(display, 'joinDisplay', { roomId: room.roomId }, 'joinDisplaySuccess');
+  const blocked = await send(display, 'requestPlayerAnalysis', { targetPlayerId: ids[1] }, 'error');
+  assert.match(blocked.message, /只能查看自己/);
+  const shown = await send(admin, 'setReviewView', { view: 'player', playerId: ids[1] }, 'gameStateUpdate', (g) => g.reviewView?.view === 'player');
+  assert.equal(shown.reviewView.playerId, ids[1]);
+  const onScreen = await send(display, 'requestPlayerAnalysis', { targetPlayerId: ids[1] }, 'playerAnalysis');
+  assert.equal(onScreen.playerId, ids[1]);
+  const awards = await send(admin, 'setReviewView', { view: 'awards', step: 2 }, 'gameStateUpdate', (g) => g.reviewView?.view === 'awards');
+  assert.equal(awards.reviewView.step, 2);
+  const guide = await send(admin, 'setReviewView', { view: 'intro' }, 'reviewViewChanged');
+  assert.equal(guide.view, 'guide', '舊版「復盤原則」按鈕對應到新的復盤引導');
+
   assert.equal(stderr.trim(), '', `伺服器不應有錯誤輸出：${stderr.slice(0, 400)}`);
 });

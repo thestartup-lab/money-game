@@ -2,7 +2,7 @@
 import type { Socket } from 'socket.io';
 import { GameState, GamePhase, PlayerEvent, AssetType } from '../gameDataModels';
 import { previewCareerChange } from '../careerStage';
-import { applyGlobalEvent, rollDice, computePension, computeConsultantIncome, getArrangedMarriageCost } from '../gameLogic';
+import { applyGlobalEvent, getCurrentAge, rollDice, computePension, computeConsultantIncome, getArrangedMarriageCost } from '../gameLogic';
 import { RELATIONSHIP_MARRIAGE_THRESHOLD, HP_ACTIVITY_THRESHOLDS, RETIREMENT_STARTUP_SUCCESS_ROLL, RETIREMENT_STARTUP_RETURN_RATE, RETIREMENT_STARTUP_FAILURE_LOSS, RETIREMENT_DEFER_HP_COST, CONSULTANT_HP_COST_PER_CYCLE, CONSULTANT_MIN_HP } from '../gameConfig';
 import { worldEventRestriction, hasFragilePlayers, describeWorldEvent } from '../worldEvents';
 import { executeCareerChange, applyHPChange } from '../statsSystem';
@@ -349,6 +349,18 @@ export function resolveFacilitatorSceneChoice(gs: GameState, sceneId: string | u
     }
     const optionLabel = scene.options?.find((option) => option.id === finalChoice)?.label ?? '共同決策';
     const byMajority = finalChoice === majorityCommunityChoice(scene);
+    gs.communityChoiceLog ??= [];
+    gs.communityChoiceLog.push({
+      age: Math.round(getCurrentAge(gs)),
+      cardId: String(context.cardId ?? ''),
+      title: scene.title,
+      optionLabel,
+      votes: (scene.options ?? []).map((option) => ({ label: option.label, count: scene.votes?.[option.id] ?? 0 })),
+      votedCount: scene.votedCount ?? 0,
+      voterCount: scene.voterCount ?? 0,
+      byMajority,
+      result,
+    });
     revealFacilitatorResult(gs, `全場選擇：${optionLabel}`, `${tally}${byMajority ? '' : '（主持人裁定）'}\n${result}`);
     return;
   }

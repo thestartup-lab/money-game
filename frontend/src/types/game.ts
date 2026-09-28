@@ -283,6 +283,8 @@ export interface GameState {
   autoHost?: boolean;
   /** 每次發薪後自動出現全場共同抉擇 */
   communityChoiceAuto?: boolean;
+  /** 終局：大螢幕復盤目前的步驟（主持人控制） */
+  reviewView?: ReviewViewState | null;
   /** 全體行動時間已按完成的玩家 */
   actionPhaseDone?: string[];
   actionPhaseEnabled?: boolean;
@@ -366,6 +368,10 @@ export interface LifeScoreBreakdown {
   total:               number;
   grade:               string;
   achievements:        string[];
+  /** 淨資產夠付幾個月生活、滿分所需月數、被動收入是月支出的幾倍 */
+  runwayMonths?:       number;
+  runwayTarget?:       number;
+  passiveCoverage?:    number;
 }
 
 export interface SecondLifeIndicatorReview {
@@ -434,7 +440,28 @@ export interface PlayerAnalysis {
     cashflowDelta: number;
     cashDelta: number;
     netWorthDelta: number;
+    monthsAfter?: number;
+    impact?: number;
   }[];
+  /** 終局時是否仍在世（活到遊戲結束） */
+  isAlive?: boolean;
+}
+
+export type KeyDecision = PlayerAnalysis['keyDecisions'][number];
+
+export type ReviewView = 'game' | 'guide' | 'curves' | 'community' | 'awards' | 'ranking' | 'player' | 'analysis' | 'history';
+export interface ReviewViewState { view: ReviewView; step?: number; playerId?: string }
+
+export interface CommunityChoiceRecord {
+  age: number;
+  cardId: string;
+  title: string;
+  optionLabel: string;
+  votes: { label: string; count: number }[];
+  votedCount: number;
+  voterCount: number;
+  byMajority: boolean;
+  result: string;
 }
 
 export interface RoomPlayerSummary {
@@ -459,6 +486,8 @@ export interface RoomPlayerSummary {
   escapeAge?: number | null;
   secondLifeReview?: SecondLifeReview;
   score: LifeScoreBreakdown;
+  crisisCount?: number;
+  keyDecisions?: KeyDecision[];
   cashflowHistory: { age: number; cashflow: number; netWorth: number }[];
   eventLog?: {
     meta?: Record<string, unknown>;
@@ -474,6 +503,7 @@ export interface RoomAnalysis {
   currentAge: number;
   players: RoomPlayerSummary[];
   awards?: RoomAward[];
+  communityChoices?: CommunityChoiceRecord[];
 }
 
 export interface RoomAward {
