@@ -419,6 +419,12 @@ export default function HostControlPage() {
             <div><p className="host-eyebrow">GAME FLOW</p><h2>遊戲控制</h2></div>
             <span>{phase === 'GameOver' ? '復盤中' : manualPause ? '已暫停' : isRunning ? '進行中' : '準備中'}</span>
           </div>
+          {gameState?.restoredAt && (
+              <div className="mb-3 rounded-xl border border-sky-600 bg-sky-950 p-3 text-base text-sky-100" role="status">
+                <p className="font-black">🔄 伺服器剛重新啟動，已還原到 {new Date(gameState.restoredAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })} 的遊戲進度</p>
+                <p className="mt-1">玩家手機會自動重新連線（{players.filter((p) => !p.isDisconnected).length}／{players.length} 位已回來）。進行到一半的那一步會回到開始前；大家回來後按「▶ 繼續」。</p>
+              </div>
+            )}
 
           {isStartable ? (
             <div className="host-action-stack">

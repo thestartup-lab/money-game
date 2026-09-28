@@ -604,7 +604,7 @@ export default function DisplayScreen() {
             {gameState.gamePhase === 'GameOver'
               ? '人生旅程完成'
               : manualPause
-              ? '遊戲暫停'
+              ? (gameState.restoredAt ? '連線恢復中' : '遊戲暫停')
               : gameState.finalRoundStarted
                 ? '最後一輪'
                 : currentTurnPlayer?.name ?? '準備開始'}

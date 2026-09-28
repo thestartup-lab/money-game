@@ -582,6 +582,7 @@ export default function PlayerPage() {
       addNotification(p.message ? `💹 ${p.message}` : `💹 資產出售！淨收益 ${sign}$${p.netCashChange.toLocaleString()}（賣價 $${p.proceeds.toLocaleString()}${p.debtSettled > 0 ? `，清償負債 $${p.debtSettled.toLocaleString()}` : ''}${p.capitalGainsTax ? `，資本利得稅 $${p.capitalGainsTax.toLocaleString()}` : ''}）`);
     });
     s.on('homeBought', (p: { message: string }) => { addNotification(`🏠 ${p.message}`); });
+    s.on('bondResult', (p: { message: string }) => { addNotification(`🏦 ${p.message}`); });
 
     // 發薪日結果在主持人收束決策後才公開。
     s.on('paydayPlanResult', (p: { playerId: string; planResult?: { stockDCA?: { executed: boolean; amount: number; newPortfolioValue: number } } }) => {
@@ -1457,6 +1458,7 @@ export default function PlayerPage() {
                 onTakeEmergencyLoan={(amt) => emit('takeEmergencyLoan', { amount: amt })}
                 onTakeLeverageLoan={(amt, name) => emit('takeLeverageLoan', { amount: amt, targetAssetName: name })}
                 onInvestStockDCA={(amt) => emit('investStockDCA', { amount: amt })}
+                onInvestBond={(amt) => emit('investBond', { amount: amt })}
                 onLoanOffer={(targetId, amount, monthlyRate) => emit('loanOffer', { targetPlayerId: targetId, amount, monthlyRate })}
                 onLoanRequest={(targetId, amount, monthlyRate) => emit('loanRequest', { targetPlayerId: targetId, amount, monthlyRate })}
                 onSellAsset={(assetId) => emit('sellAsset', { assetId })}

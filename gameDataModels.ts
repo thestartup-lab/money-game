@@ -296,6 +296,8 @@ export interface PaydayPlanPayload {
   investInNetwork: boolean;
   /** 股票定期定額投入金額（0 = 不投入；可選 15000 / 30000 / 75000）*/
   stockDCAAmount: number;
+  /** 債券基金投入金額（0 = 不投入；不限額） */
+  bondAmount?: number;
   /** 本次購買的保險類型（已持有的將被跳過）*/
   buyInsuranceTypes: Array<'medical' | 'life' | 'property'>;
   /** 生活方式（節儉／普通／享受），送出後持續到下次更改 */
@@ -864,6 +866,8 @@ export class GameState {
   marriageGiftOverride: number | null = null;
   /** 每輪結算月數（12／24／48） */
   monthsPerRound = MONTHS_PER_ROUND;
+  /** 伺服器重啟後從存檔還原的時間（主持人按繼續後清除） */
+  restoredAt: string | null = null;
   /** 計時發薪：開關、間隔、上次發薪時的「有效經過時間」與輪數 */
   paydayTimerEnabled = true;
   paydayIntervalMs = 10 * 60 * 1000;

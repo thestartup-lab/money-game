@@ -3,57 +3,11 @@ import type { Player } from '../../types/game';
 import EffectPreview from './EffectPreview';
 import type { MoneyDetailMode } from './MoneyDetailSheet';
 
-const DESTINATIONS = [
-  { id: 'taiwan_cycling',   name: '台灣環島',   tier: 'inner', cost: 15_000,  lifeExp: 8,  region: '亞太', desc: '騎單車環島',            special: '' },
-  { id: 'japan_tokyo',      name: '日本東京',   tier: 'inner', cost: 38_000,  lifeExp: 12, region: '亞太', desc: 'NT+1',                   special: '人脈+1' },
-  { id: 'thailand_bangkok', name: '泰國曼谷',   tier: 'inner', cost: 22_000,  lifeExp: 10, region: '亞太', desc: '東南亞文化',              special: '' },
-  { id: 'korea_seoul',      name: '韓國首爾',   tier: 'inner', cost: 30_000,  lifeExp: 10, region: '亞太', desc: '韓流體驗',               special: '' },
-  { id: 'malaysia_kl',      name: '馬來西亞',   tier: 'inner', cost: 22_000,  lifeExp: 9,  region: '亞太', desc: '美食天堂',               special: '' },
-  { id: 'hong_kong',        name: '香港',       tier: 'inner', cost: 18_000,  lifeExp: 8,  region: '亞太', desc: 'FQ+1',                   special: '財商+1' },
-  { id: 'vietnam_hanoi',    name: '越南河內',   tier: 'inner', cost: 15_000,  lifeExp: 8,  region: '亞太', desc: '歷史古城',               special: '' },
-  { id: 'bali',             name: '峇里島',     tier: 'inner', cost: 30_000,  lifeExp: 11, region: '亞太', desc: 'HP+5 療癒之旅',          special: 'HP+5' },
-  { id: 'singapore',        name: '新加坡',     tier: 'inner', cost: 38_000,  lifeExp: 10, region: '亞太', desc: 'FQ+1',                   special: '財商+1' },
-  { id: 'australia_sydney', name: '澳洲雪梨',   tier: 'inner', cost: 60_000,  lifeExp: 14, region: '亞太', desc: '南半球大都市',            special: '' },
-  { id: 'france_paris',     name: '法國巴黎',   tier: 'outer', cost: 120_000, lifeExp: 20, region: '歐洲', desc: 'NT+2',                   special: '人脈+2' },
-  { id: 'usa_newyork',      name: '美國紐約',   tier: 'outer', cost: 135_000, lifeExp: 20, region: '北美', desc: 'FQ+2 金融洞察',          special: '財商+2' },
-  { id: 'africa_safari',    name: '非洲獵遊',   tier: 'outer', cost: 225_000, lifeExp: 30, region: '非洲', desc: 'SK+1 視野拓展',          special: '技能+1' },
-  { id: 'antarctica',       name: '南極探險',   tier: 'outer', cost: 450_000, lifeExp: 50, region: '極地', desc: '傳承分+10（稀有）',      special: '傳承+10' },
-  { id: 'italy_culture',    name: '義大利文化', tier: 'outer', cost: 150_000, lifeExp: 22, region: '歐洲', desc: 'NT+2',                   special: '人脈+2' },
-  { id: 'uae_dubai',        name: '中東杜拜',   tier: 'outer', cost: 180_000, lifeExp: 22, region: '中東', desc: 'FQ+1',                   special: '財商+1' },
-  { id: 'peru_machu',       name: '南美洲秘魯', tier: 'outer', cost: 180_000, lifeExp: 25, region: '南美', desc: '印加古文明',              special: '' },
-  { id: 'world_cruise',     name: '環遊世界',   tier: 'outer', cost: 750_000, lifeExp: 80, region: '全球', desc: '全屬性+1（人生夢想）',   special: '全屬性+1' },
-  { id: 'japan_fuji',       name: '富士山朝聖', tier: 'outer', cost: 75_000,  lifeExp: 18, region: '亞太', desc: 'HP+10 精神修復',         special: 'HP+10' },
-  { id: 'silicon_valley',   name: '矽谷考察',   tier: 'outer', cost: 150_000, lifeExp: 20, region: '北美', desc: 'FQ+3，可觸發創業事件',  special: '財商+3' },
-] as const;
-
-const INSURANCE_COSTS: Record<'medical' | 'life' | 'property', number> = {
-  medical: 6_000,
-  life: 3_000,
-  property: 9_000,
-};
 const INSURANCE_LABELS: Record<'medical' | 'life' | 'property', string> = {
   medical: '🏥 醫療險',
   life: '🛡 壽險',
   property: '🏠 財產險',
 };
-
-const LEVERAGE_RATE_MULTIPLIER = 1.25;
-const DCA_AMOUNTS = [15_000, 30_000, 75_000, 150_000, 300_000, 750_000] as const;
-const LOAN_AMOUNTS = [75_000, 150_000, 300_000, 450_000, 750_000] as const;
-
-function getLoanLimit(score: number): number {
-  if (score >= 750) return 1_200_000;
-  if (score >= 650) return 750_000;
-  if (score >= 550) return 450_000;
-  if (score >= 300) return 150_000;
-  return 75_000;
-}
-function getLoanRate(score: number): number {
-  if (score >= 750) return 0.005;
-  if (score >= 650) return 0.008;
-  if (score >= 550) return 0.012;
-  return 0.020;
-}
 
 const fmt = (n: number) => n.toLocaleString();
 
@@ -69,6 +23,7 @@ interface Props {
   onTakeEmergencyLoan: (amount: number) => void;
   onTakeLeverageLoan: (amount: number, targetAssetName: string) => void;
   onInvestStockDCA: (amount: number) => void;
+  onInvestBond?: (amount: number) => void;
   onLoanOffer: (targetId: string, amount: number, monthlyRate: number) => void;
   onLoanRequest: (targetId: string, amount: number, monthlyRate: number) => void;
   onSellAsset: (assetId: string) => void;
@@ -90,6 +45,7 @@ export default function ActionPanel({
   onTakeEmergencyLoan,
   onTakeLeverageLoan,
   onInvestStockDCA,
+  onInvestBond,
   onLoanOffer,
   onLoanRequest,
   onSellAsset,
@@ -106,6 +62,8 @@ export default function ActionPanel({
   const [showLeveragePanel, setShowLeveragePanel] = useState(false);
   const [leverageAssetName, setLeverageAssetName] = useState('');
   const [showDCAPanel, setShowDCAPanel] = useState(false);
+  const [showBondPanel, setShowBondPanel] = useState(false);
+  const [bondPreview, setBondPreview] = useState<number | null>(null);
   const [showP2PPanel, setShowP2PPanel] = useState(false);
   const [homeConfirmId, setHomeConfirmId] = useState<string | null>(null);
   const [showHomePanel, setShowHomePanel] = useState(false);
@@ -129,23 +87,26 @@ export default function ActionPanel({
     ? '自由行程（不限次數）'
     : `本輪剩餘活動：${player.actionTokensThisPayday} 次`;
 
-  const travelDisabled = player.isBedridden || player.stats.health < 50 || noTokensLeft;
+  const travelMinHp = info?.travelMinHp ?? 50;
+  const travelDisabled = player.isBedridden || player.stats.health < travelMinHp || noTokensLeft;
   const socialDisabled = player.isBedridden || player.isMarried || noTokensLeft;
   const tokenReason = '本輪的活動額度已用完（固定班表每輪 1 次，下一輪開始時重置）';
   const travelReason = player.isBedridden ? '臥床中無法出遊'
-    : player.stats.health < 50 ? `健康值 ${player.stats.health} 未達 50，先投資健康`
+    : player.stats.health < travelMinHp ? `健康值 ${player.stats.health} 未達 ${travelMinHp}，先投資健康`
     : noTokensLeft ? tokenReason : '';
   const socialReason = player.isBedridden ? '臥床中無法參加'
     : player.isMarried ? '已婚，不再參加聯誼'
     : noTokensLeft ? tokenReason : '';
 
-  const availableDestinations = info?.travel
-    ? info.travel.map((t) => ({ id: t.id, name: t.name, tier: t.tier, cost: t.cost, lifeExp: t.lifeExp, region: t.region, desc: t.description, special: [t.statEffect?.nt ? `人脈+${t.statEffect.nt}` : '', t.statEffect?.fq ? `財商+${t.statEffect.fq}` : '', t.statEffect?.sk ? `專長+${t.statEffect.sk}` : '', t.statEffect?.hp ? `HP+${t.statEffect.hp}` : '', t.statEffect?.legacyScore ? `傳承+${t.statEffect.legacyScore}` : ''].filter(Boolean).join(' ') }))
-    : DESTINATIONS.filter((d) => d.tier === 'inner' || (d.tier === 'outer' && player.isInFastTrack)).map((d) => ({ ...d, desc: d.desc as string, special: d.special as string }));
+  const availableDestinations = (info?.travel ?? []).map((t) => ({ id: t.id, name: t.name, tier: t.tier, cost: t.cost, lifeExp: t.lifeExp, region: t.region, desc: t.description, special: [t.statEffect?.nt ? `人脈+${t.statEffect.nt}` : '', t.statEffect?.fq ? `財商+${t.statEffect.fq}` : '', t.statEffect?.sk ? `專長+${t.statEffect.sk}` : '', t.statEffect?.hp ? `HP+${t.statEffect.hp}` : '', t.statEffect?.legacyScore ? `傳承+${t.statEffect.legacyScore}` : ''].filter(Boolean).join(' ') }));
   const visited = new Set(player.visitedDestinations ?? []);
 
-  const loanLimit = getLoanLimit(player.creditScore);
-  const loanRate = getLoanRate(player.creditScore);
+  // 利率與額度一律用伺服器算好的值，避免前後端規則不同步
+  const loanLimit = info?.loan.limit ?? 0;
+  const loanRate = info?.loan.rate ?? 0;
+  const leverageRate = info?.loan.leverageRate ?? 0;
+  const loanPresets = info?.loan.presetAmounts ?? [];
+  const insuranceFee = (type: 'medical' | 'life' | 'property') => info?.insurance[type].activationFee ?? 0;
   // 只計算「無擔保負債」（不含房貸、加盟貸款等資產綁定的 secured debt）
   const securedLiabilityIds = new Set(
     (player.assets ?? [])
@@ -347,7 +308,7 @@ export default function ActionPanel({
               <p className="text-sm text-white font-semibold">確認購買 {INSURANCE_LABELS[insuranceConfirm]}：效果與價值</p>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">啟動費</span>
-                <span className="text-red-400 font-bold">-${fmt(INSURANCE_COSTS[insuranceConfirm])}</span>
+                <span className="text-red-400 font-bold">-${fmt(insuranceFee(insuranceConfirm))}</span>
               </div>
               {info && (() => { const ins = info.insurance[insuranceConfirm]; return (
                 <>
@@ -375,11 +336,11 @@ export default function ActionPanel({
               </div>
               <div className="flex justify-between text-sm border-t border-gray-600 pt-2">
                 <span className="text-gray-400">剩餘現金</span>
-                <span className={`font-bold ${player.cash - INSURANCE_COSTS[insuranceConfirm] < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
-                  ${fmt(player.cash - INSURANCE_COSTS[insuranceConfirm])}
+                <span className={`font-bold ${player.cash - insuranceFee(insuranceConfirm) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                  ${fmt(player.cash - insuranceFee(insuranceConfirm))}
                 </span>
               </div>
-              {player.cash < INSURANCE_COSTS[insuranceConfirm] && (
+              {player.cash < insuranceFee(insuranceConfirm) && (
                 <p className="text-xs text-red-400">⚠️ 現金不足，無法購買</p>
               )}
               <div className="grid grid-cols-2 gap-2 pt-1">
@@ -391,7 +352,7 @@ export default function ActionPanel({
                 </button>
                 <button
                   className="btn-primary text-sm"
-                  disabled={player.cash < INSURANCE_COSTS[insuranceConfirm]}
+                  disabled={player.cash < insuranceFee(insuranceConfirm)}
                   onClick={() => { onBuyInsurance(insuranceConfirm); setInsuranceConfirm(null); }}
                 >
                   確認購買
@@ -412,7 +373,7 @@ export default function ActionPanel({
                   >
                     {INSURANCE_LABELS[type]}<br />
                     <span className={owned ? 'text-teal-300' : 'text-gray-400'}>
-                      {owned ? '已投保（點此退保）' : `$${fmt(INSURANCE_COSTS[type])}`}
+                      {owned ? '已投保（點此退保）' : `$${fmt(insuranceFee(type))}`}
                     </span>
                   </button>
                 );
@@ -523,7 +484,7 @@ export default function ActionPanel({
             <div className="space-y-2">
               <p className="text-xs text-gray-400">選擇每次投入金額（指數基金，每月增值 {((info?.dca.monthlyReturnRate ?? 0.006) * 100).toFixed(1)}%、股息 {((info?.dca.monthlyDividendRate ?? 0.003) * 100).toFixed(1)}%，年化約 {info?.dca.annualized ?? 11}%）</p>
               <div className="grid grid-cols-3 gap-2">
-                {DCA_AMOUNTS.map((amt) => {
+                {(info?.dca.amounts ?? []).map((amt) => {
                   const canAfford = player.cash >= amt;
                   return (
                     <button
@@ -559,6 +520,44 @@ export default function ActionPanel({
         </div>
       )}
 
+      {/* ── 債券基金（不限額、穩定配息） ──────────────── */}
+      {!isGameOver && onInvestBond && info && (
+        <div className="card">
+          <div className="flex justify-between items-center mb-2">
+            <p className="text-xs text-gray-400">債券基金（高股息）</p>
+            {info.bond.principal > 0 && <span className="text-xs text-emerald-400">本金 ${fmt(info.bond.principal)}，每月 +${fmt(Math.round(info.bond.principal * info.bond.monthlyYield))}</span>}
+          </div>
+          {bondPreview !== null ? (() => {
+            const amt = bondPreview; const income = Math.round(amt * info.bond.monthlyYield);
+            return <EffectPreview title={`🏦 投入債券基金 $${fmt(amt)}：效果與價值`} rows={[
+              { label: '投入', value: `-$${fmt(amt)}`, tone: 'bad' },
+              { label: '每月配息（被動收入）', value: `+$${fmt(income)}/月`, tone: 'good' },
+              { label: '年化殖利率', value: `約 ${info.bond.annualized}%`, tone: 'neutral' },
+              { label: '合計本金', value: `$${fmt(info.bond.principal + amt)}`, tone: 'neutral' },
+              { label: '剩餘現金', value: `$${fmt(player.cash - amt)}`, tone: 'neutral' },
+            ]} notes={['本金不受股市行情卡影響，賣出時全額拿回、沒有資本利得稅', '報酬比定期定額低（沒有增值），適合把閒置現金換成穩定月收入', '配息乘上財商乘數，算進脫離內圈的被動收入']}
+              confirmLabel="確認投入" onCancel={() => setBondPreview(null)} disabled={player.cash < amt} disabledReason="現金不足"
+              onConfirm={() => { onInvestBond(amt); setBondPreview(null); setShowBondPanel(false); }} />;
+          })() : showBondPanel ? (
+            <div className="space-y-2">
+              <p className="text-xs text-gray-400">不限額；每月配息 {(info.bond.monthlyYield * 100).toFixed(2)}%（年化約 {info.bond.annualized}%），本金穩定</p>
+              <div className="grid grid-cols-3 gap-2">
+                {info.bond.amounts.map((amt) => (
+                  <button key={amt} disabled={player.cash < amt} onClick={() => setBondPreview(amt)}
+                    className={`rounded-lg py-2 text-sm font-semibold border ${player.cash >= amt ? 'bg-teal-900 border-teal-700 text-teal-100 hover:bg-teal-800' : 'bg-gray-800 border-gray-700 text-gray-600 cursor-not-allowed'}`}>
+                    ${fmt(amt)}
+                    {player.cash >= amt && <div className="text-[10px] font-normal text-gray-300">每月 +${fmt(Math.round(amt * info.bond.monthlyYield))}</div>}
+                  </button>
+                ))}
+              </div>
+              <button className="text-xs text-gray-400 underline" onClick={() => setShowBondPanel(false)}>取消</button>
+            </div>
+          ) : (
+            <button className="btn-secondary w-full text-sm" onClick={() => setShowBondPanel(true)}>🏦 投入債券基金（把閒置現金變月收入）</button>
+          )}
+        </div>
+      )}
+
       {/* ── 銀行應急借款 ──────────────── */}
       {!isGameOver && (
         <div className="card">
@@ -590,7 +589,7 @@ export default function ActionPanel({
                 <p className="text-xs text-red-400 text-center py-2">已達借款上限，無法再借</p>
               ) : (
                 <div className="grid grid-cols-2 gap-2">
-                  {LOAN_AMOUNTS.filter((a) => a <= availableLoan).map((amt) => {
+                  {loanPresets.filter((a) => a <= availableLoan).map((amt) => {
                     const monthly = Math.round(amt * loanRate);
                     return (
                       <button
@@ -625,12 +624,12 @@ export default function ActionPanel({
           <div className="flex justify-between items-center mb-2">
             <p className="text-xs text-gray-400">投資槓桿借款</p>
             <span className="text-xs text-gray-500">
-              利率 {(loanRate * LEVERAGE_RATE_MULTIPLIER * 100).toFixed(2)}%/月（不扣信用，比應急借款貴）
+              利率 {(leverageRate * 100).toFixed(2)}%/月（不扣信用，比應急借款貴）
             </span>
           </div>
 
           {showLeveragePanel && leveragePreview !== null ? (() => {
-            const amt = leveragePreview; const rate = loanRate * LEVERAGE_RATE_MULTIPLIER; const monthly = Math.max(1, Math.round(amt * rate));
+            const amt = leveragePreview; const rate = leverageRate; const monthly = Math.max(1, Math.round(amt * rate));
             return <EffectPreview title={`🚀 槓桿借款 $${fmt(amt)}：效果與價值`} rows={[
               { label: '拿到現金', value: `+$${fmt(amt)}`, tone: 'good' },
               { label: '每月利息', value: `-$${fmt(monthly)}/月（${(rate * 100).toFixed(2)}%）`, tone: 'bad' },
@@ -661,8 +660,8 @@ export default function ActionPanel({
                 <p className="text-xs text-red-400 text-center py-2">已達借款上限，無法再借</p>
               ) : (
                 <div className="grid grid-cols-2 gap-2">
-                  {LOAN_AMOUNTS.filter((a) => a <= availableLoan).map((amt) => {
-                    const monthly = Math.max(1, Math.round(amt * loanRate * LEVERAGE_RATE_MULTIPLIER));
+                  {loanPresets.filter((a) => a <= availableLoan).map((amt) => {
+                    const monthly = Math.max(1, Math.round(amt * leverageRate));
                     const disabled = !leverageAssetName.trim();
                     return (
                       <button

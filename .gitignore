@@ -12,3 +12,6 @@ node_modules/
 .DS_Store
 .vercel
 .env*.local
+
+# 房間存檔（本機測試用；正式環境寫在 Railway volume）
+data/

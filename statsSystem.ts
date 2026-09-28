@@ -62,6 +62,7 @@ export interface PaydayPlanResult {
     networkInvest: InvestmentOutcome;
   };
   stockDCA: { executed: boolean; amount: number; newPortfolioValue: number };
+  bond: { executed: boolean; amount: number; monthlyIncome: number };
   insurancePurchases: Array<{ type: string; success: boolean; message?: string }>;
   statsAfter: {
     financialIQ: number;
@@ -244,6 +245,14 @@ export function applyPaydayPlan(player: Player, plan: PaydayPlanPayload): Payday
     stockDCAResult = { executed: true, amount: dcaAmount, newPortfolioValue: updated?.currentValue ?? dcaAmount };
   }
 
+  // --- 債券基金（不限額、穩定配息）---
+  let bondResult: { executed: boolean; amount: number; monthlyIncome: number } = { executed: false, amount: plan.bondAmount ?? 0, monthlyIncome: 0 };
+  if ((plan.bondAmount ?? 0) > 0) {
+    const { investBondFund } = require('./bondFund') as typeof import('./bondFund');
+    const r = investBondFund(player, plan.bondAmount!);
+    bondResult = { executed: r.success, amount: plan.bondAmount!, monthlyIncome: r.monthlyIncome ?? 0 };
+  }
+
   // --- 保險購買 ---
   const insurancePurchases: Array<{ type: string; success: boolean; message?: string }> = [];
   for (const insType of plan.buyInsuranceTypes ?? []) {
@@ -266,6 +275,7 @@ export function applyPaydayPlan(player: Player, plan: PaydayPlanPayload): Payday
       networkInvest: networkOutcome,
     },
     stockDCA: stockDCAResult,
+    bond: bondResult,
     insurancePurchases,
     statsAfter: {
       financialIQ: player.stats.financialIQ,

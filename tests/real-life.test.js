@@ -158,3 +158,29 @@ test('自然壽命：80 歲前 0；之後依 HP 提高；年齡由回合同步',
   syncPlayerAges(game);
   assert.equal(p.currentAge, 80);
 });
+
+test('債券基金：不限額、配息算被動收入、本金不受股市卡影響、賣出全額拿回不課稅', () => {
+  const { investBondFund, BOND_FUND_ID } = require('../dist/bondFund');
+  const { sellAsset } = require('../dist/gameLogic');
+  const { applyMarketCard } = require('../dist/cardSystem');
+  const { MARKET_CARDS } = require('../dist/gameCards');
+  const p = createPlayer('b', '存錢族', 'teacher');
+  p.cash = 5_000_000;
+  assert.equal(investBondFund(p, 0).success, false);
+  assert.equal(investBondFund(p, 9_000_000).success, false, '現金不足');
+  const r1 = investBondFund(p, 3_000_000);
+  assert.equal(r1.success, true);
+  assert.equal(r1.monthlyIncome, Math.round(3_000_000 * cfg.BOND_FUND_MONTHLY_YIELD));
+  const r2 = investBondFund(p, 1_000_000);
+  assert.equal(r2.principal, 4_000_000, '同一檔累加');
+  assert.equal(p.assets.filter((a) => a.id === BOND_FUND_ID).length, 1);
+  assert.equal(p.totalPassiveIncome, Math.round(4_000_000 * cfg.BOND_FUND_MONTHLY_YIELD));
+  const game = new GameState('B'); game.addPlayer(p);
+  applyMarketCard(game, MARKET_CARDS.find((c) => c.effect === 'PriceDecrease' && c.targetAssetType === 'Stock'));
+  assert.equal(p.assets.find((a) => a.id === BOND_FUND_ID).currentValue, 4_000_000, '股災不影響本金');
+  const cashBefore = p.cash;
+  const sold = sellAsset(p, BOND_FUND_ID);
+  assert.equal(sold.capitalGainsTax, 0);
+  assert.equal(p.cash, cashBefore + 4_000_000);
+  assert.ok(cfg.BOND_FUND_MONTHLY_YIELD * 12 < 0.11, '報酬低於定期定額');
+});

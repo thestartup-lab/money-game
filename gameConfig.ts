@@ -41,6 +41,12 @@ export const STOCK_DCA_MONTHLY_DIVIDEND_RATE = 0.003;
 /** 股票定期定額可選投入金額選項 */
 export const STOCK_DCA_AMOUNTS = [15_000, 30_000, 75_000, 150_000, 300_000, 750_000] as const;
 
+/** 債券基金：月殖利率 0.35%（年化約 4.2%），本金不受股市行情卡影響、不限額 */
+export const BOND_FUND_MONTHLY_YIELD = 0.0035;
+/** 手機借款面板的快速金額 */
+export const LOAN_PRESET_AMOUNTS = [75_000, 150_000, 300_000, 450_000, 750_000] as const;
+export const BOND_FUND_AMOUNTS = [75_000, 150_000, 300_000, 750_000, 1_500_000, 3_000_000] as const;
+
 /** 「第二人生」格的索引（內圈第 24 格，路過後才能進入外圈）*/
 export const SECOND_LIFE_CELL = 23;
 

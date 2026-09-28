@@ -6,7 +6,9 @@ import { repayRoomLoan, validatePlayerLoan } from './playerLoans';
 import { GameState, Player, PaydayPlanPayload, GamePhase, PlayerEvent, PlayerEventType, DecisionPhaseState, FacilitatorSceneState, AssetType } from './gameDataModels';
 import { previewCareerChange } from './careerStage';
 import { BASIC_INVESTMENTS, buyBasicInvestment } from './basicInvestments';
+import { writeSnapshot, readSnapshots, deleteSnapshot, resolveStateDir, isPersistentVolume, SNAPSHOT_VERSION } from './roomPersistence';
 import { getHomeOffers, buyHome } from './householdLoans';
+import { investBondFund, BOND_FUND_ID } from './bondFund';
 import { syncPlayerAges, getLayoffMonths, createSpouse, checkNaturalDeath, naturalDeathProbability } from './gameLogic';
 import { LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS, MONTHS_PER_ROUND_OPTIONS, CHILD_EXPENSE_BY_AGE, SOCIAL_INSURANCE_RATE, PREMIUM_MULT_BY_STAGE } from './gameConfig';
 import {
@@ -160,6 +162,8 @@ const httpServer = http.createServer((request, response) => {
       revision: process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GIT_COMMIT_SHA ?? 'local',
       rooms: rooms.size,
       uptimeSeconds: Math.floor(process.uptime()),
+      persistence: PERSIST_ENABLED ? (isPersistentVolume() ? 'volume' : 'container-disk') : 'off',
+      restoredRooms: restoredRoomCount,
     }));
     return;
   }
@@ -276,6 +280,7 @@ function scheduleEmptyRoomCleanup(roomId: string): void {
     rooms.delete(roomId);
     roomAdminCredentials.delete(roomId);
     roomAdminSocketIds.delete(roomId);
+    forgetPersistedRoom(roomId);
     console.log(`[autoCleanup] 空房間 ${roomId} 已在 30 分鐘後自動清除`);
   }, EMPTY_ROOM_CLEANUP_MS);
   timer.unref?.();
@@ -405,7 +410,104 @@ function getRoomState(socket: Socket): GameState | null {
  */
 function emitToRoom(roomId: string, event: string, ...args: unknown[]): void {
   io.to(roomId).emit(event, ...args);
+  if (event === 'gameStateUpdate') schedulePersist(roomId);
 }
+
+// ============================================================
+// 房間存檔與還原（伺服器重啟不丟遊戲）
+// ============================================================
+
+/** 正式環境（Railway）或指定 STATE_DIR／PERSIST_ROOMS=1 才存檔；測試與本機開發預設不寫檔。 */
+const PERSIST_ENABLED = process.env.PERSIST_ROOMS !== '0'
+  && Boolean(process.env.STATE_DIR || process.env.RAILWAY_ENVIRONMENT || process.env.PERSIST_ROOMS === '1');
+const PERSIST_DEBOUNCE_MS = 400;
+const persistTimers = new Map<string, NodeJS.Timeout>();
+let restoredRoomCount = 0;
+
+/** 靜止點：沒有人在行動、沒有決策、舞台或發薪進行中；只在這時存檔，還原後一定一致。 */
+function isQuiescent(gs: GameState): boolean {
+  return !gs.turnInProgress && !gs.decisionPhase && !gs.facilitatorScene && !gs.globalPaydayInProgress;
+}
+
+function schedulePersist(roomId: string): void {
+  if (!PERSIST_ENABLED || persistTimers.has(roomId)) return;
+  const timer = setTimeout(() => { persistTimers.delete(roomId); persistRoomNow(roomId); }, PERSIST_DEBOUNCE_MS);
+  timer.unref?.();
+  persistTimers.set(roomId, timer);
+}
+
+function persistRoomNow(roomId: string): boolean {
+  const gs = rooms.get(roomId);
+  if (!PERSIST_ENABLED || !gs || !isQuiescent(gs)) return false;
+  try {
+    writeSnapshot({
+      version: SNAPSHOT_VERSION,
+      savedAt: new Date().toISOString(),
+      roomId,
+      gameState: gs,
+      credential: roomAdminCredentials.get(roomId) ?? null,
+      sessions: [...playerSessions.entries()].filter(([, session]) => session.roomId === roomId),
+    }, resolveStateDir());
+    return true;
+  } catch (error) {
+    console.error(`[persist] 房間 ${roomId} 存檔失敗：`, (error as Error).message);
+    return false;
+  }
+}
+
+function forgetPersistedRoom(roomId: string): void {
+  const timer = persistTimers.get(roomId);
+  if (timer) { clearTimeout(timer); persistTimers.delete(roomId); }
+  if (!PERSIST_ENABLED) return;
+  try { deleteSnapshot(roomId, resolveStateDir()); } catch (error) { console.error(`[persist] 刪除 ${roomId} 存檔失敗：`, (error as Error).message); }
+}
+
+/** 開機時還原所有存檔房間：清掉進行中的暫態、全員標為斷線、暫停遊戲等主持人按繼續。 */
+function restorePersistedRooms(): void {
+  if (!PERSIST_ENABLED) return;
+  const { snapshots, errors } = readSnapshots(resolveStateDir());
+  for (const error of errors) console.error(`[persist] 無法還原：${error}`);
+  for (const snap of snapshots) {
+    const gs = snap.gameState;
+    const savedAt = new Date(snap.savedAt);
+    gs.turnInProgress = false;
+    gs.decisionPhase = null;
+    gs.facilitatorScene = null;
+    gs.facilitatorSceneContext = null;
+    gs.globalPaydayInProgress = false;
+    gs.actionPhaseDone = new Set();
+    gs.activeAuctions = {};
+    gs.pendingPartnershipOffers = {};
+    gs.pendingLoanOffers = {};
+    gs.pendingLoanRequests = {};
+    gs.adminSocketId = undefined;
+    for (const player of gs.players.values()) player.isDisconnected = true;
+    const running = gs.gamePhase === GamePhase.RatRace || gs.gamePhase === GamePhase.FastTrack;
+    if (running) {
+      // 停機期間不算遊戲時間；等主持人確認大家都回來再按繼續
+      if (!gs.pausedAt) gs.pausedAt = savedAt;
+      if (!gs.paydayPausedAt) gs.paydayPausedAt = savedAt;
+      gs.restoredAt = snap.savedAt;
+      queueSecondLifeCandidates(gs);
+    }
+    rooms.set(snap.roomId, gs);
+    if (snap.credential) roomAdminCredentials.set(snap.roomId, snap.credential);
+    for (const [playerId, session] of snap.sessions) playerSessions.set(playerId, { ...session, socketId: '' });
+    scheduleEmptyRoomCleanup(snap.roomId);
+    restoredRoomCount += 1;
+    console.log(`[persist] 已還原房間 ${snap.roomId}（${gs.players.size} 位玩家，第 ${gs.turnNumber} 輪，存檔時間 ${snap.savedAt}）`);
+  }
+}
+
+/** 部署或關機時（SIGTERM）把每個房間最後的靜止狀態寫下來再離開 */
+function flushAllRoomsAndExit(signal: string): void {
+  let saved = 0;
+  for (const roomId of rooms.keys()) if (persistRoomNow(roomId)) saved += 1;
+  if (PERSIST_ENABLED) console.log(`[persist] 收到 ${signal}，已存檔 ${saved}/${rooms.size} 個房間`);
+  process.exit(0);
+}
+process.once('SIGTERM', () => flushAllRoomsAndExit('SIGTERM'));
+process.once('SIGINT', () => flushAllRoomsAndExit('SIGINT'));
 
 /**
  * 向當前玩家發送落地通知，並同時廣播給全房（供大螢幕顯示）。
@@ -1773,9 +1875,12 @@ function buildActionInfo(p: Player): object {
       peakStart: marriageWindow.peakStart, peakEnd: marriageWindow.peakEnd, threshold: RELATIONSHIP_MARRIAGE_THRESHOLD, currentDrs: p.relationshipPoints, active: p.relationshipActive, minHp: HP_ACTIVITY_THRESHOLDS.socialEvent },
     insurance,
     premiumMultiplier: premiumMult,
+    bond: { monthlyYield: cfg.BOND_FUND_MONTHLY_YIELD, annualized: Math.round(cfg.BOND_FUND_MONTHLY_YIELD * 12 * 1000) / 10, amounts: cfg.BOND_FUND_AMOUNTS,
+      principal: p.assets.find((a) => a.id === BOND_FUND_ID)?.cost ?? 0 },
     dca: { monthlyReturnRate: STOCK_DCA_MONTHLY_RETURN_RATE, monthlyDividendRate: STOCK_DCA_MONTHLY_DIVIDEND_RATE,
-      annualized: Math.round((Math.pow(1 + STOCK_DCA_MONTHLY_RETURN_RATE, 12) - 1 + STOCK_DCA_MONTHLY_DIVIDEND_RATE * 12) * 1000) / 10 },
-    loan: { rate, leverageRate: rate * cfg.LEVERAGE_RATE_MULTIPLIER, limit: getLoanLimit(p.creditScore), available: getAvailableLoan(p),
+      annualized: Math.round((Math.pow(1 + STOCK_DCA_MONTHLY_RETURN_RATE, 12) - 1 + STOCK_DCA_MONTHLY_DIVIDEND_RATE * 12) * 1000) / 10,
+      amounts: cfg.STOCK_DCA_AMOUNTS },
+    loan: { rate, leverageRate: rate * cfg.LEVERAGE_RATE_MULTIPLIER, limit: getLoanLimit(p.creditScore), available: getAvailableLoan(p), presetAmounts: cfg.LOAN_PRESET_AMOUNTS,
       emergencyCreditPenalty: cfg.CREDIT_CHANGE_EMERGENCY_LOAN, repayCredit: cfg.CREDIT_CHANGE_REPAY, clearCredit: 25, negativeCashflowCredit: cfg.CREDIT_CHANGE_NEGATIVE_CF,
       tiers: cfg.LOAN_RATE_BY_TIER.map((t) => ({ minScore: t.minScore, rate: t.rate, limit: getLoanLimit(t.minScore) })) },
     capitalGainsTaxRate: cfg.CAPITAL_GAINS_TAX_RATE,
@@ -2024,6 +2129,7 @@ function serializeGameState(gs: GameState): object {
     isManuallyPaused: gs.pausedAt !== null && !gs.decisionPhase && !gs.facilitatorScene,
     readingAutoContinueMs: gs.readingAutoContinueMs,
     marriageGiftOverride: gs.marriageGiftOverride,
+    restoredAt: gs.restoredAt,
     monthsPerRound: gs.monthsPerRound || MONTHS_PER_ROUND,
     autoRevealOnSubmit: gs.autoRevealOnSubmit,
     actionPhaseDone: gs.decisionPhase?.playerId === '__all_players__' && (gs.decisionPhase.kind === 'actions' || gs.decisionPhase.kind === 'payday') ? [...gs.actionPhaseDone] : [],
@@ -2921,7 +3027,7 @@ function emitClient(socket: Socket, event: string, ...args: unknown[]) {
   } else socket.emit(event, ...args);
 }
 const financialActions = new Set(['sellAsset', 'buyInsurance', 'cancelInsurance',
-  'takeEmergencyLoan', 'investStockDCA', 'takeLeverageLoan', 'repayLoan', 'buyFranchise',
+  'takeEmergencyLoan', 'investStockDCA', 'investBond', 'buyHome', 'takeLeverageLoan', 'repayLoan', 'buyFranchise',
   'partnershipOffer', 'partnershipResponse', 'loanOffer', 'loanResponse', 'loanRequest', 'loanRequestResponse',
   'goTravel', 'attendSocialEvent']);
 const setupActions = new Set(['rollSocialClass', 'allocateGrowthStats', 'continueEducation', 'selectQuadrant']);
@@ -3070,6 +3176,7 @@ io.on('connection', (socket: Socket) => {
     rooms.delete(roomId);
     roomAdminCredentials.delete(roomId);
     roomAdminSocketIds.delete(roomId);
+    forgetPersistedRoom(roomId);
 
     for (const [id, session] of playerSessions) if (session.roomId === roomId) {
       playerSessions.delete(id);
@@ -3799,6 +3906,20 @@ io.on('connection', (socket: Socket) => {
     logPlayerEvent(player, gs, 'asset_buy', result.message, _bhCB, _bhFB, _bhNWB, { source: 'home', optionId: payload.optionId, price: result.price, monthlyPayment: result.monthlyPayment });
     emitClient(socket, 'homeBought', result);
     emitToRoom(gs.gameId, 'notification', { message: `🏠 ${player.name} 買了房子：${result.message}` });
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
+  // 債券基金 (investBond)：不限額，穩定配息
+  onSafe('investBond', (payload: { amount: number }) => {
+    const gs = getRoomState(socket);
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    const player = gs.players.get(playerIdentity(socket));
+    if (!player || !player.isAlive) { emitClient(socket, 'error', { message: '玩家不存在或已出局。' }); return; }
+    const _bdCB = player.cash; const _bdFB = player.monthlyCashflow; const _bdNWB = calcNetWorth(player);
+    const result = investBondFund(player, payload.amount);
+    if (!result.success) { emitClient(socket, 'error', { message: result.message }); return; }
+    logPlayerEvent(player, gs, 'asset_buy', result.message, _bdCB, _bdFB, _bdNWB, { source: 'bond', amount: payload.amount });
+    emitClient(socket, 'bondResult', result);
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 
@@ -5152,6 +5273,7 @@ io.on('connection', (socket: Socket) => {
 
     resumeGameClock(gs);
     resumePaydayClock(gs);
+    gs.restoredAt = null;
     const currentAge = getCurrentAge(gs);
     console.log(`[resumeGame] 房間 ${roomId} 時鐘恢復，目前年齡：${currentAge.toFixed(1)} 歲`);
 
@@ -7472,6 +7594,8 @@ function buildAvailableProfessions(player: Player): object[] {
 // ============================================================
 // 啟動伺服器
 // ============================================================
+
+restorePersistedRooms();
 
 httpServer.listen(PORT, () => {
   console.log(`====================================`);

@@ -9,13 +9,12 @@ interface PaydayPlanFormProps {
   onSubmit: (plan: PaydayPlanPayload, lifeChoice: LifeChoice) => void;
 }
 
-const INSURANCE_CONFIG = {
-  medical:  { label: '醫療險', monthlyPremium: 3_000, activationFee: 6_000, icon: '🏥', key: 'hasMedicalInsurance' as const },
-  life:     { label: '壽險',   monthlyPremium: 1_500, activationFee: 3_000, icon: '🛡️', key: 'hasLifeInsurance' as const },
-  property: { label: '財產險', monthlyPremium: 4_500, activationFee: 9_000, icon: '🏠', key: 'hasPropertyInsurance' as const },
+/** 只放畫面用的標籤與圖示；費用、保費一律讀伺服器的 actionInfo */
+const INSURANCE_UI = {
+  medical:  { label: '醫療險', icon: '🏥', key: 'hasMedicalInsurance' as const },
+  life:     { label: '壽險',   icon: '🛡️', key: 'hasLifeInsurance' as const },
+  property: { label: '財產險', icon: '🏠', key: 'hasPropertyInsurance' as const },
 };
-
-const DCA_AMOUNTS = [15_000, 30_000, 75_000, 150_000, 300_000, 750_000] as const;
 
 export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSubmit }: PaydayPlanFormProps) {
   const [checks, setChecks] = useState({
@@ -26,6 +25,9 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
     networkInvest: false,
   });
   const [dcaAmount, setDcaAmount] = useState(0);
+  const [bondAmount, setBondAmount] = useState(0);
+  const info = data.actionInfo;
+  const activationFee = (type: 'medical' | 'life' | 'property') => info?.insurance[type].activationFee ?? 0;
   const [basicInvestmentId, setBasicInvestmentId] = useState<string | undefined>();
   const [basicQty, setBasicQty] = useState(1);
   const [buyIns, setBuyIns] = useState<Array<'medical' | 'life' | 'property'>>([]);
@@ -41,8 +43,9 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
     if (checks.skillTraining) cost += data.affordableOptions.skillTraining.cost;
     if (checks.networkInvest) cost += data.affordableOptions.networkInvest.cost;
     cost += dcaAmount;
+    cost += bondAmount;
     cost += (data.basicInvestments?.find(item => item.id === basicInvestmentId)?.cost ?? 0) * basicQty;
-    for (const t of buyIns) cost += INSURANCE_CONFIG[t].activationFee;
+    for (const t of buyIns) cost += activationFee(t);
     if (lifeChoice.type === 'travel') {
       const dest = data.travelDestinations?.find((d) => d.id === (lifeChoice as { type: 'travel'; destinationId: string; destinationName: string }).destinationId);
       if (dest) cost += dest.cost;
@@ -76,6 +79,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
       investInSkillTraining: checks.skillTraining,
       investInNetwork: checks.networkInvest,
       stockDCAAmount: dcaAmount,
+      bondAmount,
       buyInsuranceTypes: buyIns,
       lifestyle,
       healthHabit,
@@ -250,7 +254,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
                 onClick={() => setDcaAmount(0)}
                 className={`flex-1 py-1.5 rounded-lg text-xs transition-colors ${dcaAmount === 0 ? 'bg-gray-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
               >不投入</button>
-              {DCA_AMOUNTS.map((amt) => (
+              {(info?.dca.amounts ?? []).map((amt) => (
                 <button
                   key={amt}
                   disabled={remaining + (dcaAmount === amt ? amt : 0) < amt}
@@ -272,12 +276,38 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
             )}
           </div>
 
+          {/* 債券基金：不限額、穩定配息，把閒置現金變月收入 */}
+          {info && (
+            <div className="bg-gray-800 rounded-xl p-3 mb-2 border border-teal-800">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-lg">🏦</span>
+                <div>
+                  <div className="text-sm text-white font-semibold">債券基金（高股息，不限額）</div>
+                  <div className="text-xs text-teal-300">{info.bond.principal > 0 ? `目前本金 $${info.bond.principal.toLocaleString()}；` : ''}每月配息 {(info.bond.monthlyYield * 100).toFixed(2)}%（年化約 {info.bond.annualized}%），本金不受股市影響</div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => setBondAmount(0)}
+                  className={`flex-1 py-1.5 rounded-lg text-xs ${bondAmount === 0 ? 'bg-gray-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}>不投入</button>
+                {info.bond.amounts.map((amt) => (
+                  <button key={amt} disabled={remaining + (bondAmount === amt ? amt : 0) < amt} onClick={() => setBondAmount(bondAmount === amt ? 0 : amt)}
+                    className={`flex-1 py-1.5 rounded-lg text-xs ${bondAmount === amt ? 'bg-teal-600 text-white' : remaining + (bondAmount === amt ? amt : 0) < amt ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-gray-700 text-gray-300 hover:bg-teal-700'}`}>
+                    ${amt >= 1_000_000 ? `${(amt / 1_000_000).toFixed(1)}M` : `${(amt / 1000).toFixed(0)}k`}</button>
+                ))}
+              </div>
+              {bondAmount > 0 && (
+                <p className="mt-2 text-[11px] leading-snug text-emerald-300">價值：投入 ${bondAmount.toLocaleString()} → 每月配息 +${Math.round(bondAmount * info.bond.monthlyYield).toLocaleString()}（被動收入，乘財商乘數）；報酬低於定期定額但本金穩定，賣出全額拿回。</p>
+              )}
+            </div>
+          )}
+
           {/* 保險購買 */}
           <div className="space-y-2">
-            {(Object.entries(INSURANCE_CONFIG) as [keyof typeof INSURANCE_CONFIG, typeof INSURANCE_CONFIG[keyof typeof INSURANCE_CONFIG]][]).map(([type, cfg]) => {
+            {(Object.entries(INSURANCE_UI) as [keyof typeof INSURANCE_UI, typeof INSURANCE_UI[keyof typeof INSURANCE_UI]][]).map(([type, cfg]) => {
               const alreadyOwned = ins[cfg.key];
               const checked = buyIns.includes(type);
-              const canAfford = remaining + (checked ? cfg.activationFee : 0) >= cfg.activationFee;
+              const fee = activationFee(type);
+              const canAfford = remaining + (checked ? fee : 0) >= fee;
               if (alreadyOwned) return null;
               return (
                 <label
@@ -297,7 +327,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
                   <div className="flex-1">
                     <div className="text-sm text-white">{cfg.label}</div>
                     <div className="text-xs text-gray-400">
-                      月保費 ${(data.actionInfo?.insurance[type].monthlyPremium ?? cfg.monthlyPremium).toLocaleString()}{data.actionInfo && data.actionInfo.premiumMultiplier !== 1 ? `（年齡倍率 ×${data.actionInfo.premiumMultiplier}）` : ''} ｜ 啟動費 ${cfg.activationFee.toLocaleString()}
+                      月保費 ${(info?.insurance[type].monthlyPremium ?? 0).toLocaleString()}{data.actionInfo && data.actionInfo.premiumMultiplier !== 1 ? `（年齡倍率 ×${data.actionInfo.premiumMultiplier}）` : ''} ｜ 啟動費 ${fee.toLocaleString()}
                     </div>
                     {data.actionInfo && (
                       <div className="mt-0.5 text-[11px] leading-snug text-emerald-300">
@@ -315,7 +345,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
         <section>
           <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">目前保險狀態</h3>
           <div className="grid grid-cols-3 gap-2">
-            {(Object.entries(INSURANCE_CONFIG) as [keyof typeof INSURANCE_CONFIG, typeof INSURANCE_CONFIG[keyof typeof INSURANCE_CONFIG]][]).map(([type, cfg]) => {
+            {(Object.entries(INSURANCE_UI) as [keyof typeof INSURANCE_UI, typeof INSURANCE_UI[keyof typeof INSURANCE_UI]][]).map(([type, cfg]) => {
               const owned = ins[cfg.key];
               return (
                 <div key={type} className={`flex flex-col items-center p-2 rounded-xl border text-xs ${owned ? 'border-teal-500 bg-teal-900/30 text-teal-300' : 'border-gray-700 bg-gray-800 text-gray-500'}`}>

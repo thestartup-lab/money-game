@@ -270,6 +270,8 @@ export interface GameState {
   marriageGiftOverride?: number | null;
   /** 每輪結算月數（12／24／48） */
   monthsPerRound?: number;
+  /** 伺服器重啟後從存檔還原的時間；主持人按繼續後清除 */
+  restoredAt?: string | null;
   /** 玩家送出選擇後自動揭曉（預設開） */
   autoRevealOnSubmit?: boolean;
   /** 全體行動時間已按完成的玩家 */
@@ -571,8 +573,9 @@ export interface ActionInfo {
   social: { cost: number; drsMin: number; drsMax: number; inPeak: boolean; peakStart: number; peakEnd: number; threshold: number; currentDrs: number; active: boolean; minHp: number };
   insurance: { medical: ActionInsuranceInfo; life: ActionInsuranceInfo; property: ActionInsuranceInfo };
   premiumMultiplier: number;
-  dca: { monthlyReturnRate: number; monthlyDividendRate: number; annualized: number };
-  loan: { rate: number; leverageRate: number; limit: number; available: number; emergencyCreditPenalty: number; repayCredit: number; clearCredit: number; negativeCashflowCredit: number; tiers: { minScore: number; rate: number; limit: number }[] };
+  dca: { monthlyReturnRate: number; monthlyDividendRate: number; annualized: number; amounts: number[] };
+  bond: { monthlyYield: number; annualized: number; amounts: number[]; principal: number };
+  loan: { rate: number; leverageRate: number; limit: number; available: number; presetAmounts: number[]; emergencyCreditPenalty: number; repayCredit: number; clearCredit: number; negativeCashflowCredit: number; tiers: { minScore: number; rate: number; limit: number }[] };
   capitalGainsTaxRate: number;
   homeTransactionCostRate: number;
   fqMultipliers: number[];
@@ -651,6 +654,7 @@ export interface PaydayPlanPayload {
   investInSkillTraining: boolean;
   investInNetwork: boolean;
   stockDCAAmount: number;
+  bondAmount?: number;
   buyInsuranceTypes: Array<'medical' | 'life' | 'property'>;
   lifeChoice?: LifeChoice;
 }
