@@ -51,6 +51,15 @@ export function registerHostHandlers(socket: Socket, onSafe: OnSafe): void {
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 
+  // 發薪後自動出現全場共同抉擇 (setCommunityChoiceAuto)
+  onSafe('setCommunityChoiceAuto', (payload: { enabled: boolean }) => {
+    const gs = getRoomState(socket);
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    if (!isRoomAdmin(socket, gs)) { emitClient(socket, 'error', { message: '只有管理員可以調整。' }); return; }
+    gs.communityChoiceAuto = payload.enabled === true;
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
   onSafe('startGame', (payload?: { durationMinutes?: number; force?: boolean }) => {
     const gs = getRoomState(socket);
     if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }

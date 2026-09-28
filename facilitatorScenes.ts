@@ -329,36 +329,34 @@ export function applyCommunityChoice(gs: GameState, cardId: string, choiceId: st
     const cashflowBefore = player.monthlyCashflow;
     const netWorthBefore = calcNetWorth(player);
 
+    // 花費依各人每月支出計算，讓不同收入的人都有感
+    const months = (m: number, min: number) => Math.max(min, Math.round(player.totalExpenses * m));
+    const working = player.retirementStatus === 'working' && player.salary > 0;
     if (cardId === 'healthcare' && choiceId === 'safety_net') {
-      spendAvailableCash(player, 12_000);
+      spendAvailableCash(player, months(1, 12_000));
       adjustFacilitatorHealth(player, 10);
       player.stats.network = clampFacilitatorStat(player.stats.network + 1, 1, 10);
     } else if (cardId === 'healthcare') {
-      player.cash += 5_000;
+      player.cash += months(0.3, 5_000);
       adjustFacilitatorHealth(player, -6);
     } else if (cardId === 'technology' && choiceId === 'learn_together') {
-      spendAvailableCash(player, 12_000);
+      spendAvailableCash(player, months(1, 12_000));
       player.stats.financialIQ = clampFacilitatorStat(player.stats.financialIQ + 1, 1, 10);
       player.stats.careerSkill = clampFacilitatorStat(player.stats.careerSkill + 8, 0, 100);
     } else if (cardId === 'technology' && choiceId === 'invest_early') {
-      if (player.cash >= 10_000) {
-        const invested = Math.min(player.cash, 20_000);
+      const target = months(2, 20_000);
+      if (player.cash >= target / 2) {
+        const invested = Math.min(player.cash, target);
         player.cash -= invested;
-        player.assets.push({
-          id: `community-tech-${Date.now()}-${player.id}`,
-          name: '共同科技轉型基金',
-          type: AssetType.Business,
-          cost: invested,
-          currentValue: invested,
-          monthlyCashflow: 1_200,
-        });
+        player.assets.push({ id: `community-tech-${Date.now()}-${player.id}`, name: '共同科技轉型基金', type: AssetType.Business,
+          cost: invested, currentValue: invested, monthlyCashflow: Math.round(invested * 0.006) });
       } else {
         player.stats.careerSkill = clampFacilitatorStat(player.stats.careerSkill + 3, 0, 100);
       }
     } else if (cardId === 'technology') {
       adjustFacilitatorHealth(player, 3);
     } else if (cardId === 'climate' && choiceId === 'rebuild') {
-      spendAvailableCash(player, 10_000);
+      spendAvailableCash(player, months(1, 10_000));
       adjustFacilitatorHealth(player, 5);
       player.stats.network = clampFacilitatorStat(player.stats.network + 2, 1, 10);
       player.lifeExperience += 6;
@@ -367,6 +365,43 @@ export function applyCommunityChoice(gs: GameState, cardId: string, choiceId: st
       for (const asset of player.assets) {
         asset.currentValue = Math.round((asset.currentValue ?? asset.cost) * 0.92);
       }
+    } else if (cardId === 'housing' && choiceId === 'social_housing') {
+      spendAvailableCash(player, months(0.5, 8_000));
+      if (player.housing === 'rent') player.expenses.rent = Math.round(player.expenses.rent * 0.9);
+      for (const asset of player.assets) if (asset.isResidence) asset.currentValue = Math.round((asset.currentValue ?? asset.cost) * 0.95);
+    } else if (cardId === 'housing') {
+      if (player.housing === 'rent') player.expenses.rent = Math.round(player.expenses.rent * 1.1);
+      for (const asset of player.assets) if (asset.type === AssetType.RealEstate) asset.currentValue = Math.round((asset.currentValue ?? asset.cost) * 1.1);
+    } else if (cardId === 'aging' && choiceId === 'care_fund') {
+      spendAvailableCash(player, months(1, 10_000));
+      adjustFacilitatorHealth(player, 5);
+      player.legacyBonusPoints = (player.legacyBonusPoints ?? 0) + 3;
+    } else if (cardId === 'aging') {
+      if (player.currentAge >= 35 && player.currentAge < 65) {
+        player.recurringExpenses.push({ id: `community-care-${Date.now()}-${player.id}`, label: '家中長輩照護', monthly: 8_000, monthsLeft: 12 });
+      }
+      player.lifeExperience += 3;
+    } else if (cardId === 'literacy' && choiceId === 'fund_education') {
+      spendAvailableCash(player, months(0.5, 6_000));
+      player.stats.financialIQ = clampFacilitatorStat(player.stats.financialIQ + 1, 1, 10);
+    } else if (cardId === 'literacy') {
+      spendAvailableCash(player, Math.min(50_000, Math.round(Math.max(0, player.cash) * 0.05)));
+    } else if (cardId === 'workweek' && choiceId === 'four_day') {
+      if (working) player.salaryGrowthMultiplier = Math.round(player.salaryGrowthMultiplier * 0.95 * 1000) / 1000;
+      adjustFacilitatorHealth(player, 8);
+      player.lifeExperience += 5;
+    } else if (cardId === 'workweek') {
+      if (working) player.cash += Math.round(player.salary * 0.5);
+      adjustFacilitatorHealth(player, -3);
+    } else if (cardId === 'green' && choiceId === 'invest_green') {
+      const invested = Math.min(Math.max(0, player.cash), months(1, 10_000));
+      if (invested > 0) {
+        player.cash -= invested;
+        player.assets.push({ id: `community-green-${Date.now()}-${player.id}`, name: '綠能共同基金', type: AssetType.Other,
+          cost: invested, currentValue: invested, monthlyCashflow: Math.round(invested * 0.006) });
+      }
+    } else if (cardId === 'green') {
+      player.livingCostMultiplier = Math.round(player.livingCostMultiplier * 1.03 * 1000) / 1000;
     }
 
     logPlayerEvent(
@@ -389,6 +424,16 @@ export function applyCommunityChoice(gs: GameState, cardId: string, choiceId: st
     wait: '大家保留資源並恢復健康，但這一輪沒有獲得科技成長。',
     rebuild: '共同重建讓現金減少，卻提高了全場的健康、人脈與生命體驗。',
     protect_self: '大家守住了眼前現金，但健康與現有資產價值都受到衝擊。',
+    social_housing: '社會住宅動工：大家分攤經費，租屋族房租下降，屋主房價小跌。',
+    market: '房價繼續飆：屋主資產增值，租屋族的房租也跟著漲。',
+    care_fund: '長照基金成立：大家出了一筆錢，換來健康與世代之間的信任。',
+    family_care: '各家自己照顧長輩：中年的人接下來一年多了照護支出。',
+    fund_education: '理財教育上路：大家花了一點錢，財商都提升了。',
+    skip: '沒有推動理財教育，詐騙集團趁虛而入，每個人都損失了一些現金。',
+    four_day: '週休三日通過：薪水少了一點，健康與生活體驗變好了。',
+    keep_five: '維持週休二日：多領了加班費，但身體更累了。',
+    invest_green: '綠能基金成立：大家把一個月的錢換成穩定的月配息。',
+    status_quo: '維持現狀：能源漲價，生活成本永久上升。',
   };
   return resultDescriptions[choiceId] ?? choice.description;
 }
@@ -589,4 +634,77 @@ export function applyLegacyAction(
   if (legacyId === 'wisdom') return `${beneficiary.name} 承接智慧：財商增加 1、第二專長增加 6。`;
   if (legacyId === 'network') return `${beneficiary.name} 承接人脈：人脈增加 3、生命體驗增加 5。`;
   return `${deceased.name} 將最後資源化為公益影響；所有仍在旅途中的玩家增加 4 點生命體驗。`;
+}
+
+
+/** 開啟全場共同抉擇（主持人手動或發薪後自動）；每位存活玩家都能在手機投票 */
+export function startCommunityChoice(gs: GameState, cardId: string, reminderSeconds = 90): boolean {
+  const card = COMMUNITY_CHOICE_CARDS.find((candidate) => candidate.id === cardId);
+  if (!card) return false;
+  const voters = [...gs.players.values()].filter((player) => player.isAlive);
+  beginFacilitatorScene(gs, {
+    kind: 'community',
+    kicker: '全場共同抉擇・每人在手機投票',
+    title: card.title,
+    description: card.description,
+    participantNames: voters.map((player) => player.name),
+    options: card.options,
+    reminderEndsAt: Date.now() + reminderSeconds * 1000,
+    votes: Object.fromEntries(card.options.map((option) => [option.id, 0])),
+    votedCount: 0,
+    voterCount: voters.length,
+  }, { cardId: card.id, ballots: {} as Record<string, string> });
+  gs.communityChoiceHistory = [...gs.communityChoiceHistory.filter((id) => id !== card.id), card.id];
+  return true;
+}
+
+/** 記錄一票（可改票）；回傳錯誤訊息或 null */
+export function recordCommunityVote(gs: GameState, playerId: string, sceneId: string, optionId: string): string | null {
+  const scene = gs.facilitatorScene;
+  const context = gs.facilitatorSceneContext;
+  if (!scene || !context || scene.kind !== 'community' || scene.stage !== 'prompt' || scene.id !== sceneId) return '這次投票已經結束。';
+  const player = gs.players.get(playerId);
+  if (!player?.isAlive) return '只有仍在遊戲中的玩家可以投票。';
+  if (!scene.options?.some((option) => option.id === optionId)) return '沒有這個選項。';
+  const ballots = (context.ballots ?? {}) as Record<string, string>;
+  // 重複投同一票：不重算、不廣播（避免出錯的頁面一直重送造成全房更新風暴）
+  if (ballots[playerId] === optionId) return null;
+  ballots[playerId] = optionId;
+  context.ballots = ballots;
+  const votes: Record<string, number> = Object.fromEntries((scene.options ?? []).map((option) => [option.id, 0]));
+  for (const choice of Object.values(ballots)) votes[choice] = (votes[choice] ?? 0) + 1;
+  scene.votes = votes;
+  scene.votedCount = Object.keys(ballots).length;
+  scene.voterCount = [...gs.players.values()].filter((candidate) => candidate.isAlive).length;
+  emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  return null;
+}
+
+/** 多數決：票數最多者；同票取畫面上排前面的選項；沒人投票時取第一個選項 */
+export function majorityCommunityChoice(scene: FacilitatorSceneState): string {
+  const options = scene.options ?? [];
+  let best = options[0]?.id ?? '';
+  let bestVotes = -1;
+  for (const option of options) {
+    const votes = scene.votes?.[option.id] ?? 0;
+    if (votes > bestVotes) { best = option.id; bestVotes = votes; }
+  }
+  return best;
+}
+
+export function describeCommunityVotes(scene: FacilitatorSceneState): string {
+  const parts = (scene.options ?? []).map((option) => `${option.label} ${scene.votes?.[option.id] ?? 0} 票`);
+  return `投票結果（${scene.votedCount ?? 0}／${scene.voterCount ?? 0} 人投票）：${parts.join('、')}`;
+}
+
+/** 每次發薪結算後自動出現一張，依序輪替沒出現過的卡 */
+export function tryOpenScheduledCommunityChoice(gs: GameState): boolean {
+  if (!gs.communityChoiceAuto || gs.facilitatorScene || gs.decisionPhase) return false;
+  if (gs.gamePhase !== GamePhase.RatRace && gs.gamePhase !== GamePhase.FastTrack) return false;
+  if (gs.globalPaydayNumber <= gs.lastCommunityChoicePayday) return false;
+  if ([...gs.players.values()].filter((player) => player.isAlive).length === 0) return false;
+  gs.lastCommunityChoicePayday = gs.globalPaydayNumber;
+  const unused = COMMUNITY_CHOICE_CARDS.find((card) => !gs.communityChoiceHistory.includes(card.id));
+  const card = unused ?? COMMUNITY_CHOICE_CARDS.find((candidate) => candidate.id === gs.communityChoiceHistory[0]) ?? COMMUNITY_CHOICE_CARDS[0];
+  return startCommunityChoice(gs, card.id);
 }

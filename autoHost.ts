@@ -4,7 +4,8 @@
  * - 決策：本人送出後 2 秒揭曉；沒人送出時，提醒倒數歸零就收束（發薪用空白方案、交易視為放棄、競標結標）。
  * - 系統自動出現的舞台（第二人生、家庭、婚姻、世界事件、決策回聲）停留幾秒讓大家看完再揭曉；結果顯示幾秒後自動關閉。
  * - 需要本人選擇的舞台（轉職、65 歲轉折）等本人在手機選；倒數歸零還沒選時，轉職視為取消、轉折預設退休。
- * - 主持人自己開的舞台（全場抉擇、合作契約、傳承）仍由主持人操作。
+ * - 全場共同抉擇：全員投完票 2 秒後、或倒數結束時，依多數決揭曉。
+ * - 主持人自己開的合作契約、傳承仍由主持人操作。
  * - 排隊的轉職申請在空檔時依序開啟。
  * - 主持人手動暫停（含伺服器重啟後的還原暫停）時不動作。
  */
@@ -103,6 +104,15 @@ export function runAutoHost(gs: GameState, now = Date.now()): string | null {
       if (scene.careerConfirmed && context.choice) {
         resolveFacilitatorSceneChoice(gs, scene.id, 'reveal', ignore);
         return `揭曉人生轉折：${scene.title}`;
+      }
+      return null;
+    }
+    if (scene.kind === 'community') {
+      // 全員投完票就揭曉；否則倒數結束依多數決
+      const allVoted = (scene.voterCount ?? 0) > 0 && (scene.votedCount ?? 0) >= (scene.voterCount ?? 0);
+      if ((allVoted && now - seen.firstAt >= wait(AUTO_HOST_TIMING.submittedRevealMs)) || now >= deadline) {
+        resolveFacilitatorSceneChoice(gs, scene.id, 'majority', ignore);
+        return `共同抉擇依多數決揭曉：${scene.title}`;
       }
       return null;
     }

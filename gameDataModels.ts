@@ -232,6 +232,10 @@ export interface FacilitatorSceneState {
   resumeOnClose: boolean;
   careerPlayerId?: string;
   careerConfirmed?: boolean;
+  /** 全場共同抉擇的公開票數（每個選項幾票）；誰投哪一票不公開 */
+  votes?: Record<string, number>;
+  votedCount?: number;
+  voterCount?: number;
 }
 
 export type AdaptiveDifficultyMode = 'support' | 'balanced' | 'challenge';
@@ -861,6 +865,11 @@ export class GameState {
   autoRevealOnSubmit = true;
   /** 全自動主持：系統代按繼續、揭曉舞台、開轉職（見 autoHost.ts） */
   autoHost = false;
+  /** 每次發薪結算後自動出現一張全場共同抉擇 */
+  communityChoiceAuto = true;
+  lastCommunityChoicePayday = 0;
+  /** 已出現過的共同抉擇卡（依出現順序），用來輪替不重複 */
+  communityChoiceHistory: string[] = [];
   /** 已跑過「全體行動時間」的輪數（turnNumber）；每輪開始只跑一次 */
   /** 每輪開始是否開「全體行動時間」（主持人可關） */
   actionPhaseEnabled = true;

@@ -651,13 +651,21 @@ export default function AdminPage() {
                 </div>
                 <p className="mt-1 text-[11px] text-gray-500">開啟時玩家一送出就在 1.5 秒後揭曉；競標仍由你按「結束競標」。</p>
                 <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="font-bold text-gray-200">🗳️ 發薪後全場共同抉擇</span>
+                  <button
+                    className={`rounded-lg px-2 py-1 font-bold ${gameState?.communityChoiceAuto !== false ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+                    onClick={() => emit('setCommunityChoiceAuto', { enabled: gameState?.communityChoiceAuto === false })}
+                  >{gameState?.communityChoiceAuto !== false ? '開啟中' : '關閉中'}</button>
+                </div>
+                <p className="mt-1 text-[11px] text-gray-500">每次發薪結算完自動出現一張（8 張輪替），每人在手機投票，你按「依多數決揭曉」或自己裁定。</p>
+                <div className="mt-2 flex items-center justify-between gap-2">
                   <span className="font-bold text-gray-200">🤖 全自動主持</span>
                   <button
                     className={`rounded-lg px-2 py-1 font-bold ${gameState?.autoHost ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
                     onClick={() => emit('setAutoHost', { enabled: !gameState?.autoHost })}
                   >{gameState?.autoHost ? '開啟中（點此改回手動）' : '關閉中（點此開啟）'}</button>
                 </div>
-                <p className="mt-1 text-[11px] text-gray-500">適合小場次：倒數結束自動收束決策與競標、系統舞台停留 8 秒後自動揭曉、結果 8 秒後關閉、轉職申請自動依序開啟。轉職與 65 歲轉折仍等本人選，逾時轉職取消、轉折預設退休。你自己開的舞台（全場抉擇、合作、傳承）與暫停仍由你控制。</p>
+                <p className="mt-1 text-[11px] text-gray-500">適合小場次：倒數結束自動收束決策與競標、系統舞台停留 8 秒後自動揭曉、結果 8 秒後關閉、轉職申請自動依序開啟。轉職與 65 歲轉折仍等本人選，逾時轉職取消、轉折預設退休。全場共同抉擇在全員投完或倒數結束時依多數決揭曉。你自己開的合作契約、傳承與暫停仍由你控制。</p>
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <span className="font-bold text-gray-200">每輪開始的全體行動時間</span>
                   <button

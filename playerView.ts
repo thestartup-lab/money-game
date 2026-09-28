@@ -353,6 +353,7 @@ export function serializeGameState(gs: GameState): object {
     monthsPerRound: gs.monthsPerRound || MONTHS_PER_ROUND,
     autoRevealOnSubmit: gs.autoRevealOnSubmit,
     autoHost: gs.autoHost,
+    communityChoiceAuto: gs.communityChoiceAuto,
     actionPhaseDone: gs.decisionPhase?.playerId === '__all_players__' && (gs.decisionPhase.kind === 'actions' || gs.decisionPhase.kind === 'payday') ? [...gs.actionPhaseDone] : [],
     actionPhaseEnabled: gs.actionPhaseEnabled,
     activeAuctions: Object.entries(gs.activeAuctions ?? {}).map(([auctionId, a]) => ({

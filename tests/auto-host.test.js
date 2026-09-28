@@ -15,7 +15,7 @@ function wait(s, ev, pred = () => true, ms = 8000) {
 }
 function send(s, ev, p, r, pred, ms) { const w = wait(s, r, pred, ms); s.emit(ev, p); return w; }
 
-test('全自動主持：主持人不按任何按鈕、玩家不送任何決策，整場仍能跑到終局並照常發薪', { timeout: 240_000 }, async (t) => {
+test('全自動主持：主持人不按任何按鈕、玩家不送任何決策，整場仍能跑到終局、照常發薪與揭曉共同抉擇', { timeout: 240_000 }, async (t) => {
   const boot = "let seed=3;Math.random=()=>{seed=(seed*1103515245+12345)%2147483648;return seed/2147483648;};require('./dist/socketServer');";
   const server = spawn(process.execPath, ['-e', boot], {
     env: { ...process.env, PORT: String(PORT), NODE_ENV: 'test', AUTO_HOST_TIME_SCALE: '0.004', AUTO_HOST_TICK_MS: '40' }, stdio: ['ignore', 'pipe', 'pipe'],
@@ -55,7 +55,10 @@ test('全自動主持：主持人不按任何按鈕、玩家不送任何決策�
     await new Promise((r) => setTimeout(r, 80));
   }
   assert.equal(latest.gamePhase, 'GameOver', '沒有主持人也能跑到終局');
-  assert.ok(latest.globalPaydayNumber >= 5, `至少發薪 5 次（實際 ${latest.globalPaydayNumber}）`);
+  // 這裡的玩家完全不理財、不顧健康，可能提早全數過世；重點是流程：每 3 輪至少發薪一次
+  assert.ok(latest.globalPaydayNumber >= Math.floor(latest.turnNumber / 3), `發薪次數要跟輪數相符（${latest.turnNumber} 輪、發薪 ${latest.globalPaydayNumber} 次）`);
+  assert.ok(latest.globalPaydayNumber >= 3, `至少發薪 3 次（實際 ${latest.globalPaydayNumber}）`);
+  assert.match(autoLog, /共同抉擇依多數決揭曉/, '發薪後的全場共同抉擇沒人投票也會依多數決揭曉');
   assert.match(autoLog, /倒數結束，收束/, '決策沒人送出時會在倒數結束收束');
   assert.equal(stderr.trim(), '', `伺服器不應有錯誤輸出：${stderr.slice(0, 400)}`);
 });

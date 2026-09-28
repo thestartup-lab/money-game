@@ -12,6 +12,7 @@ import PaydayPlanForm from '../components/game/PaydayPlanForm';
 import MoneyDetailSheet from '../components/game/MoneyDetailSheet';
 import type { MoneyDetailMode } from '../components/game/MoneyDetailSheet';
 import SecondLifeProgressPanel from '../components/game/SecondLifeProgressPanel';
+import CommunityVotePanel from '../components/game/CommunityVotePanel';
 import { formatCountdown, usePaydayCountdown } from '../components/game/paydayCountdown';
 import CollapsePanel from '../components/game/CollapsePanel';
 import DecisionCountdown from '../components/game/DecisionCountdown';
@@ -97,6 +98,7 @@ export default function PlayerPage() {
   type LoanRequest = { requestId: string; borrowerName: string; lenderId: string; amount: number; monthlyRate: number };
   const [congratulatableEvent, setCongratulatableEvent] = useState<CongratulatableEvent | null>(null);
   const [congratsAmount, setCongratsAmount] = useState(7500);
+  const [communityVotes, setCommunityVotes] = useState<Record<string, string>>({});
   const [activeAuction, setActiveAuction] = useState<ActiveAuction | null>(null);
   const [auctionBid, setAuctionBid] = useState('');
   const [partnershipOffer, setPartnershipOffer] = useState<PartnershipOffer | null>(null);
@@ -583,6 +585,7 @@ export default function PlayerPage() {
     });
     s.on('homeBought', (p: { message: string }) => { addNotification(`🏠 ${p.message}`); });
     s.on('bondResult', (p: { message: string }) => { addNotification(`🏦 ${p.message}`); });
+    s.on('communityVoteRecorded', (p: { sceneId: string; optionId: string }) => { setCommunityVotes((prev) => ({ ...prev, [p.sceneId]: p.optionId })); });
 
     // 發薪日結果在主持人收束決策後才公開。
     s.on('paydayPlanResult', (p: { playerId: string; planResult?: { stockDCA?: { executed: boolean; amount: number; newPortfolioValue: number } } }) => {
@@ -710,6 +713,13 @@ export default function PlayerPage() {
   }
 
   const paydayRemaining = usePaydayCountdown(gameState?.paydayTimer, Boolean(gameState?.paydayTimer?.frozen));
+  // 行動面板開放的時段：全體行動時間、本人危機自救；主持人關掉行動時間時才開放回合空檔
+  const canUseActions = Boolean(gameState && !gameState.facilitatorScene && (
+    gameState.decisionPhase?.kind === 'actions'
+    || (gameState.decisionPhase?.rescue && gameState.decisionPhase.playerId === myId)
+    || (gameState.actionPhaseEnabled === false && !gameState.decisionPhase)
+    || gameState.gamePhase === 'GameOver'
+  ));
   const myPlayer: Player | undefined = gameState?.players.find((p) => p.id === myId);
   const isMyTurn = gameState?.currentPlayerTurnId === myId;
   const isGameOver = gameState?.gamePhase === 'GameOver';
@@ -1284,7 +1294,10 @@ export default function PlayerPage() {
             </div>
           )}
 
-          {!isGameOver && gameState.facilitatorScene && gameState.facilitatorScene.careerPlayerId !== myId && (
+          {!isGameOver && gameState.facilitatorScene?.kind === 'community' && (
+            <CommunityVotePanel scene={gameState.facilitatorScene} myVote={communityVotes[gameState.facilitatorScene.id]} canVote={Boolean(myPlayer?.isAlive)} emit={emit} />
+          )}
+          {!isGameOver && gameState.facilitatorScene && gameState.facilitatorScene.kind !== 'community' && gameState.facilitatorScene.careerPlayerId !== myId && (
             <div className="mx-4 mb-3 rounded-2xl border-2 border-yellow-500 bg-gradient-to-br from-indigo-950 to-gray-900 px-5 py-6 text-center shadow-xl">
               <div className="text-5xl" aria-hidden="true">📺</div>
               <p className="mt-3 text-2xl font-black text-white">請抬頭看大螢幕</p>
@@ -1445,7 +1458,14 @@ export default function PlayerPage() {
               <FinancialStatement player={myPlayer} onShowCash={() => setMoneyDetail('cash')} onShowFlow={() => setMoneyDetail('flow')} onShow={(mode) => setMoneyDetail(mode)} />
             </CollapsePanel>
 
-            {(!gameState.decisionPhase || gameState.decisionPhase.kind === 'actions' || (gameState.decisionPhase.rescue && gameState.decisionPhase.playerId === myId)) && !gameState.facilitatorScene && <CollapsePanel title="行動" defaultOpen={Boolean(gameState.decisionPhase?.rescue) || gameState.decisionPhase?.kind === 'actions'}>
+            {!isGameOver && !canUseActions && (gameState.gamePhase === 'RatRace' || gameState.gamePhase === 'FastTrack') && (
+              <div className="mx-4 my-2 rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-sm text-gray-300">
+                {gameState.actionPhaseEnabled === false
+                  ? '🕒 大螢幕進行中，結束後就能在「行動」處理旅遊、聯誼、保險、投資與借還款。'
+                  : <>🕒 旅遊、聯誼、保險、投資、借還款在<strong className="text-white">每輪開始的「全體行動時間」</strong>一起處理；現在請看大螢幕。</>}
+              </div>
+            )}
+            {canUseActions && <CollapsePanel title="行動" defaultOpen={Boolean(gameState.decisionPhase?.rescue) || gameState.decisionPhase?.kind === 'actions'}>
               <ActionPanel
                 player={myPlayer}
                 currentAge={personalAge}

@@ -81,6 +81,12 @@ export default function FacilitatorControlPanel({ gameState, emit }: Props) {
         {scene.stage === 'prompt' ? (
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
             {(scene.kind === 'career' || scene.kind === 'retirement') && !scene.careerConfirmed ? <p className="text-base font-bold text-yellow-200">等待本人在手機{scene.kind === 'retirement' ? '選擇' : '確認'}，主持人不能代為決定。</p> : null}
+            {scene.kind === 'community' ? (
+              <button
+                className="min-h-14 rounded-xl border-2 border-cyan-300 bg-cyan-700 px-3 py-2 text-base font-black text-white hover:bg-cyan-600 sm:col-span-2"
+                onClick={() => emit('resolveFacilitatorScene', { sceneId: scene.id, choiceId: 'majority' })}
+              >依多數決揭曉（已投 {scene.votedCount ?? 0}／{scene.voterCount ?? 0}）</button>
+            ) : null}
             {(scene.options ?? []).map((option) => (
               <button
                 key={option.id}
@@ -89,7 +95,7 @@ export default function FacilitatorControlPanel({ gameState, emit }: Props) {
                 title={(scene.kind === 'career' || scene.kind === 'retirement') && !scene.careerConfirmed ? '等待玩家本人在手機做決定' : undefined}
                 onClick={() => emit('resolveFacilitatorScene', { sceneId: scene.id, choiceId: option.id })}
               >
-                {option.label}
+                {scene.kind === 'community' ? `主持人裁定：${option.label}（${scene.votes?.[option.id] ?? 0} 票）` : option.label}
               </button>
             ))}
             {scene.kind !== 'second_life' && <button

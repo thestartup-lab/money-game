@@ -47,12 +47,19 @@ export default function FacilitatorSceneOverlay({ scene }: Props) {
           <div className={`mx-auto mt-6 grid max-w-5xl gap-4 ${scene.options.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
             {scene.options.map((option, index) => (
               <article key={option.id} className="rounded-3xl border-2 border-gray-600 bg-gray-900 px-6 py-5 text-left">
-                <p className="text-lg font-black text-yellow-300">選項 {index + 1}</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-lg font-black text-yellow-300">選項 {index + 1}</p>
+                  {scene.kind === 'community' && <p className="text-2xl font-black text-cyan-200">{scene.votes?.[option.id] ?? 0} 票</p>}
+                </div>
                 <h3 className="mt-1 text-3xl font-black text-white">{option.label}</h3>
                 <p className="mt-2 text-lg font-semibold leading-relaxed text-gray-300">{option.description}</p>
               </article>
             ))}
           </div>
+        ) : null}
+
+        {!isResult && scene.kind === 'community' ? (
+          <p className="mt-4 text-2xl font-black text-cyan-200">已投票 {scene.votedCount ?? 0}／{scene.voterCount ?? 0} 人・請在手機投下你的一票</p>
         ) : null}
 
         {scene.participantNames.length > 0 ? (
@@ -84,7 +91,7 @@ export default function FacilitatorSceneOverlay({ scene }: Props) {
         ) : null}
 
         <p className="mt-5 text-xl font-black text-emerald-300">
-          {isResult ? '請一起觀察：這個結果改變了誰？' : scene.kind === 'career' ? (scene.careerConfirmed ? '本人已確認，等待主持人揭曉。' : '等待本人在手機確認；時間到不會自動轉職。') : scene.kind === 'retirement' ? (scene.careerConfirmed ? '本人已選擇，等待主持人揭曉。' : '請本人在手機選擇退休、顧問、創業或延後；時間到不會替你選。') : '請抬頭看大螢幕共同討論，由主持人決定何時揭曉。'}
+          {isResult ? '請一起觀察：這個結果改變了誰？' : scene.kind === 'career' ? (scene.careerConfirmed ? '本人已確認，等待主持人揭曉。' : '等待本人在手機確認；時間到不會自動轉職。') : scene.kind === 'retirement' ? (scene.careerConfirmed ? '本人已選擇，等待主持人揭曉。' : '請本人在手機選擇退休、顧問、創業或延後。') : scene.kind === 'community' ? '結果套用到全場每個人：先討論，再各自在手機投票，多數決揭曉。' : '請抬頭看大螢幕共同討論，由主持人決定何時揭曉。'}
         </p>
       </section>
     </main>

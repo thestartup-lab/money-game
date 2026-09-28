@@ -12,6 +12,7 @@ import {
   closeFacilitatorScene, emitAdaptiveDirectorStatus, emitClient, emitToRoom, findDecisionEcho, getPlayerAge,
   getPlayerSocket, getRoomState, isRoomAdmin, logPlayerEvent, resolveFamilyScene, revealFacilitatorResult,
   revealSecondLife, serializeGameState, startFamilyScene, startMarriageScene,
+  startCommunityChoice, recordCommunityVote, majorityCommunityChoice, describeCommunityVotes, playerIdentity,
 } from '../socketServer';
 
 export function registerSceneHandlers(socket: Socket, onSafe: OnSafe): void {
@@ -55,14 +56,7 @@ export function registerSceneHandlers(socket: Socket, onSafe: OnSafe): void {
         emitClient(socket, 'error', { message: '找不到這張共同抉擇事件。' });
         return;
       }
-      beginFacilitatorScene(gs, {
-        kind: 'community',
-        kicker: '全場共同抉擇',
-        title: card.title,
-        description: card.description,
-        participantNames: [...gs.players.values()].filter((player) => player.isAlive).map((player) => player.name),
-        options: card.options,
-      }, { cardId: card.id });
+      startCommunityChoice(gs, card.id);
       return;
     }
 
@@ -181,6 +175,15 @@ export function registerSceneHandlers(socket: Socket, onSafe: OnSafe): void {
       return;
     }
     resolveFacilitatorSceneChoice(gs, payload?.sceneId, payload?.choiceId ?? '', (message) => emitClient(socket, 'error', { message }));
+  });
+
+  // 全場共同抉擇：每位玩家在手機投票（可改票），大螢幕只公開票數
+  onSafe('voteCommunityChoice', (payload: { sceneId: string; optionId: string }) => {
+    const gs = getRoomState(socket);
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    const error = recordCommunityVote(gs, playerIdentity(socket), payload.sceneId, payload.optionId);
+    if (error) { emitClient(socket, 'error', { message: error }); return; }
+    emitClient(socket, 'communityVoteRecorded', { sceneId: payload.sceneId, optionId: payload.optionId });
   });
 
   onSafe('closeFacilitatorScene', (payload?: { sceneId?: string }) => {
@@ -336,13 +339,17 @@ export function resolveFacilitatorSceneChoice(gs: GameState, sceneId: string | u
   }
 
   if (scene.kind === 'community') {
-    const result = applyCommunityChoice(gs, String(context.cardId ?? ''), choiceId);
+    // 'majority' = 依投票多數決；主持人也可以直接指定選項
+    const finalChoice = choiceId === 'majority' ? majorityCommunityChoice(scene) : choiceId;
+    const tally = describeCommunityVotes(scene);
+    const result = applyCommunityChoice(gs, String(context.cardId ?? ''), finalChoice);
     if (!result) {
       fail('請選擇有效的共同決策。');
       return;
     }
-    const optionLabel = scene.options?.find((option) => option.id === choiceId)?.label ?? '共同決策';
-    revealFacilitatorResult(gs, `全場選擇：${optionLabel}`, result);
+    const optionLabel = scene.options?.find((option) => option.id === finalChoice)?.label ?? '共同決策';
+    const byMajority = finalChoice === majorityCommunityChoice(scene);
+    revealFacilitatorResult(gs, `全場選擇：${optionLabel}`, `${tally}${byMajority ? '' : '（主持人裁定）'}\n${result}`);
     return;
   }
 

@@ -159,7 +159,7 @@ import { registerSceneHandlers } from './handlers/sceneHandlers';
 import { registerReviewHandlers } from './handlers/reviewHandlers';
 import { handleLandingSquare } from './landingSquare';
 import { serializeGameState, serializePlayer, buildSecondLifeProgress, buildActionInfo, buildSalaryItems, buildNetWorthBreakdown, buildAffordableOptions, buildAvailableProfessions, careerBlockReason } from './playerView';
-import { clampFacilitatorStat, adjustFacilitatorHealth, spendAvailableCash, beginFacilitatorScene, revealFacilitatorResult, pickMarriageCard, buildMarriageScene, startMarriageScene, transitionFamilySceneToMarriage, startFamilyScene, applyMarriageScene, resolveFamilyScene, closeFacilitatorScene, applyCommunityChoice, applyCooperationContract, findDecisionEcho, applyDecisionEcho, applyLegacyAction } from './facilitatorScenes';
+import { clampFacilitatorStat, adjustFacilitatorHealth, spendAvailableCash, beginFacilitatorScene, revealFacilitatorResult, pickMarriageCard, buildMarriageScene, startMarriageScene, transitionFamilySceneToMarriage, startFamilyScene, applyMarriageScene, resolveFamilyScene, closeFacilitatorScene, applyCommunityChoice, applyCooperationContract, findDecisionEcho, applyDecisionEcho, applyLegacyAction, startCommunityChoice, recordCommunityVote, majorityCommunityChoice, describeCommunityVotes, tryOpenScheduledCommunityChoice } from './facilitatorScenes';
 import { emitQuarterMilestones, settleQuarterMonths, getActiveElapsedMs, roundsSinceLastPayday, paydaySettlementMonths, getPaydayElapsedMs, pausePaydayClock, resumePaydayClock, paydayRemainingMs, isPaydayDue, schedulePaydayIfDue, runGlobalPayday } from './paydayFlow';
 import { beginHostDecisionPhase, waitForHostControlledDecision, waitForHostRelease, describePrompt, waitForCardDecision, applyCrisisWithRescue, scaleFastTrackCrisis } from './decisionPhases';
 import { checkBucketGoals, checkLifeMilestones, buildSecondLifeReview, deathAgeLabel, eliminatePlayer, finishGame, startFinalRound, retirementSceneDescription, queueRetirementCandidates, tryOpenRetirementScene, queueSecondLifeCandidates, tryOpenSecondLife, revealSecondLife, promoteSecondLife, announceCareerUnlock } from './lifeProgress';
@@ -168,7 +168,7 @@ export { emitAdaptiveDirectorStatus, assessAdaptiveDifficulty, getAdaptiveEventP
 export { checkBucketGoals, checkLifeMilestones, buildSecondLifeReview, deathAgeLabel, eliminatePlayer, finishGame, startFinalRound, retirementSceneDescription, queueRetirementCandidates, tryOpenRetirementScene, queueSecondLifeCandidates, tryOpenSecondLife, revealSecondLife, promoteSecondLife, announceCareerUnlock };
 export { beginHostDecisionPhase, waitForHostControlledDecision, waitForHostRelease, describePrompt, waitForCardDecision, applyCrisisWithRescue, scaleFastTrackCrisis };
 export { emitQuarterMilestones, settleQuarterMonths, getActiveElapsedMs, roundsSinceLastPayday, paydaySettlementMonths, getPaydayElapsedMs, pausePaydayClock, resumePaydayClock, paydayRemainingMs, isPaydayDue, schedulePaydayIfDue, runGlobalPayday };
-export { clampFacilitatorStat, adjustFacilitatorHealth, spendAvailableCash, beginFacilitatorScene, revealFacilitatorResult, pickMarriageCard, buildMarriageScene, startMarriageScene, transitionFamilySceneToMarriage, startFamilyScene, applyMarriageScene, resolveFamilyScene, closeFacilitatorScene, applyCommunityChoice, applyCooperationContract, findDecisionEcho, applyDecisionEcho, applyLegacyAction };
+export { clampFacilitatorStat, adjustFacilitatorHealth, spendAvailableCash, beginFacilitatorScene, revealFacilitatorResult, pickMarriageCard, buildMarriageScene, startMarriageScene, transitionFamilySceneToMarriage, startFamilyScene, applyMarriageScene, resolveFamilyScene, closeFacilitatorScene, applyCommunityChoice, applyCooperationContract, findDecisionEcho, applyDecisionEcho, applyLegacyAction, startCommunityChoice, recordCommunityVote, majorityCommunityChoice, describeCommunityVotes, tryOpenScheduledCommunityChoice };
 export { serializeGameState, serializePlayer, buildSecondLifeProgress, buildActionInfo, buildSalaryItems, buildNetWorthBreakdown, buildAffordableOptions, buildAvailableProfessions, careerBlockReason };
 export { handleLandingSquare };
 
@@ -389,6 +389,51 @@ export const COMMUNITY_CHOICE_CARDS: CommunityChoiceCard[] = [
     options: [
       { id: 'rebuild', label: '共同重建', description: '共同出資，換取人脈、健康與生命體驗。' },
       { id: 'protect_self', label: '各自防守', description: '減少支出，但每個人承受一部分資產損失。' },
+    ],
+  },
+  {
+    id: 'housing',
+    title: '城市房價飆漲',
+    description: '房價與房租一路上漲，年輕人買不起也快租不起。市議會要表決：蓋社會住宅，還是交給市場？',
+    options: [
+      { id: 'social_housing', label: '支持社會住宅', description: '每人分攤建設經費；租屋族房租降 10%，屋主房價略降。' },
+      { id: 'market', label: '交給市場', description: '不用出錢；屋主房價上漲 10%，租屋族房租也漲 10%。' },
+    ],
+  },
+  {
+    id: 'aging',
+    title: '高齡社會的長照壓力',
+    description: '長輩越來越多，照護人力不夠。要大家一起出錢成立長照基金，還是各家自己照顧？',
+    options: [
+      { id: 'care_fund', label: '共同長照基金', description: '每人出一個月支出；全體健康 +5、傳承 +3。' },
+      { id: 'family_care', label: '各家自理', description: '不用出錢；35–64 歲的人未來 12 個月每月多 $8,000 照護長輩。' },
+    ],
+  },
+  {
+    id: 'literacy',
+    title: '理財教育進校園',
+    description: '詐騙與卡債越來越多。要不要一起出錢推動理財教育？',
+    options: [
+      { id: 'fund_education', label: '一起推動', description: '每人出半個月支出；全體財商 +1。' },
+      { id: 'skip', label: '先不用', description: '不用出錢，但詐騙集團趁虛而入：每人損失現金 5%（最多 $50,000）。' },
+    ],
+  },
+  {
+    id: 'workweek',
+    title: '四天工作制公投',
+    description: '有人主張週休三日換取健康與家庭時間，也有人擔心收入變少。你們怎麼選？',
+    options: [
+      { id: 'four_day', label: '支持週休三日', description: '在職者薪資永久 −5%；全體健康 +8、體驗 +5。' },
+      { id: 'keep_five', label: '維持週休二日', description: '在職者多領半個月薪水的加班費；全體健康 −3。' },
+    ],
+  },
+  {
+    id: 'green',
+    title: '綠能轉型',
+    description: '能源價格不穩。要一起投資綠能，還是維持現狀？',
+    options: [
+      { id: 'invest_green', label: '共同投資綠能', description: '每人投入一個月支出成立綠能基金，每月配息 0.6%（被動收入）。' },
+      { id: 'status_quo', label: '維持現狀', description: '不用出錢，但能源漲價：生活成本永久 +3%。' },
     ],
   },
 ];
@@ -947,6 +992,9 @@ export function continueAfterTurnAdvance(gs: GameState): void {
     return;
   }
 
+  // 每次發薪結算後：全場共同抉擇（每人手機投票、多數決）
+  if (tryOpenScheduledCommunityChoice(gs)) return;
+
   // 65 歲人生轉折（在發薪之後、行動時間之前，逐位開舞台）
   queueRetirementCandidates(gs);
   if (tryOpenRetirementScene(gs)) return;
@@ -1045,6 +1093,8 @@ export const financialActions = new Set(['sellAsset', 'buyInsurance', 'cancelIns
   'takeEmergencyLoan', 'investStockDCA', 'investBond', 'buyHome', 'takeLeverageLoan', 'repayLoan', 'buyFranchise',
   'partnershipOffer', 'partnershipResponse', 'loanOffer', 'loanResponse', 'loanRequest', 'loanRequestResponse',
   'goTravel', 'attendSocialEvent']);
+/** 回覆別人的邀約：不限行動時間（只要沒有決策或舞台），避免邀約卡在兩個時段之間 */
+export const responseActions = new Set(['partnershipResponse', 'loanResponse', 'loanRequestResponse']);
 export const setupActions = new Set(['rollSocialClass', 'allocateGrowthStats', 'continueEducation', 'selectQuadrant']);
 
 io.on('connection', (socket: Socket) => {
@@ -1083,10 +1133,17 @@ io.on('connection', (socket: Socket) => {
       && ['sellAsset', 'takeEmergencyLoan'].includes(event));
     // 全體行動時間：所有存活玩家都可自由操作
     const actionsOpen = Boolean(gs && player?.isAlive && gs.decisionPhase?.kind === 'actions' && !gs.facilitatorScene);
-    if (financialActions.has(event) && !rescueAllowed && !actionsOpen && (!gs || !player?.isAlive ||
-      ![GamePhase.RatRace, GamePhase.FastTrack].includes(gs.gamePhase) || gs.pausedAt !== null ||
-      gs.decisionPhase || gs.facilitatorScene || gs.turnInProgress || gs.globalPaydayPending || gs.globalPaydayInProgress)) {
-      emitClient(socket, 'error', { message: '目前不是自由操作時間，請等待主持人完成決策或恢復遊戲。' });
+    const idleFreeTime = Boolean(gs && player?.isAlive && [GamePhase.RatRace, GamePhase.FastTrack].includes(gs.gamePhase) && gs.pausedAt === null &&
+      !gs.decisionPhase && !gs.facilitatorScene && !gs.turnInProgress && !gs.globalPaydayPending && !gs.globalPaydayInProgress);
+    // 開著全體行動時間時，主動的財務與生活行動只在行動時間進行；擲骰時大家一起看大螢幕。
+    // 關掉行動時間的房間，才沿用「回合空檔」自由操作。回覆邀約、危機自救不受限。
+    const allowed = rescueAllowed || actionsOpen
+      || (responseActions.has(event) && idleFreeTime)
+      || (!gs?.actionPhaseEnabled && idleFreeTime);
+    if (financialActions.has(event) && !allowed) {
+      emitClient(socket, 'error', { message: gs?.actionPhaseEnabled
+        ? '財務與生活行動在每輪開始的「全體行動時間」進行，現在請一起看大螢幕。'
+        : '目前不是自由操作時間，請等待主持人完成決策或恢復遊戲。' });
       return;
     }
     if (setupActions.has(event) && (!gs || gs.gamePhase !== GamePhase.Pre20 || !player || player.pre20Done)) {

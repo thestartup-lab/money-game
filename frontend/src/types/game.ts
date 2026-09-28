@@ -279,6 +279,8 @@ export interface GameState {
   autoRevealOnSubmit?: boolean;
   /** 全自動主持 */
   autoHost?: boolean;
+  /** 每次發薪後自動出現全場共同抉擇 */
+  communityChoiceAuto?: boolean;
   /** 全體行動時間已按完成的玩家 */
   actionPhaseDone?: string[];
   actionPhaseEnabled?: boolean;
@@ -339,6 +341,10 @@ export interface FacilitatorScene {
   resumeOnClose: boolean;
   careerPlayerId?: string;
   careerConfirmed?: boolean;
+  /** 全場共同抉擇：每個選項的票數（誰投哪票不公開） */
+  votes?: Record<string, number>;
+  votedCount?: number;
+  voterCount?: number;
 }
 
 export interface LifeScoreBreakdown {
