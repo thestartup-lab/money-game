@@ -1270,22 +1270,22 @@ export const MARRIAGE_CARDS: MarriageCard[] = [
   {
     id: 'marry-001',
     title: '幸福結婚',
-    description: '你們攜手步入禮堂！雙薪家庭，每月多了 $12,000 的生活收入加成。',
-    monthlyBonus: 12_000,
+    description: '你們攜手步入禮堂！成為雙薪家庭，收入多了一份，生活開銷也多了一份。',
+    monthlyBonus: 0,
     lifeExpGain: 15,
   },
   {
     id: 'marry-002',
     title: '閃婚',
-    description: '認識不久便決定在一起，衝動也是一種勇氣！每月收入加成 $7,500，但初期有些磨合。',
-    monthlyBonus: 7_500,
+    description: '認識不久便決定在一起，衝動也是一種勇氣！收入與開銷一起變成兩人份，初期有些磨合。',
+    monthlyBonus: 0,
     lifeExpGain: 12,
   },
   {
     id: 'marry-003',
     title: '老來得配',
-    description: '緣分在 50 歲後到來，相識恨晚！每月收入加成 $9,000，且健康值互相支持 +10。',
-    monthlyBonus: 9_000,
+    description: '緣分在 50 歲後到來，相識恨晚！兩人互相照顧，健康值 +10。',
+    monthlyBonus: 0,
     lifeExpGain: 18,
   },
 ];

@@ -1,9 +1,9 @@
 /** 大螢幕舞台事件：婚姻、家庭、社區選擇、合作契約、決策回聲、傳承儀式 */
 import { randomBytes } from 'crypto';
 import { GameState, Player, GamePhase, PlayerEvent, PlayerEventType, FacilitatorSceneState, AssetType } from './gameDataModels';
-import { createSpouse } from './gameLogic';
+import { createSpouse, describeMarriagePreview, payWedding } from './gameLogic';
 import { addLifeExperience, getCurrentAge, pauseGameClock, resumeGameClock, confirmMarriage, buyArrangedMarriage, getArrangedMarriageCost } from './gameLogic';
-import { LIFE_EXP, LIFE_EVENT_WINDOWS, MARRIAGE_GIFT, MARRIAGE_GIFT_RANDOM_BONUS, CHILD_GIFT_BASE, CHILD_GIFT_RANDOM_BONUS, MAX_CHILDREN, MIN_CHILD_SPACING_YEARS, MIN_CHILD_AGE, MAX_CHILD_AGE, MARRIAGE_BONUS_BY_TYPE, RELATIONSHIP_MARRIAGE_THRESHOLD, HP_ACTIVITY_THRESHOLDS } from './gameConfig';
+import { LIFE_EXP, LIFE_EVENT_WINDOWS, MARRIAGE_GIFT, MARRIAGE_GIFT_RANDOM_BONUS, CHILD_GIFT_BASE, CHILD_GIFT_RANDOM_BONUS, MAX_CHILDREN, MIN_CHILD_SPACING_YEARS, MIN_CHILD_AGE, MAX_CHILD_AGE, MARRIED_RENT_INCREASE, RELATIONSHIP_MARRIAGE_THRESHOLD, HP_ACTIVITY_THRESHOLDS } from './gameConfig';
 import { PER_CHILD_EXPENSE } from './gameConstants';
 import { MARRIAGE_CARDS, MarriageCard } from './gameCards';
 import { applyBabyCard } from './cardSystem';
@@ -83,7 +83,7 @@ export function buildMarriageScene(
       kind: 'marriage',
       kicker: '婚姻與人生選擇',
       title: `${player.name} 的付費婚配機會`,
-      description: `需要 $${cost.toLocaleString()}，結婚後每月收入 +$${MARRIAGE_BONUS_BY_TYPE.arranged.toLocaleString()}、生命體驗 +${LIFE_EXP.MARRIAGE_ARRANGED}。`,
+      description: `需要 $${cost.toLocaleString()}，生命體驗 +${LIFE_EXP.MARRIAGE_ARRANGED}。${describeMarriagePreview(player, 0.8, false)}。`,
       participantNames: [player.name],
       reminderEndsAt: Date.now() + 60_000,
       options: [
@@ -95,13 +95,12 @@ export function buildMarriageScene(
 
   if (route === 'love' || route === 'matchmaker') {
     const isMatchmaker = route === 'matchmaker';
-    const bonus = MARRIAGE_BONUS_BY_TYPE[route];
     const lifeExp = isMatchmaker ? LIFE_EXP.MARRIAGE_MATCHMAKER : LIFE_EXP.MARRIAGE_LOVE;
     return {
       kind: 'marriage',
       kicker: isMatchmaker ? '主持人媒合・關係達標' : '深度關係達標',
       title: `${player.name}，要一起走下去嗎？`,
-      description: `關係經營值已達 ${player.relationshipPoints}/${RELATIONSHIP_MARRIAGE_THRESHOLD}。${isMatchmaker ? '由主持人促成這段緣分，' : ''}結婚後每月收入 +$${bonus.toLocaleString()}、生命體驗 +${lifeExp}。`,
+      description: `關係經營值已達 ${player.relationshipPoints}/${RELATIONSHIP_MARRIAGE_THRESHOLD}。${isMatchmaker ? '由主持人促成這段緣分，' : ''}生命體驗 +${lifeExp}。${describeMarriagePreview(player)}。`,
       participantNames: [player.name],
       reminderEndsAt: Date.now() + 60_000,
       options: [
@@ -116,7 +115,7 @@ export function buildMarriageScene(
     kind: 'marriage',
     kicker: '緣分來到人生路口',
     title: `${player.name}｜${selectedCard.title}`,
-    description: `${selectedCard.description} 生命體驗 +${selectedCard.lifeExpGain}。`,
+    description: `${selectedCard.description} 生命體驗 +${selectedCard.lifeExpGain}。${describeMarriagePreview(player)}。`,
     participantNames: [player.name],
     reminderEndsAt: Date.now() + 60_000,
     options: [
@@ -169,13 +168,26 @@ export function startFamilyScene(gs: GameState, player: Player, source: 'inner' 
   }, { playerId: player.id, familySource: source });
 }
 
+/** 結婚後的金錢說明：配偶實拿、家裡多的支出、每月淨變化、婚禮與禮金 */
+function marriageMoneyText(player: Player, cashflowBefore: number, wedding: ReturnType<typeof payWedding> | null, gift: number): string {
+  const extra = player.spouseLivingExpenses + (player.housing === 'own' ? 0 : Math.round((player.expenses.rent ?? 0) * player.livingCostMultiplier * MARRIED_RENT_INCREASE));
+  const net = player.monthlyCashflow - cashflowBefore;
+  const parts = [
+    `配偶每月實拿 +$${(player.spouse?.income ?? 0).toLocaleString()}`,
+    `家裡每月多 $${extra.toLocaleString()} 支出`,
+    `每月淨${net >= 0 ? '增' : '減'} $${Math.abs(net).toLocaleString()}`,
+  ];
+  if (wedding) parts.push(`婚禮 −$${wedding.paid.toLocaleString()}${wedding.simplified ? '（現金不夠，簡單辦）' : ''}`);
+  if (gift) parts.push(`禮金 +$${gift.toLocaleString()}`);
+  return parts.join('、');
+}
+
 export function applyMarriageScene(gs: GameState, player: Player, context: Record<string, unknown>): string | null {
   const route = context.marriageRoute as MarriageSceneRoute;
   const card = context.marriageCard as MarriageCard | undefined;
   const cashBefore = player.cash;
   const cashflowBefore = player.monthlyCashflow;
   const netWorthBefore = calcNetWorth(player);
-  let marriageBonus = 0;
   let lifeExpGained = 0;
   let marriageGift = 0;
   let healthGained = 0;
@@ -185,8 +197,8 @@ export function applyMarriageScene(gs: GameState, player: Player, context: Recor
     if (!card || player.isMarried) return null;
     player.isMarried = true;
     player.marriageType = 'love';
-    player.marriageBonus = card.monthlyBonus;
-    marriageBonus = card.monthlyBonus + createSpouse(player).income;
+    player.marriageBonus = 0;
+    createSpouse(player);
     lifeExpGained = card.lifeExpGain;
     addLifeExperience(player, lifeExpGained);
     marriageGift = gs.marriageGiftOverride ?? (MARRIAGE_GIFT.window + Math.round(Math.random() * MARRIAGE_GIFT_RANDOM_BONUS));
@@ -196,29 +208,28 @@ export function applyMarriageScene(gs: GameState, player: Player, context: Recor
       adjustFacilitatorHealth(player, 10);
       healthGained = player.stats.health - previousHealth;
     }
-    description = `${player.name} 接受「${card.title}」：每月收入 +$${marriageBonus.toLocaleString()}、生命體驗 +${lifeExpGained}、禮金 +$${marriageGift.toLocaleString()}${healthGained > 0 ? `、健康 +${healthGained}` : ''}。`;
+    description = `${player.name} 接受「${card.title}」：${marriageMoneyText(player, cashflowBefore, payWedding(player), marriageGift)}、生命體驗 +${lifeExpGained}${healthGained > 0 ? `、健康 +${healthGained}` : ''}。`;
   } else if (route === 'love' || route === 'matchmaker') {
     const result = confirmMarriage(player, route);
     if (!result.success) return null;
-    marriageBonus = (result.marriageBonus ?? 0) + (player.spouse?.income ?? 0);
     lifeExpGained = result.lifeExpGained ?? 0;
     marriageGift = gs.marriageGiftOverride ?? (MARRIAGE_GIFT[route] + Math.round(Math.random() * MARRIAGE_GIFT_RANDOM_BONUS));
     player.cash += marriageGift;
-    description = `${player.name} 把${route === 'matchmaker' ? '主持人促成的緣分' : '長期經營的關係'}帶進婚姻：每月收入 +$${marriageBonus.toLocaleString()}、生命體驗 +${lifeExpGained}、禮金 +$${marriageGift.toLocaleString()}。`;
+    description = `${player.name} 把${route === 'matchmaker' ? '主持人促成的緣分' : '長期經營的關係'}帶進婚姻：${marriageMoneyText(player, cashflowBefore, payWedding(player), marriageGift)}、生命體驗 +${lifeExpGained}。`;
   } else {
     const currentAge = getPlayerAge(gs, player);
     const cost = getArrangedMarriageCost(currentAge);
     const result = buyArrangedMarriage(player, currentAge);
     if (!result.success) return null;
-    marriageBonus = result.marriageBonus ?? 0;
     lifeExpGained = result.lifeExpGained ?? 0;
-    description = `${player.name} 完成付費婚配：支出 $${cost.toLocaleString()}，每月收入 +$${marriageBonus.toLocaleString()}、生命體驗 +${lifeExpGained}。`;
+    description = `${player.name} 完成付費婚配：支出 $${cost.toLocaleString()}，${marriageMoneyText(player, cashflowBefore, null, 0)}、生命體驗 +${lifeExpGained}。`;
   }
 
   logPlayerEvent(player, gs, 'marriage', description, cashBefore, cashflowBefore, netWorthBefore, {
     marriageRoute: route,
     cardId: card?.id,
-    marriageBonus,
+    spouseIncome: player.spouse?.income ?? 0,
+    monthlyCashflowChange: player.monthlyCashflow - cashflowBefore,
     lifeExpGained,
     marriageGift,
     healthGained,
@@ -227,7 +238,7 @@ export function applyMarriageScene(gs: GameState, player: Player, context: Recor
     playerId: player.id,
     playerName: player.name,
     marriageType: player.marriageType,
-    marriageBonus,
+    spouseIncome: player.spouse?.income ?? 0,
     lifeExpGained,
     marriageGift,
     healthGained,

@@ -12,7 +12,7 @@ export const EVENT_ICONS: Record<string, string> = {
 };
 
 export const EVENT_LABELS: Record<string, string> = {
-  game_start: '開局', payday: '發薪', payday_plan: '發薪規劃', insurance: '投保',
+  game_start: '開局', payday: '發薪', payday_plan: '人生規劃', insurance: '投保',
   asset_buy: '投資', asset_sell: '出售資產', travel: '旅遊',
   marriage: '婚姻', child: '生育', crisis: '危機',
   career_change: '轉職', education: '進修', rat_race_escaped: '脫出老鼠賽跑',

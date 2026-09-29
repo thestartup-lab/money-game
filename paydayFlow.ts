@@ -3,8 +3,8 @@ import { Socket } from 'socket.io';
 import { GameState, Player, PaydayPlanPayload, GamePhase } from './gameDataModels';
 import { BASIC_INVESTMENTS, buyBasicInvestment } from './basicInvestments';
 import { LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS } from './gameConfig';
-import { triggerPayday, checkAndApplyAnnualTax, getCurrentAge, applyFastTrackAppreciation, applyFastTrackPaydayBonus, pauseGameClock, resumeGameClock } from './gameLogic';
-import { MONTHS_PER_GLOBAL_PAYDAY, PAYDAY_MAX_ROUNDS, MONTHS_PER_ROUND, CONSULTANT_HP_COST_PER_CYCLE, GROWTH_CYCLES_PER_GLOBAL_PAYDAY, YEARS_PER_COMPLETED_ROUND, STOCK_DCA_MONTHLY_RETURN_RATE, STOCK_DCA_MONTHLY_DIVIDEND_RATE } from './gameConfig';
+import { syncPlayerAges, triggerPayday, checkAndApplyAnnualTax, getCurrentAge, applyFastTrackAppreciation, applyFastTrackPaydayBonus, pauseGameClock, resumeGameClock } from './gameLogic';
+import { PLAN_COVER_ROUNDS, FAST_TRACK_ROUND_SHARE, MONTHS_PER_GLOBAL_PAYDAY, PAYDAY_MAX_ROUNDS, MONTHS_PER_ROUND, CONSULTANT_HP_COST_PER_CYCLE, GROWTH_CYCLES_PER_GLOBAL_PAYDAY, YEARS_PER_COMPLETED_ROUND, STOCK_DCA_MONTHLY_RETURN_RATE, STOCK_DCA_MONTHLY_DIVIDEND_RATE } from './gameConfig';
 import { expireWorldEffects } from './worldEvents';
 import { applyPaydayPlan, checkBedriddenStatus, applyHPChange } from './statsSystem';
 import { serializeGameState, buildActionInfo, buildAffordableOptions } from './playerView';
@@ -40,7 +40,7 @@ export function emitQuarterMilestones(
   }
 }
 
-/** 將季度中的三個月逐月入帳，保留月支出、複利、年度稅與健康衰退。 */
+/** 逐月入帳，保留月支出、複利、年度稅與健康衰退；回傳每 12 個月的現金變化（逐年顯示用）。 */
 export function settleQuarterMonths(
   socket: Socket | undefined,
   gs: GameState,
@@ -48,7 +48,12 @@ export function settleQuarterMonths(
   maintenanceCovered: boolean,
   settlementMonths = MONTHS_PER_GLOBAL_PAYDAY,
   growthCycles = GROWTH_CYCLES_PER_GLOBAL_PAYDAY,
-): void {
+  fastTrackShare = 1,
+  /** 傳入時改為累計稅額，不逐年廣播（每輪發薪一次說明，避免大螢幕洗版） */
+  taxTotals?: { paid: number; saved: number },
+): number[] {
+  const yearlyCash: number[] = [];
+  let yearStartCash = player.cash;
   // 復盤用：每 12 個月記一筆發薪事件，年齡依「距上次發薪經過的輪數」往前推，讓時間軸每輪一點
   const monthsPerRound = gs.monthsPerRound || MONTHS_PER_ROUND;
   const yearsCovered = Math.max(1, Math.round(settlementMonths / monthsPerRound));
@@ -71,15 +76,17 @@ export function settleQuarterMonths(
     if (month % monthsPerRound === 0 || month === settlementMonths) {
       const yearIndex = Math.ceil(month / monthsPerRound);
       const eventAge = Math.round(currentAgeNow - (yearsCovered - yearIndex) * YEARS_PER_COMPLETED_ROUND);
+      const cashDelta = player.cash - yearCashBefore;
+      const fromAge = Math.max(player.startAge ?? 20, eventAge - YEARS_PER_COMPLETED_ROUND);
       logPlayerEvent(
         player,
         gs,
         'payday',
-        `第 ${gs.globalPaydayNumber + 1} 次發薪・第 ${yearIndex}/${yearsCovered} 輪結算（${monthsPerRound} 個月，現金 ${player.cash - yearCashBefore >= 0 ? '+' : '-'}$${Math.abs(player.cash - yearCashBefore).toLocaleString()}）`,
+        `${fromAge}–${eventAge} 歲發薪（${Math.round(Math.min(settlementMonths, monthsPerRound) / 12)} 年）：現金 ${cashDelta >= 0 ? '+' : '-'}$${Math.abs(cashDelta).toLocaleString()}`,
         yearCashBefore,
         yearFlowBefore,
         yearWorthBefore,
-        { globalPaydayNumber: gs.globalPaydayNumber + 1, yearIndex, yearsCovered, monthsSettled: month },
+        { round: gs.turnNumber, yearIndex, yearsCovered, monthsSettled: month },
         eventAge,
       );
       yearCashBefore = player.cash;
@@ -93,9 +100,16 @@ export function settleQuarterMonths(
     }
 
     if (!player.profession.hasFlexibleSchedule) player.actionTokensThisPayday = 1;
+    if (month % 12 === 0 || month === settlementMonths) {
+      yearlyCash.push(player.cash - yearStartCash);
+      yearStartCash = player.cash;
+    }
 
     const { triggered, taxResult } = checkAndApplyAnnualTax(player);
-    if (triggered && taxResult) {
+    if (triggered && taxResult && taxTotals) {
+      taxTotals.paid += taxResult.taxAmount;
+      taxTotals.saved += taxResult.taxCreditAmount ?? 0;
+    } else if (triggered && taxResult) {
       emitToRoom(gs.gameId, 'annualTaxResult', {
         playerId: player.id,
         playerName: player.name,
@@ -114,8 +128,8 @@ export function settleQuarterMonths(
   }
 
   if (player.isInFastTrack) {
-    const bonus = applyFastTrackPaydayBonus(player);
-    applyFastTrackAppreciation(player);
+    const bonus = applyFastTrackPaydayBonus(player, fastTrackShare);
+    applyFastTrackAppreciation(player, fastTrackShare);
     emitToRoom(gs.gameId, 'fastTrackPayday', {
       playerId: player.id,
       playerName: player.name,
@@ -138,6 +152,78 @@ export function settleQuarterMonths(
     checkLifeMilestones(player, gs, gs.gameId, socket);
     checkBucketGoals(player, gs, gs.gameId, socket);
   }
+  return yearlyCash;
+}
+
+/**
+ * 一輪（4 年）結束就發薪；跳過進修、移除玩家也可能完成一輪，所以依「已發到第幾輪」補發。
+ * 舊存檔沒有這個欄位時從目前輪數開始算，不補發過去的輪。
+ */
+export function payCompletedRounds(gs: GameState): void {
+  if (typeof gs.lastPaidRound !== 'number' || gs.lastPaidRound > gs.turnNumber) gs.lastPaidRound = gs.turnNumber;
+  while (gs.lastPaidRound < gs.turnNumber) {
+    gs.lastPaidRound += 1;
+    syncPlayerAges(gs);
+    settleRound(gs);
+  }
+}
+
+export interface RoundPayout {
+  playerId: string;
+  playerName: string;
+  fromAge: number;
+  toAge: number;
+  /** 每年的現金變化（依序對應 fromAge、fromAge+1…） */
+  years: { age: number; cash: number }[];
+  total: number;
+  cashAfter: number;
+  monthlyCashflow: number;
+  /** 這一輪繳的所得稅與稅務規劃省下的金額（已含在每年的現金變化裡） */
+  taxPaid: number;
+  taxSaved: number;
+}
+
+/**
+ * 每輪發薪：每輪人生 4 年，一輪結束就把這 4 年（monthsPerRound 個月）的收入與支出入帳。
+ * 不需要任何人操作；投資、保險、生活方式等決定留給定期的「人生規劃」。
+ */
+export function settleRound(gs: GameState): RoundPayout[] {
+  const monthsPerRound = gs.monthsPerRound || MONTHS_PER_ROUND;
+  const toAge = Math.round(getCurrentAge(gs));
+  const roundStartAge = toAge - YEARS_PER_COMPLETED_ROUND;
+  const payouts: RoundPayout[] = [];
+  for (const playerId of gs.playerOrder) {
+    const player = gs.players.get(playerId);
+    if (!player?.isAlive) continue;
+    // 22 歲或進修到 25 歲才開始工作的人，只結算開始工作之後的年數
+    const fromAge = Math.max(player.startAge ?? 20, roundStartAge);
+    const yearsLived = toAge - fromAge;
+    if (yearsLived <= 0) continue;
+    const months = Math.round(monthsPerRound * yearsLived / YEARS_PER_COMPLETED_ROUND);
+    const cashBefore = player.cash;
+    const covered = (player.healthMaintenanceRounds ?? 0) > 0;
+    const taxTotals = { paid: 0, saved: 0 };
+    const yearly = settleQuarterMonths(getPlayerSocket(player.id), gs, player, covered, months, 1, FAST_TRACK_ROUND_SHARE * yearsLived / YEARS_PER_COMPLETED_ROUND, taxTotals);
+    if (covered) player.healthMaintenanceRounds -= 1;
+    const ageStep = yearly.length > 0 ? yearsLived / yearly.length : 1;
+    payouts.push({
+      playerId: player.id,
+      playerName: player.name,
+      fromAge,
+      toAge,
+      years: yearly.map((cash, index) => ({ age: Math.round(fromAge + index * ageStep), cash })),
+      total: player.cash - cashBefore,
+      cashAfter: player.cash,
+      monthlyCashflow: player.monthlyCashflow,
+      taxPaid: taxTotals.paid,
+      taxSaved: taxTotals.saved,
+    });
+    queueSecondLifeCandidates(gs, player);
+  }
+  if (payouts.length > 0) {
+    emitToRoom(gs.gameId, 'roundPayday', { round: gs.turnNumber, months: monthsPerRound, payouts });
+  }
+  return payouts;
 }
 
 /** 遊戲開始後扣掉暫停的有效經過毫秒數（舞台事件、決策、手動暫停都不算）。 */
@@ -211,8 +297,9 @@ export async function runGlobalPayday(gs: GameState): Promise<void> {
 
   gs.globalPaydayPending = false;
   const playerIds = gs.playerOrder.filter((id) => gs.players.get(id)?.isAlive);
-  const settlementMonths = paydaySettlementMonths(gs);
-  const growthCycles = roundsSinceLastPayday(gs);
+  // 薪水每輪已經入帳；人生規劃只做決定。健康維護等花費涵蓋接下來 PLAN_COVER_ROUNDS 輪。
+  const settlementMonths = 0;
+  const growthCycles = PLAN_COVER_ROUNDS;
 
   emitToRoom(roomId, 'globalPaydayStarted', {
     globalPaydayNumber: gs.globalPaydayNumber + 1,
@@ -221,7 +308,7 @@ export async function runGlobalPayday(gs: GameState): Promise<void> {
     playerCount: playerIds.length,
   });
   emitToRoom(roomId, 'gamePaused', {
-    reason: `第 ${gs.globalPaydayNumber + 1} 季全體發薪`,
+    reason: `第 ${gs.globalPaydayNumber + 1} 次人生規劃`,
     currentAge: Math.round(getCurrentAge(gs) * 10) / 10,
     controlledByHost: true,
   });
@@ -245,10 +332,10 @@ export async function runGlobalPayday(gs: GameState): Promise<void> {
     gs,
     { id: '__all_players__', name: '全體玩家' },
     'payday',
-    `第 ${gs.globalPaydayNumber + 1} 次全體發薪規劃（結算 ${growthCycles} 輪 × ${gs.monthsPerRound || MONTHS_PER_ROUND} 個月）`,
-    '所有人同時在手機填寫這段期間的規劃；全員送出後自動結算，主持人也可提前以空白方案結束。',
+    `第 ${gs.globalPaydayNumber + 1} 次人生規劃`,
+    '所有人同時在手機規劃接下來幾輪：投資、保險、進修、生活方式。薪水每輪已自動入帳；全員送出後生效，主持人也可提前以空白方案結束。',
     { publicLines: [
-      `💰 結算 ${settlementMonths} 個月薪資與支出；每人可配置：財商升級、健康投資、專長培訓、人脈投資、保險、股票定期定額`,
+      `🗓️ 每人可配置：財商升級、健康投資（涵蓋 ${PLAN_COVER_ROUNDS} 輪）、專長培訓、人脈投資、保險、股票定期定額、債券`,
       `🏦 基本投資（每人最多一種、最多 10 份）：${BASIC_INVESTMENTS.map((b) => `${b.name} $${b.cost.toLocaleString()}／份、每月 +$${b.monthlyCashflow.toLocaleString()}`).join('；')}`,
     ] },
   );
@@ -368,7 +455,12 @@ export async function runGlobalPayday(gs: GameState): Promise<void> {
         { source: 'basic_investment', offerId: quarterlyPlan.basicInvestmentId, globalPaydayNumber: gs.globalPaydayNumber + 1 });
     }
     emitToRoom(roomId, 'basicInvestmentResult', { playerId: player.id, playerName: player.name, ...basicInvestment });
-    settleQuarterMonths(playerSocket, gs, player, maintenanceCovered, settlementMonths, growthCycles);
+    // 健康維護涵蓋接下來幾輪的每輪發薪（不再在這裡入帳）
+    if (maintenanceCovered) player.healthMaintenanceRounds = Math.max(player.healthMaintenanceRounds ?? 0, PLAN_COVER_ROUNDS);
+    if (playerSocket && player.isAlive) {
+      checkLifeMilestones(player, gs, gs.gameId, playerSocket);
+      checkBucketGoals(player, gs, gs.gameId, playerSocket);
+    }
     queueSecondLifeCandidates(gs, player);
     player.paydayPlanningPending = false;
 

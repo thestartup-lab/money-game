@@ -32,7 +32,7 @@ import { applyHPDecay, applyNTAutoGrowth } from './statsSystem';
 import {
   SALARY_GROWTH_BY_STAGE, SALARY_GROWTH_SKILL_THRESHOLD, SALARY_GROWTH_SKILL_BONUS,
   LIVING_COST_GROWTH_PER_ROUND, LIVING_COST_GROWTH_STOP_AGE, LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS,
-  LAYOFF_MONTHS_BY_STAGE, SPOUSE_INCOME_RATIO_MIN, SPOUSE_INCOME_RATIO_MAX, SPOUSE_INCOME_MIN, SPOUSE_INCOME_MAX, SPOUSE_RETIRED_RATIO,
+  LAYOFF_MONTHS_BY_STAGE, SPOUSE_INCOME_RATIO_MIN, SPOUSE_INCOME_RATIO_MAX, SPOUSE_INCOME_MIN, SPOUSE_INCOME_MAX, SPOUSE_RETIRED_RATIO, SPOUSE_NET_INCOME_RATIO, SPOUSE_LIVING_COST_RATIO, MARRIED_RENT_INCREASE, WEDDING_COST_MONTHS, WEDDING_COST_MIN,
   CAPITAL_GAINS_TAX_RATE, NATURAL_DEATH_MIN_AGE, NATURAL_DEATH_BASE_PROBABILITY, NATURAL_DEATH_HP_FACTOR,
 } from './gameConfig';
 import { sellHome } from './householdLoans';
@@ -301,14 +301,54 @@ export function getLayoffMonths(player: Player): number {
 }
 
 /** 結婚時建立配偶：收入 = 本人薪資 × 隨機 0.5–0.9，夾在 $20,000–$120,000 */
+/** 配偶實拿月收入：你的薪水 × 50–90%（夾在上下限內），再扣掉稅與勞健保 */
+function spouseNetIncome(player: Player, ratio: number, ratioScale: number): number {
+  const base = Math.max(player.salary, player.profession.startingSalary, SPOUSE_INCOME_MIN);
+  const gross = Math.min(SPOUSE_INCOME_MAX, Math.max(SPOUSE_INCOME_MIN, base * ratio * ratioScale));
+  return Math.round(gross * SPOUSE_NET_INCOME_RATIO / 100) * 100;
+}
+
 export function createSpouse(player: Player, ratioScale = 1): { income: number; unemployedMonthsLeft: number; retired: boolean } {
   const ratio = SPOUSE_INCOME_RATIO_MIN + Math.random() * (SPOUSE_INCOME_RATIO_MAX - SPOUSE_INCOME_RATIO_MIN);
-  const base = Math.max(player.salary, player.profession.startingSalary, SPOUSE_INCOME_MIN);
-  const income = Math.round(Math.min(SPOUSE_INCOME_MAX, Math.max(SPOUSE_INCOME_MIN, base * ratio * ratioScale)) / 100) * 100;
+  const income = spouseNetIncome(player, ratio, ratioScale);
   const spouse = { income, unemployedMonthsLeft: 0, retired: player.isSenior };
   if (player.isSenior) spouse.income = Math.round(income * SPOUSE_RETIRED_RATIO);
   player.spouse = spouse;
   return spouse;
+}
+
+/** 結婚前的試算：配偶收入範圍、家裡多出的支出、婚禮大約花費（大螢幕舞台說明用） */
+export function previewMarriageFinances(player: Player, ratioScale = 1, withWedding = true) {
+  const spouseMin = spouseNetIncome(player, SPOUSE_INCOME_RATIO_MIN, ratioScale);
+  const spouseMax = spouseNetIncome(player, SPOUSE_INCOME_RATIO_MAX, ratioScale);
+  const style = LIFESTYLE_OPTIONS[player.lifestyle] ?? LIFESTYLE_OPTIONS.normal;
+  const extraLiving = Math.round(player.expenses.otherExpenses * style.expenseMultiplier * player.livingCostMultiplier * SPOUSE_LIVING_COST_RATIO);
+  const extraRent = player.housing === 'own' ? 0 : Math.round((player.expenses.rent ?? 0) * player.livingCostMultiplier * MARRIED_RENT_INCREASE);
+  const wedding = withWedding ? weddingCost(player, Math.round((spouseMin + spouseMax) / 2)) : 0;
+  return { spouseMin, spouseMax, extraLiving, extraRent, extraExpenses: extraLiving + extraRent, wedding };
+}
+
+export function describeMarriagePreview(player: Player, ratioScale = 1, withWedding = true): string {
+  const p = previewMarriageFinances(player, ratioScale, withWedding);
+  const parts = [
+    `配偶每月實拿約 $${p.spouseMin.toLocaleString()}–$${p.spouseMax.toLocaleString()}`,
+    `家裡每月多 $${p.extraExpenses.toLocaleString()} 支出（配偶生活費${p.extraRent ? '、房租多 50%' : ''}）`,
+  ];
+  if (withWedding) parts.push(`婚禮約 $${p.wedding.toLocaleString()}（現金不夠就簡單辦）`);
+  return parts.join('；');
+}
+
+/** 婚禮花費：兩人每月收入合計 × WEDDING_COST_MONTHS，至少 WEDDING_COST_MIN */
+export function weddingCost(player: Player, spouseIncome: number): number {
+  return Math.max(WEDDING_COST_MIN, Math.round((Math.max(0, player.salary) + spouseIncome) * WEDDING_COST_MONTHS / 1000) * 1000);
+}
+
+/** 付婚禮費用；現金不夠就簡單辦，最多花掉手頭現金，不借錢 */
+export function payWedding(player: Player): { cost: number; paid: number; simplified: boolean } {
+  const cost = weddingCost(player, player.spouse?.income ?? 0);
+  const paid = Math.min(cost, Math.max(0, player.cash));
+  player.cash -= paid;
+  return { cost, paid, simplified: paid < cost };
 }
 
 /** 80 歲起每輪自然壽命判定機率 */
@@ -1001,8 +1041,8 @@ export function addLifeExperience(player: Player, amount: number): void {
  *
  * 此函數在玩家處於 FastTrack 階段的每個 triggerPayday 後呼叫。
  */
-export function applyFastTrackAppreciation(player: Player): void {
-  const rate = FAST_TRACK_ASSET_APPRECIATION_RATE;
+export function applyFastTrackAppreciation(player: Player, share = 1): void {
+  const rate = FAST_TRACK_ASSET_APPRECIATION_RATE * share;
   player.assets.forEach((asset) => {
     asset.currentValue = Math.round(asset.currentValue * (1 + rate));
     asset.monthlyCashflow = Math.round(asset.monthlyCashflow * (1 + rate * 0.1));
@@ -1013,9 +1053,9 @@ export function applyFastTrackAppreciation(player: Player): void {
  * 外圈發薪日紅利：總資產市值 × FAST_TRACK_PAYDAY_BONUS_RATE 現金直接入帳。
  * @returns 紅利金額
  */
-export function applyFastTrackPaydayBonus(player: Player): number {
+export function applyFastTrackPaydayBonus(player: Player, share = 1): number {
   const totalAssetValue = player.assets.reduce((sum, a) => sum + (a.currentValue ?? 0), 0);
-  const bonus = Math.round(totalAssetValue * FAST_TRACK_PAYDAY_BONUS_RATE);
+  const bonus = Math.round(totalAssetValue * FAST_TRACK_PAYDAY_BONUS_RATE * share);
   player.cash += bonus;
   return bonus;
 }
@@ -1470,7 +1510,7 @@ export function confirmMarriage(
 
   return {
     success: true,
-    message: `恭喜結婚（${type}）！月收入加成 +$${bonus.toLocaleString()}。`,
+    message: `恭喜結婚（${type}）！配偶每月實拿 +$${(player.spouse?.income ?? 0).toLocaleString()}，家裡每月多 $${(player.spouseLivingExpenses).toLocaleString()} 生活費。`,
     marriageBonus: bonus,
     lifeExpGained: lifeExp,
   };
@@ -1517,7 +1557,7 @@ export function buyArrangedMarriage(player: Player, currentAge: number): Confirm
 
   return {
     success: true,
-    message: `買賣婚姻完成，費用 $${cost.toLocaleString()}。月收入加成 +$${bonus.toLocaleString()}。`,
+    message: `買賣婚姻完成，費用 $${cost.toLocaleString()}。配偶每月實拿 +$${(player.spouse?.income ?? 0).toLocaleString()}。`,
     marriageBonus: bonus,
     lifeExpGained: LIFE_EXP.MARRIAGE_ARRANGED,
   };

@@ -10,7 +10,7 @@ import {
   continueAfterTurnAdvance, createRoomAdminCredential, emitClient, emitToRoom, forgetPersistedRoom, generateRoomCode,
   getPlayerSocket, getRoomState, hasRoomAdmin, io, isRoomAdmin, maybeCompleteActionPhase,
   pendingSubmissions, playerIdentity, playerSessions, privateReplay, removeRoomAdmin, roomAdminCredentials,
-  roomAdminSocketIds, roomCreationRate, rooms, scheduleEmptyRoomCleanup, serializeGameState, skipCurrentEducationTurns,
+  roomAdminSocketIds, roomCreationRate, rooms, scheduleEmptyRoomCleanup, serializeGameState, skipCurrentEducationTurns, payCompletedRounds,
   socketRoomMap, tryOpenWorldEvent, verifyRoomAdminPassword,
 } from '../socketServer';
 
@@ -353,6 +353,7 @@ export function registerRoomHandlers(socket: Socket, onSafe: OnSafe): void {
     if (wasCurrentTurn && inPlay && gs.playerOrder.length > 0) {
       if (gs.currentPlayerTurnId === payload.playerId) gs.currentPlayerTurnId = gs.playerOrder[0];
       skipCurrentEducationTurns(gs);
+      payCompletedRounds(gs);
       continueAfterTurnAdvance(gs);
       tryOpenWorldEvent(gs);
     }

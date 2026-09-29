@@ -77,14 +77,18 @@ export const PAYDAY_LOCATIONS: readonly number[] = [];
 export const ROUNDS_PER_GLOBAL_PAYDAY = 3;
 /** 舊常數：保留給舊測試與說明；實際結算月數 = 經過輪數 × MONTHS_PER_ROUND。 */
 export const MONTHS_PER_GLOBAL_PAYDAY = 6;
-/** 每個完整輪視為一年薪資：結算月數 = 經過輪數 × 12（至少一輪）。 */
-export const MONTHS_PER_ROUND = 24;
+/** 每輪人生 4 年，每輪結束就發薪：結算 48 個月（= 4 年）的收入與支出。 */
+export const MONTHS_PER_ROUND = 48;
 /** 計時發薪的保底：距上次發薪超過這麼多輪就一定發薪（避免計時太長整場沒發薪） */
 export const PAYDAY_MAX_ROUNDS = 3;
-/** 主持人可選的每輪結算月數（1 結算月 ≈ 4/24×12 個真實月） */
+/** 主持人可選的每輪結算月數；48 = 真實 4 年，較小的值會讓金錢壓縮（只供特殊場次） */
 export const MONTHS_PER_ROUND_OPTIONS = [12, 24, 48] as const;
 /** 計時發薪預設間隔（主持人可調 5–20 分鐘）；到期後排在目前玩家行動結束時執行，且至少要經過一輪。 */
 export const PAYDAY_TIMER_DEFAULT_MS = 10 * 60 * 1000;
+/** 人生規劃會議買的健康維護／積極健康，涵蓋接下來幾輪（每輪一次 HP 衰退） */
+export const PLAN_COVER_ROUNDS = 3;
+/** 外圈資產增值與紅利原本每次發薪（約 3 輪）一次；改成每輪發薪後，每輪給三分之一 */
+export const FAST_TRACK_ROUND_SHARE = 1 / 3;
 /** 健康與自然人脈仍維持原本每次發薪三個成長週期，不隨財務月份加倍。 */
 export const GROWTH_CYCLES_PER_GLOBAL_PAYDAY = 3;
 
@@ -778,6 +782,19 @@ export const PROFESSIONS: Profession[] = [
 ];
 
 /**
+ * 真實生活成本係數：職業表的生活支出沿用桌遊的精簡設定，開局存錢率高達五成以上。
+ * 以前每輪只結算 24 個月，等於把存錢率打對折；改成每輪誠實結算 48 個月（4 年）後，
+ * 把開局生活支出放大到讓一般職業的存錢率回到真實的 25–30%。
+ * 只調整開局基準；卡片、世界事件加上的支出照原金額。
+ * 只套用在靠薪水的 E、S 象限；B、I 象限收入來自資產，開局存錢率本來就只有兩成多。
+ */
+export const LIVING_COST_REALISM = 2.0;
+for (const profession of PROFESSIONS) {
+  if (profession.quadrant !== 'E' && profession.quadrant !== 'S') continue;
+  profession.startingOtherExpenses = Math.round(profession.startingOtherExpenses * LIVING_COST_REALISM / 100) * 100;
+}
+
+/**
  * 以職業 ID 快速查詢職業物件。
  * 在 createPlayer 中用於依 professionId 指定職業。
  */
@@ -1005,11 +1022,14 @@ export const ARRANGED_MARRIAGE_BASE_COST = 75_000;
 export const ARRANGED_MARRIAGE_COST_STEP = 3_000;   // 每歲增加 $3,000
 export const ARRANGED_MARRIAGE_MAX_COST = 450_000;
 
-/** 各婚姻類型帶來的月收入加成（婚姻紅利） */
+/**
+ * 舊版的「婚姻紅利」月收入加成，已取消（改為配偶實拿收入 − 家庭多出的支出）。
+ * 保留常數讓舊程式與舊存檔可以讀取。
+ */
 export const MARRIAGE_BONUS_BY_TYPE: Record<'love' | 'matchmaker' | 'arranged', number> = {
-  love:        15_000,  // 愛情婚姻：最高加成
-  matchmaker:   9_000,  // 媒合婚姻：中等加成
-  arranged:     3_000,  // 買賣婚姻：最低加成
+  love:        0,
+  matchmaker:  0,
+  arranged:    0,
 };
 
 // ============================================================
@@ -1585,6 +1605,15 @@ export const LAYOFF_MONTHS_BY_STAGE: Readonly<Record<LifeStage, number>> = {
 };
 
 /** 配偶：結婚時配偶月收入 = 本人薪資 × 隨機 0.5–0.9（下限 $20,000、上限 $120,000）；65 歲後改領 40% */
+/** 配偶收入以實拿計：扣掉稅與勞健保後約 85% */
+export const SPOUSE_NET_INCOME_RATIO = 0.85;
+/** 配偶自己的生活費 = 你的生活支出基準 × 這個比例（同樣隨生活方式與物價變動） */
+export const SPOUSE_LIVING_COST_RATIO = 1.0;
+/** 租屋者結婚後換大一點的住處：房租 +50%（自有住宅不受影響） */
+export const MARRIED_RENT_INCREASE = 0.5;
+/** 婚禮花費：兩人每月收入合計 × 2，至少 $60,000；現金不夠就簡單辦，最多花掉手頭現金 */
+export const WEDDING_COST_MONTHS = 2;
+export const WEDDING_COST_MIN = 60_000;
 export const SPOUSE_INCOME_RATIO_MIN = 0.5;
 export const SPOUSE_INCOME_RATIO_MAX = 0.9;
 export const SPOUSE_INCOME_MIN = 20_000;

@@ -29,7 +29,7 @@ const STRATEGY_CARDS = [
     icon: '🛡️',
     title: '風險怎麼管？',
     question: '危機來臨前，你準備好了嗎？',
-    body: '保險在危機發生後才買是來不及的。每次發薪日都可以購入醫療、壽險、財產險。有保險的危機只需付部分費用，沒保險可能讓你一夕歸零。',
+    body: '保險在危機發生後才買是來不及的。每次人生規劃都可以購入醫療、壽險、財產險。有保險的危機只需付部分費用，沒保險可能讓你一夕歸零。',
     color: 'border-red-600',
     highlight: 'text-red-400',
   },
@@ -46,7 +46,7 @@ const STRATEGY_CARDS = [
 const FREE_ACTIONS = [
   { icon: '✈️', name: '旅遊', desc: '消耗現金和少量 HP，獲得生命體驗。部分目的地額外提升 FQ、NT 或 SK。' },
   { icon: '🤝', name: '社交活動', desc: '花費時間與金錢，提升人脈（NT）。NT 越高，危機豁免與交易加成效果越強。' },
-  { icon: '📈', name: '股票定期定額', desc: '任何時候都可投入，指數基金每次發薪日自動複利增長。定期定額降低進場時機的風險。' },
+  { icon: '📈', name: '股票定期定額', desc: '任何時候都可投入，指數基金每月自動複利增長，每輪發薪時結算。定期定額降低進場時機的風險。' },
   { icon: '🏥', name: '購買保險', desc: '醫療險、壽險、財產險三種。每種保險保護不同的危機類型，每月扣除保費。' },
   { icon: '🏦', name: '應急借款', desc: '信用分越高，借款上限越高、利率越低。借款後每月扣除本利，請謹慎使用。' },
   { icon: '💼', name: '出售資產', desc: '隨時可賣出名下資產。市值低於成本時出售會虧損；繁榮市場時賣出可獲利。' },
@@ -55,10 +55,10 @@ const FREE_ACTIONS = [
 const PAYDAY_DECISIONS = [
   { icon: '🧠', name: '提升財商 FQ', cost: '每次固定費用', effect: 'FQ +1，提高資產回報倍率，解鎖高階投資選項' },
   { icon: '💪', name: 'HP 強化', cost: '固定費用', effect: 'HP 大幅回升，抵抗老年 HP 衰退' },
-  { icon: '🩺', name: 'HP 維護', cost: '低費用', effect: '本次發薪日 HP 不衰退（不回復，只維持）' },
+  { icon: '🩺', name: 'HP 維護', cost: '低費用', effect: '接下來 3 輪 HP 不衰退（不回復，只維持）' },
   { icon: '🛠️', name: '職涯培訓 SK', cost: '固定費用', effect: 'SK 提升，累積達 100 可解鎖轉職' },
   { icon: '🌐', name: '拓展人脈 NT', cost: '固定費用', effect: 'NT 提升，達到 3/5/8 解鎖特殊效果' },
-  { icon: '📈', name: '股票定投 DCA', cost: '自訂金額', effect: '投入指數基金，每月複利。下次發薪日即開始增值' },
+  { icon: '📈', name: '股票定投 DCA', cost: '自訂金額', effect: '投入指數基金，每月複利。下一輪發薪就開始增值' },
   { icon: '🛡️', name: '購買保險', cost: '啟用費 + 月保費', effect: '保護未來危機，每月從薪資中扣除保費' },
 ];
 
@@ -199,7 +199,7 @@ export default function IntroSheet({ onClose, mode = 'sheet' }: Props) {
               </div>
             </div>
             <div>
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 px-1">每次發薪日的決策選項</h3>
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 px-1">每次人生規劃的決策選項</h3>
               <div className={isFullscreen ? 'grid grid-cols-3 gap-2' : 'space-y-2'}>
                 {PAYDAY_DECISIONS.map((d) => (
                   <div key={d.name} className="flex gap-3 bg-gray-900 rounded-xl p-3">

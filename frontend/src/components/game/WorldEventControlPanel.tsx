@@ -38,8 +38,8 @@ export default function WorldEventControlPanel({ gameState, status, emit }: Prop
           </button>
         </div>
         <p className="mt-2">上次季度評估 {status?.score ?? 50}/100</p>
-        <p className="mt-1 text-sm text-cyan-100">{status?.reason ?? '等待全體發薪後評估'}</p>
-        <p className="mt-2 text-sm text-cyan-100">第 2 次全體發薪起評估；自動事件至少間隔兩季。電腦選事件，由主持人揭曉後生效。</p>
+        <p className="mt-1 text-sm text-cyan-100">{status?.reason ?? '等待人生規劃後評估'}</p>
+        <p className="mt-2 text-sm text-cyan-100">第 2 次人生規劃起評估；自動事件至少間隔兩季。電腦選事件，由主持人揭曉後生效。</p>
       </div>
 
       {pending ? (

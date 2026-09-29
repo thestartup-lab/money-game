@@ -64,7 +64,7 @@ function BoardPreview() {
           enableCalibration
         />
       </div>
-      <p className="text-gray-500 text-xs">發光棋子 = 當前回合玩家 ▎ 中央三段圓盤 = 統一發薪進度</p>
+      <p className="text-gray-500 text-xs">發光棋子 = 當前回合玩家 ▎ 中央三段圓盤 = 下次人生規劃</p>
     </div>
   );
 }

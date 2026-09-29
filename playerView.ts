@@ -182,7 +182,7 @@ export function serializePlayer(p: Player, gs: GameState): object {
     incomeItems.push({ label: `被動收入乘數（財商 ×${fqMultiplier}${p.isInFastTrack ? `、外圈 ×${FAST_TRACK_INCOME_MULTIPLIER}` : ''}）`,
       amount: Math.round(p.totalPassiveIncome * passiveMultiplier) - Math.max(0, p.totalPassiveIncome), note: '以被動收入總額乘算後的差額' });
   }
-  if (p.marriageBonus) incomeItems.push({ label: '婚姻加成', amount: p.marriageBonus });
+  if (p.marriageBonus) incomeItems.push({ label: '婚姻加成（舊版）', amount: p.marriageBonus });
   if (p.spouse) incomeItems.push({ label: '配偶收入', amount: p.spouseIncome,
     note: p.spouse.unemployedMonthsLeft > 0 ? `配偶失業中，剩 ${p.spouse.unemployedMonthsLeft} 個月` : p.spouse.retired ? '配偶已退休（40%）' : undefined });
   const expenseItems: { label: string; amount: number; note?: string }[] = [];
@@ -190,7 +190,11 @@ export function serializePlayer(p: Player, gs: GameState): object {
   pushExpense('稅', p.expenses.taxes);
   pushExpense('勞健保', p.socialInsurance, `薪資 × ${Math.round(SOCIAL_INSURANCE_RATE * 100)}%`);
   pushExpense('高齡醫療／長照', p.seniorCareExpense, p.stats.health < 30 ? 'HP < 30：醫療 + 長照' : 'HP < 60：醫療');
-  pushExpense('房租', p.rentExpense, p.livingCostMultiplier > 1 ? `隨物價 ×${p.livingCostMultiplier.toFixed(2)}；買房後不用付` : '買房後不用付');
+  pushExpense('房租', p.rentExpense, [
+    p.livingCostMultiplier > 1 ? `隨物價 ×${p.livingCostMultiplier.toFixed(2)}` : '',
+    p.isMarried && p.spouse ? '已婚住較大的房子 ×1.5' : '',
+    '買房後不用付',
+  ].filter(Boolean).join('；'));
   pushExpense('房貸月付', p.expenses.homeMortgagePayment, '可用「提前還款」降低');
   pushExpense('車貸月付', p.expenses.carLoanPayment, '可用「提前還款」降低');
   pushExpense('信用卡', p.expenses.creditCardPayment);
@@ -201,6 +205,7 @@ export function serializePlayer(p: Player, gs: GameState): object {
     if (style.expenseMultiplier !== 1) notes.push(`${style.label} ×${style.expenseMultiplier}`);
     if (p.livingCostMultiplier > 1) notes.push(`物價 ×${p.livingCostMultiplier.toFixed(2)}`);
     pushExpense('生活支出', p.livingExpenses - habit.monthlyCost, notes.length ? `基準 $${p.expenses.otherExpenses.toLocaleString()}，${notes.join('、')}` : undefined);
+    pushExpense('配偶生活費', p.spouseLivingExpenses, '和你的生活支出一樣，隨生活方式與物價變動');
     if (habit.monthlyCost) pushExpense(`健康習慣：${habit.label}`, habit.monthlyCost);
   }
   pushExpense('世界事件調整', p.worldExpenseAdjustment);
@@ -381,11 +386,13 @@ export function serializeGameState(gs: GameState): object {
       intervalMs: gs.paydayIntervalMs,
       remainingMs: paydayRemainingMs(gs),
       roundsSince: gs.turnNumber - gs.roundsAtLastPayday,
-      settlementMonths: paydaySettlementMonths(gs),
+      // 薪水每輪已入帳，人生規劃不再結算月數（保留欄位給舊畫面）
+      settlementMonths: 0,
       due: isPaydayDue(gs) || gs.globalPaydayPending,
       frozen: gs.paydayPausedAt !== null,
       maxRounds: PAYDAY_MAX_ROUNDS,
     },
+    monthsPerRoundPaid: gs.monthsPerRound || MONTHS_PER_ROUND,
     globalPaydayPending: gs.globalPaydayPending,
     globalPaydayInProgress: gs.globalPaydayInProgress,
     globalPaydayNumber: gs.globalPaydayNumber,

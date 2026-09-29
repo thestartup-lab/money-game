@@ -180,7 +180,7 @@ export default function AdminPage() {
       }
     });
     s.on('globalPaydayFailed', (p: { message?: string }) => {
-      const message = `季度發薪中斷：${p.message ?? '請檢查玩家狀態後繼續'}`;
+      const message = `人生規劃中斷：${p.message ?? '請檢查玩家狀態後繼續'}`;
       addLog(message);
       setActionError(message);
     });
@@ -609,7 +609,7 @@ export default function AdminPage() {
                   </button>
                 </div>
                 <p className="text-xs leading-relaxed text-indigo-300">
-                  {gameState?.autoHost ? '🤖 全自動主持中：倒數歸零會自動收束（沒送出的用空白方案或視為放棄）。要自己控制請先關閉全自動主持。' : '倒數只提醒節奏，不會自動送出。可以依本次發薪日內容加時，最後由你統一結束並揭曉。'}
+                  {gameState?.autoHost ? '🤖 全自動主持中：倒數歸零會自動收束（沒送出的用空白方案或視為放棄）。要自己控制請先關閉全自動主持。' : '倒數只提醒節奏，不會自動送出。可以依本次內容加時，最後由你統一結束並揭曉。'}
                 </p>
                 <button
                   className="w-full rounded-xl bg-indigo-500 px-4 py-3 text-base font-black text-white transition-colors hover:bg-indigo-400"
@@ -652,13 +652,13 @@ export default function AdminPage() {
                 </div>
                 <p className="mt-1 text-[11px] text-gray-500">開啟時玩家一送出就在 1.5 秒後揭曉；競標仍由你按「結束競標」。</p>
                 <div className="mt-2 flex items-center justify-between gap-2">
-                  <span className="font-bold text-gray-200">🗳️ 發薪後全場共同抉擇</span>
+                  <span className="font-bold text-gray-200">🗳️ 人生規劃後全場共同抉擇</span>
                   <button
                     className={`rounded-lg px-2 py-1 font-bold ${gameState?.communityChoiceAuto !== false ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
                     onClick={() => emit('setCommunityChoiceAuto', { enabled: gameState?.communityChoiceAuto === false })}
                   >{gameState?.communityChoiceAuto !== false ? '開啟中' : '關閉中'}</button>
                 </div>
-                <p className="mt-1 text-[11px] text-gray-500">每次發薪結算完自動出現一張（8 張輪替），每人在手機投票，你按「依多數決揭曉」或自己裁定。</p>
+                <p className="mt-1 text-[11px] text-gray-500">每次人生規劃結束自動出現一張（8 張輪替），每人在手機投票，你按「依多數決揭曉」或自己裁定。</p>
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <span className="font-bold text-gray-200">🤖 全自動主持</span>
                   <button
@@ -685,11 +685,11 @@ export default function AdminPage() {
                 </div>
                 <div className="mt-3 border-t border-gray-700 pt-2">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-bold text-gray-200">計時發薪</span>
+                    <span className="font-bold text-gray-200">計時人生規劃</span>
                     <span className="text-gray-300">
                       {gameState?.paydayTimer?.enabled
                         ? (gameState.paydayTimer.due ? '到期，等目前行動結束' : `下次 ${formatCountdown(paydayRemaining)}`)
-                        : '關閉（每三輪發薪）'}
+                        : '關閉（每三輪一次）'}
                     </span>
                   </div>
                   <div className="mt-1 flex flex-wrap gap-1">
@@ -703,19 +703,19 @@ export default function AdminPage() {
                     <button className={`rounded-lg px-2 py-1 font-bold ${gameState?.paydayTimer?.enabled === false ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
                       onClick={() => emit('setPaydayTimer', { enabled: false })}>改用每三輪</button>
                     <button className="rounded-lg bg-amber-700 px-2 py-1 font-bold text-white hover:bg-amber-600"
-                      onClick={() => { if (window.confirm('立即安排發薪？會在目前玩家行動結束後開始。')) emit('triggerPaydayNow'); }}>立即發薪</button>
+                      onClick={() => { if (window.confirm('立即安排人生規劃？會在目前玩家行動結束後開始。')) emit('triggerPaydayNow'); }}>立即規劃</button>
                   </div>
-                  <p className="mt-1 text-[11px] text-gray-500">時間到就排在目前玩家行動結束後發薪（至少要完成一輪）；超過 {gameState?.paydayTimer?.maxRounds ?? 3} 輪沒發薪會自動發。決策與舞台期間照常計時，只有你按暫停與發薪進行中會停。結算月數 = 經過輪數 × {gameState?.monthsPerRound ?? 24}。已累積 {gameState?.paydayTimer?.roundsSince ?? 0} 輪。</p>
+                  <p className="mt-1 text-[11px] text-gray-500">薪水每輪結束自動入帳，不用等。人生規劃是全場停下來填投資、保險、生活方式：時間到就排在目前玩家行動結束後（至少要完成一輪）；超過 {gameState?.paydayTimer?.maxRounds ?? 3} 輪沒規劃會自動開。決策與舞台期間照常計時，只有你按暫停與規劃進行中會停。距上次規劃 {gameState?.paydayTimer?.roundsSince ?? 0} 輪。</p>
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <span className="font-bold text-gray-200">每輪結算月數</span>
                     <div className="flex gap-1">
                       {[12, 24, 48].map((m) => (
-                        <button key={m} className={`rounded-lg px-2 py-1 font-bold ${(gameState?.monthsPerRound ?? 24) === m ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+                        <button key={m} className={`rounded-lg px-2 py-1 font-bold ${(gameState?.monthsPerRound ?? 48) === m ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
                           onClick={() => emit('setMonthsPerRound', { months: m })}>{m}</button>
                       ))}
                     </div>
                   </div>
-                  <p className="mt-1 text-[11px] text-gray-500">一輪 = 4 歲。24 個月時 1 結算月 ≈ 2 個真實月（預設）；48 個月最貼近真實但金額很大；12 個月為舊節奏。</p>
+                  <p className="mt-1 text-[11px] text-gray-500">一輪 = 4 歲，每輪發薪。48 個月 = 真實 4 年（預設，手機上的每月金額 × 48 就是入帳）；24、12 個月會把金錢壓縮，只給特殊場次用。</p>
                 </div>
               </div>
             )}

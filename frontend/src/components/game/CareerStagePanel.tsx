@@ -38,7 +38,7 @@ export default function CareerStagePanel({ gameState, player, emit }: {
     return <section className="mx-4 mb-3 rounded-2xl border-2 border-yellow-400 bg-slate-900 p-5 text-lg text-white" aria-live="polite">
       <p className="font-black">🎯 已申請轉職：{request.professionName}</p>
       <p className="my-2 text-base text-gray-200">{position > 1 ? `排在第 ${position} 位，` : ''}等主持人在大螢幕開啟「轉職舞台」，你再確認代價；目前沒有扣款，職業也還沒變。</p>
-      <p className="mb-3 text-sm text-yellow-200">提醒主持人：後台「🎯 等待轉職」區按「開啟轉職舞台」（要等目前回合、決策與發薪結束）。</p>
+      <p className="mb-3 text-sm text-yellow-200">提醒主持人：後台「🎯 等待轉職」區按「開啟轉職舞台」（要等目前回合、決策與人生規劃結束）。</p>
       <button className={button} onClick={() => emit('cancelCareerRequest', { requestId: request.id })}>撤回申請</button>
     </section>;
   }

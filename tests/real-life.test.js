@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createPlayer, triggerPayday, applyRoundGrowth, getLayoffMonths, createSpouse, naturalDeathProbability, syncPlayerAges, confirmMarriage } = require('../dist/gameLogic');
+const { createPlayer, triggerPayday, applyRoundGrowth, getLayoffMonths, createSpouse, naturalDeathProbability, syncPlayerAges, confirmMarriage, payWedding, previewMarriageFinances } = require('../dist/gameLogic');
 const { GameState, LifeStage } = require('../dist/gameDataModels');
 const { applyBabyCard, applyRelationshipCard, applyCrisisCard, previewCrisisCard, previewCrisisCost } = require('../dist/cardSystem');
 const { RELATIONSHIP_EVENTS, CRISIS_EVENTS, CRISIS_POOL_BY_STAGE } = require('../dist/gameCards');
@@ -102,7 +102,7 @@ test('結婚建立配偶收入；配偶失業 6 個月；離婚分割現金並�
   p.cash = 400000; p.relationshipActive = true; p.relationshipPoints = 100;
   const r = confirmMarriage(p, 'love');
   assert.equal(r.success, true);
-  assert.ok(p.spouse && p.spouse.income >= 20000 && p.spouse.income <= 120000);
+  assert.ok(p.spouse && p.spouse.income >= 17000 && p.spouse.income <= 102000, '配偶收入以實拿計（85%）');
   assert.equal(p.totalIncome, p.salary + p.marriageBonus + p.spouse.income);
   const unemployed = RELATIONSHIP_EVENTS.find((c) => c.effect.spouseEvent === 'unemployed');
   applyRelationshipCard(p, unemployed);
@@ -126,6 +126,33 @@ test('結婚建立配偶收入；配偶失業 6 個月；離婚分割現金並�
   assert.equal(single.cash, 80000);
   assert.equal(f.spouseEvent, undefined);
   assert.match(f.message, /好友失業/);
+});
+
+test('結婚：沒有額外紅利；配偶實拿收入、配偶生活費、房租變大、婚禮花費，現金不夠就簡單辦', () => {
+  const p = createPlayer('p', '玩家', 'teacher');
+  p.salary = p.profession.startingSalary;
+  p.cash = 400000; p.relationshipActive = true; p.relationshipPoints = 100;
+  const single = { income: p.totalIncome, expenses: p.totalExpenses, rent: p.rentExpense, living: p.livingExpenses };
+  const preview = previewMarriageFinances(p);
+  confirmMarriage(p, 'love');
+  assert.equal(p.marriageBonus, 0, '不再有婚姻紅利');
+  assert.equal(p.totalIncome, single.income + p.spouse.income);
+  assert.equal(p.spouseLivingExpenses, single.living - 0, '配偶生活費與自己的生活支出基準相同');
+  assert.equal(p.rentExpense, Math.round(single.rent * 1.5), '租屋換大一點');
+  assert.equal(p.totalExpenses, single.expenses + p.spouseLivingExpenses + (p.rentExpense - single.rent));
+  assert.ok(p.spouse.income >= preview.spouseMin && p.spouse.income <= preview.spouseMax, '實際配偶收入落在事前說明的範圍');
+  assert.equal(preview.extraExpenses, p.spouseLivingExpenses + (p.rentExpense - single.rent));
+  const net = p.monthlyCashflow - (single.income - single.expenses);
+  assert.ok(net < p.spouse.income * 0.8, `淨增加要明顯小於配偶收入（淨增 ${net}，配偶 ${p.spouse.income}）`);
+  const wedding = payWedding(p);
+  assert.equal(wedding.cost, Math.max(60000, Math.round((p.salary + p.spouse.income) * 2 / 1000) * 1000));
+  assert.equal(p.cash, 400000 - wedding.cost);
+  assert.equal(wedding.simplified, false);
+  // 現金不夠：簡單辦，只花掉手頭現金，不借錢
+  const poor = createPlayer('q', '小資', 'teacher'); poor.salary = poor.profession.startingSalary;
+  createSpouse(poor); poor.isMarried = true; poor.cash = 20000;
+  const small = payWedding(poor);
+  assert.equal(small.paid, 20000); assert.equal(small.simplified, true); assert.equal(poor.cash, 0);
 });
 
 test('父母事件：沒有保險可抵、人脈 ≥ 5 減半、長照變成 24 個月固定支出並逐月遞減', () => {

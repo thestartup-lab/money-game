@@ -22,7 +22,7 @@ import { Deck, DealCard, DoodadCard, CrisisCard, MarketCard, SMALL_DEALS, BIG_DE
 import type { AdminGlobalEvent, GlobalEventEffect } from './adminEvents';
 import {
   SENIOR_MEDICAL_HP, SENIOR_MEDICAL_EXPENSE, SENIOR_CARE_HP, SENIOR_CARE_EXPENSE, MONTHS_PER_ROUND,
-  CHILD_EXPENSE_BY_AGE, SOCIAL_INSURANCE_RATE, PREMIUM_MULT_BY_STAGE, LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS,
+  CHILD_EXPENSE_BY_AGE, SOCIAL_INSURANCE_RATE, PREMIUM_MULT_BY_STAGE, LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS, SPOUSE_LIVING_COST_RATIO, MARRIED_RENT_INCREASE,
 } from './gameConfig';
 import type { Lifestyle, HealthHabit } from './gameConfig';
 
@@ -520,6 +520,8 @@ export class Player {
   isMarried: boolean;
   /** 結婚帶來的月收入加成（$0 若未婚） */
   marriageBonus: number;
+  /** 人生規劃買的健康維護還涵蓋幾輪（每輪發薪時扣 1；> 0 時該輪 HP 不衰退） */
+  healthMaintenanceRounds = 0;
   /**
    * 深度關係經營值（Deep Relationship Score）。
    * 透過聯誼活動或主持人觸發累積；達到閾值後可提親結婚。
@@ -777,7 +779,15 @@ export class Player {
   /** 房租（隨生活成本上漲；買房後為 0） */
   get rentExpense(): number {
     if (this.housing === 'own') return 0;
-    return Math.round((this.expenses.rent ?? 0) * this.livingCostMultiplier);
+    const familySize = this.isMarried && this.spouse ? 1 + MARRIED_RENT_INCREASE : 1;
+    return Math.round((this.expenses.rent ?? 0) * this.livingCostMultiplier * familySize);
+  }
+
+  /** 配偶的生活費：跟你一樣隨生活方式與物價變動（離婚後歸零） */
+  get spouseLivingExpenses(): number {
+    if (!this.isMarried || !this.spouse) return 0;
+    const style = LIFESTYLE_OPTIONS[this.lifestyle] ?? LIFESTYLE_OPTIONS.normal;
+    return Math.round(this.expenses.otherExpenses * style.expenseMultiplier * this.livingCostMultiplier * SPOUSE_LIVING_COST_RATIO);
   }
 
   /** 配偶收入（失業中為 0） */
@@ -857,6 +867,7 @@ export class Player {
       e.carLoanPayment +
       e.creditCardPayment +
       this.livingExpenses +
+      this.spouseLivingExpenses +
       this.worldExpenseAdjustment +
       this.insurancePremiums +
       this.childExpenses +
@@ -895,6 +906,8 @@ export class GameState {
   communityChoiceHistory: string[] = [];
   /** 每次共同抉擇的結果（終局復盤回顧用） */
   communityChoiceLog: CommunityChoiceRecord[] = [];
+  /** 已經發薪到第幾輪（每輪結束發一次，避免重複或漏發） */
+  lastPaidRound = 0;
   /** 大螢幕復盤目前停在哪一步（主持人控制；大螢幕重新整理後可接續） */
   reviewView: ReviewViewState | null = null;
   /** 已跑過「全體行動時間」的輪數（turnNumber）；每輪開始只跑一次 */

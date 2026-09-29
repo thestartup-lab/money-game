@@ -160,14 +160,14 @@ import { registerReviewHandlers } from './handlers/reviewHandlers';
 import { handleLandingSquare } from './landingSquare';
 import { serializeGameState, serializePlayer, buildSecondLifeProgress, buildActionInfo, buildSalaryItems, buildNetWorthBreakdown, buildAffordableOptions, buildAvailableProfessions, careerBlockReason } from './playerView';
 import { clampFacilitatorStat, adjustFacilitatorHealth, spendAvailableCash, beginFacilitatorScene, revealFacilitatorResult, pickMarriageCard, buildMarriageScene, startMarriageScene, transitionFamilySceneToMarriage, startFamilyScene, applyMarriageScene, resolveFamilyScene, closeFacilitatorScene, applyCommunityChoice, applyCooperationContract, findDecisionEcho, applyDecisionEcho, applyLegacyAction, startCommunityChoice, recordCommunityVote, majorityCommunityChoice, describeCommunityVotes, tryOpenScheduledCommunityChoice } from './facilitatorScenes';
-import { emitQuarterMilestones, settleQuarterMonths, getActiveElapsedMs, roundsSinceLastPayday, paydaySettlementMonths, getPaydayElapsedMs, pausePaydayClock, resumePaydayClock, paydayRemainingMs, isPaydayDue, schedulePaydayIfDue, runGlobalPayday } from './paydayFlow';
+import { emitQuarterMilestones, settleQuarterMonths, getActiveElapsedMs, roundsSinceLastPayday, paydaySettlementMonths, getPaydayElapsedMs, pausePaydayClock, resumePaydayClock, paydayRemainingMs, isPaydayDue, schedulePaydayIfDue, runGlobalPayday, settleRound, payCompletedRounds } from './paydayFlow';
 import { beginHostDecisionPhase, waitForHostControlledDecision, waitForHostRelease, describePrompt, waitForCardDecision, applyCrisisWithRescue, scaleFastTrackCrisis } from './decisionPhases';
 import { checkBucketGoals, checkLifeMilestones, buildSecondLifeReview, deathAgeLabel, eliminatePlayer, finishGame, startFinalRound, retirementSceneDescription, queueRetirementCandidates, tryOpenRetirementScene, queueSecondLifeCandidates, tryOpenSecondLife, revealSecondLife, promoteSecondLife, announceCareerUnlock } from './lifeProgress';
 import { emitAdaptiveDirectorStatus, assessAdaptiveDifficulty, getAdaptiveEventPool, evaluateAndMaybeTriggerAdaptiveEvent, tryOpenWorldEvent } from './adaptiveDirector';
 export { emitAdaptiveDirectorStatus, assessAdaptiveDifficulty, getAdaptiveEventPool, evaluateAndMaybeTriggerAdaptiveEvent, tryOpenWorldEvent };
 export { checkBucketGoals, checkLifeMilestones, buildSecondLifeReview, deathAgeLabel, eliminatePlayer, finishGame, startFinalRound, retirementSceneDescription, queueRetirementCandidates, tryOpenRetirementScene, queueSecondLifeCandidates, tryOpenSecondLife, revealSecondLife, promoteSecondLife, announceCareerUnlock };
 export { beginHostDecisionPhase, waitForHostControlledDecision, waitForHostRelease, describePrompt, waitForCardDecision, applyCrisisWithRescue, scaleFastTrackCrisis };
-export { emitQuarterMilestones, settleQuarterMonths, getActiveElapsedMs, roundsSinceLastPayday, paydaySettlementMonths, getPaydayElapsedMs, pausePaydayClock, resumePaydayClock, paydayRemainingMs, isPaydayDue, schedulePaydayIfDue, runGlobalPayday };
+export { emitQuarterMilestones, settleQuarterMonths, getActiveElapsedMs, roundsSinceLastPayday, paydaySettlementMonths, getPaydayElapsedMs, pausePaydayClock, resumePaydayClock, paydayRemainingMs, isPaydayDue, schedulePaydayIfDue, runGlobalPayday, settleRound, payCompletedRounds };
 export { clampFacilitatorStat, adjustFacilitatorHealth, spendAvailableCash, beginFacilitatorScene, revealFacilitatorResult, pickMarriageCard, buildMarriageScene, startMarriageScene, transitionFamilySceneToMarriage, startFamilyScene, applyMarriageScene, resolveFamilyScene, closeFacilitatorScene, applyCommunityChoice, applyCooperationContract, findDecisionEcho, applyDecisionEcho, applyLegacyAction, startCommunityChoice, recordCommunityVote, majorityCommunityChoice, describeCommunityVotes, tryOpenScheduledCommunityChoice };
 export { serializeGameState, serializePlayer, buildSecondLifeProgress, buildActionInfo, buildSalaryItems, buildNetWorthBreakdown, buildAffordableOptions, buildAvailableProfessions, careerBlockReason };
 export { handleLandingSquare };
@@ -1009,8 +1009,9 @@ export function advanceTurn(gs: GameState): void {
   if (gs.gamePhase === GamePhase.GameOver) return;
   gs.advanceToNextTurn();
   syncPlayerAges(gs);
-  schedulePaydayIfDue(gs);
   skipCurrentEducationTurns(gs);
+  payCompletedRounds(gs);
+  schedulePaydayIfDue(gs);
   continueAfterTurnAdvance(gs);
   tryOpenWorldEvent(gs);
 }

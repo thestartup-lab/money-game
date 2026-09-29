@@ -17,6 +17,7 @@ import DecisionCountdown from '../components/game/DecisionCountdown';
 import TurnIntroOverlay, { type TurnIntroData } from '../components/game/TurnIntroOverlay';
 import FacilitatorSceneOverlay from '../components/game/FacilitatorSceneOverlay';
 import BoardReadingPanel from '../components/game/BoardReadingPanel';
+import RoundPaydayBanner, { type RoundPaydayPayout } from '../components/game/RoundPaydayBanner';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
@@ -51,6 +52,9 @@ export default function DisplayScreen() {
   const [roomAnalysis, setRoomAnalysis] = useState<RoomAnalysis | null>(null);
   // 復盤：主持人控制的步驟、獎項揭曉進度、投影中的玩家
   const [reviewStep, setReviewStep] = useState(0);
+  // 每輪自動發薪：逐年顯示入帳
+  const [roundPayday, setRoundPayday] = useState<{ key: number; payouts: RoundPaydayPayout[] } | null>(null);
+  const clearRoundPayday = useCallback(() => setRoundPayday(null), []);
   const [screenAnalysis, setScreenAnalysis] = useState<PlayerAnalysis | null>(null);
   const reviewPlayerIdRef = useRef<string | undefined>(undefined);
   const appliedReviewKeyRef = useRef('');
@@ -249,6 +253,11 @@ export default function DisplayScreen() {
       boardFocusTimerRef.current = setTimeout(() => setBoardFocusPlayerId(undefined), 6_000);
     });
     s.on('marriageAnnouncement', (p: { playerName: string }) => addTicker(`💑 ${p.playerName} 結婚了！`));
+    s.on('roundPayday', (p: { payouts: RoundPaydayPayout[] }) => {
+      if (!p.payouts?.length) return;
+      setRoundPayday({ key: Date.now(), payouts: p.payouts });
+      addTicker(`💵 ${p.payouts[0].fromAge}–${p.payouts[0].toAge} 歲發薪：每個人這 ${p.payouts[0].years.length} 年的收支已入帳`);
+    });
     s.on('basicInvestmentResult', (p: { playerName: string; message: string }) => {
       addTicker(`💼 ${p.playerName}：${p.message}`);
     });
@@ -256,7 +265,7 @@ export default function DisplayScreen() {
       setPaydayCards(new Map());
       showPaydayOverlayRef.current = false;
       setShowPaydayOverlay(false);
-      addTicker(`💰 第 ${p.globalPaydayNumber} 次全體發薪：一次規劃、結算 ${p.settlementMonths} 個月`);
+      addTicker(`🗓️ 第 ${p.globalPaydayNumber} 次人生規劃：每人在手機規劃接下來幾輪`);
     });
     s.on('globalPaydayPlayerTurn', (p: {
       playerId: string; playerName: string; playerIndex: number; playerCount: number; globalPaydayNumber: number;
@@ -801,7 +810,7 @@ export default function DisplayScreen() {
           >
             {gameState.globalPaydayInProgress && gameState.decisionPhase?.kind === 'payday' && gameState.basicInvestmentOffers?.length ? (
               <section className="h-full w-full overflow-y-auto bg-gray-950 p-8 text-white" aria-label="公開基本投資機會">
-                <h2 className="text-4xl font-black text-amber-200">{gameState.decisionPhase.playerId === '__all_players__' ? gameState.decisionPhase.title : `${gameState.decisionPhase.playerName} 的發薪規劃`}</h2>
+                <h2 className="text-4xl font-black text-amber-200">{gameState.decisionPhase.playerId === '__all_players__' ? gameState.decisionPhase.title : `${gameState.decisionPhase.playerName} 的人生規劃`}</h2>
                 {gameState.decisionPhase.playerId === '__all_players__' && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {gameState.players.filter((p) => p.isAlive).map((p) => {
@@ -810,7 +819,7 @@ export default function DisplayScreen() {
                     })}
                   </div>
                 )}
-                <p className="my-4 text-2xl">一次配置，結算 {gameState.paydayTimer?.settlementMonths ?? 12} 個月收支。每人本次最多購買一份基本投資，也可以不買。</p>
+                <p className="my-4 text-2xl">薪水每輪已自動入帳，這次只做規劃。每人本次最多購買一種基本投資，也可以不買。</p>
                 <div className="grid gap-5">
                   {gameState.basicInvestmentOffers.map(offer => (
                     <article key={offer.id} className="rounded-2xl border-2 border-amber-700 bg-slate-900 p-5">
@@ -916,7 +925,7 @@ export default function DisplayScreen() {
                   <div className={`mx-auto mt-6 inline-flex items-center gap-2 rounded-full px-5 py-2 text-lg font-bold ${gameState.decisionPhase.submitted ? 'bg-emerald-700 text-emerald-100' : 'bg-amber-700 text-amber-100'}`}>
                     <span className={`h-3 w-3 rounded-full ${gameState.decisionPhase.submitted ? 'bg-emerald-200' : 'animate-pulse bg-amber-200'}`} />
                     {gameState.decisionPhase.playerId === '__all_players__' && (gameState.decisionPhase.kind === 'actions' || gameState.decisionPhase.kind === 'payday')
-                      ? `大家同時在手機${gameState.decisionPhase.kind === 'payday' ? '填寫發薪規劃' : '處理行動'}，已完成 ${(gameState.actionPhaseDone ?? []).length}/${gameState.players.filter((p) => p.isAlive && !p.isDisconnected).length}`
+                      ? `大家同時在手機${gameState.decisionPhase.kind === 'payday' ? '填寫人生規劃' : '處理行動'}，已完成 ${(gameState.actionPhaseDone ?? []).length}/${gameState.players.filter((p) => p.isAlive && !p.isDisconnected).length}`
                       : gameState.decisionPhase.kind === 'auction'
                       ? '公開競標進行中，主持人決定結束時間'
                       : gameState.decisionPhase.submitted
@@ -928,13 +937,23 @@ export default function DisplayScreen() {
               </div>
             )}
 
-            {/* 發薪日決策小卡 overlay */}
+            {/* 每輪自動發薪：逐年入帳 */}
+            {roundPayday && (
+              <RoundPaydayBanner
+                key={roundPayday.key}
+                payouts={roundPayday.payouts}
+                colorOf={(playerId) => playerColor(playerColorIndex(gameState.playerOrder, playerId, Math.max(0, gameState.players.findIndex((p) => p.id === playerId))))}
+                onDone={clearRoundPayday}
+              />
+            )}
+
+            {/* 人生規劃決策小卡 overlay */}
             {showPaydayOverlay && paydayCards.size > 0 && (
               <div
                 className="absolute inset-0 flex flex-col items-center justify-center z-40 bg-black/60 backdrop-blur-sm pointer-events-auto cursor-pointer"
                 onClick={dismissPaydayOverlay}
               >
-                <p className="text-yellow-300 font-bold text-lg mb-4 tracking-wide">💵 本次發薪日決策</p>
+                <p className="text-yellow-300 font-bold text-lg mb-4 tracking-wide">🗓️ 本次人生規劃</p>
                 <div className="flex flex-wrap justify-center gap-3 max-w-5xl px-4">
                   {Array.from(paydayCards.values()).map((card, i) => {
                     const dotColor = playerColor(card.colorIndex);

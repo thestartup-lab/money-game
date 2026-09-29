@@ -95,7 +95,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
       <div className="bg-gray-800 px-4 py-3 flex items-center justify-between border-b border-gray-700">
         <div>
           <div className="text-yellow-400 font-bold text-base">
-            💰 {data.globalPayday ? `第 ${data.globalPaydayNumber ?? ''} 季全體發薪` : '發薪日！'}{!data.globalPayday && data.combinedPlanning && data.totalPaydays
+            🗓️ {data.globalPayday ? `第 ${data.globalPaydayNumber ?? ''} 次人生規劃` : '人生規劃'}{!data.globalPayday && data.combinedPlanning && data.totalPaydays
               ? `（本回合 ${data.totalPaydays} 次結算）`
               : data.totalPaydays && data.totalPaydays > 1
                 ? `（第 ${data.paydayIndex ?? 1}/${data.totalPaydays} 次）`
@@ -103,7 +103,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
           </div>
           {data.globalPayday ? (
             <div className="text-xs font-semibold text-emerald-300">
-              本次涵蓋 {data.settlementMonths ?? 12} 個月收支（{data.growthCycles ?? Math.max(1, Math.round((data.settlementMonths ?? 12) / 24))} 輪），只配置一次
+              薪水每輪結束已自動入帳；這裡規劃接下來 {data.growthCycles ?? 3} 輪的投資、保險與生活方式
             </div>
           ) : data.combinedPlanning ? (
             <div className="text-xs font-semibold text-emerald-300">只需規劃一次，薪資將依序結算</div>

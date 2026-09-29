@@ -3,8 +3,8 @@ import type { SecondLifeProgress, SecondLifeRouteProgress } from '../../types/ga
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
 const INDICATOR_EMOJI: Record<string, string> = { health: '❤️', growth: '📚', relationship: '💞', experience: '🌍' };
 const INDICATOR_HINT: Record<string, string> = {
-  health: '發薪時投資健康（+20）、旅遊、取消壞習慣',
-  growth: '發薪時進修培訓（SK +20）',
+  health: '人生規劃時投資健康（+20）、旅遊、取消壞習慣',
+  growth: '人生規劃時進修培訓（SK +20）',
   relationship: '聯誼累積 DRS，或結婚',
   experience: '旅遊、生小孩、慈善、人生事件都會累積',
 };
@@ -103,7 +103,7 @@ export default function SecondLifeProgressPanel({ progress: pg }: Props) {
         if (!r.financialMet) steps.push(`多買到月現金流 +$${fmt(r.rawPassiveGap)} 的資產（交易卡、基本投資、定期定額配息、租金）`);
         if (!r.indicatorsMet) steps.push(`再完成 ${r.indicatorGap} 項指標，最接近的是：${pending.slice(0, r.indicatorGap).map((i) => `${i.label}（差 ${i.gap}）`).join('、')}`);
         if (!pg.passedCell) steps.push('先繞到「第二人生」格');
-        if (!pg.seasoned) steps.push('等下一次發薪結算');
+        if (!pg.seasoned) steps.push('等下一輪發薪');
         return (
           <div className="rounded-xl border border-amber-700 bg-amber-950/30 p-3">
             <p className="text-sm font-bold text-amber-200">🧭 最短路徑：{r.label}</p>

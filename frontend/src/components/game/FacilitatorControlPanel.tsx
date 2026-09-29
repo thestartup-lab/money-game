@@ -130,7 +130,7 @@ export default function FacilitatorControlPanel({ gameState, emit }: Props) {
               <button className="mt-2 min-h-12 w-full rounded-xl border border-slate-500 p-3" onClick={() => emit('cancelCareerRequest', { requestId: request.id })}>取消申請</button>
             </div>
           ))}
-          <p className="mt-2 text-base text-yellow-200">依序開啟；原回合與全體發薪先完成。開啟後遊戲暫停，關閉舞台才繼續。</p>
+          <p className="mt-2 text-base text-yellow-200">依序開啟；原回合與人生規劃先完成。開啟後遊戲暫停，關閉舞台才繼續。</p>
         </section>
       ) : null}
       <div className="rounded-xl border border-cyan-800 bg-cyan-950/45 p-3">
@@ -277,7 +277,7 @@ export default function FacilitatorControlPanel({ gameState, emit }: Props) {
         )}
       </details>
 
-      {busy ? <p className="text-xs font-bold text-orange-300">請先完成目前玩家決策或季度發薪，再啟動導演事件。</p> : null}
+      {busy ? <p className="text-xs font-bold text-orange-300">請先完成目前玩家決策或人生規劃，再啟動導演事件。</p> : null}
     </section>
   );
 }

@@ -305,7 +305,15 @@ export default function PlayerPage() {
     });
     s.on('paydayPlanningRequired', (p: PaydayFormData) => {
       setPaydayForm(p);
-      addNotification('💰 發薪日到了！請規劃你的投資');
+      addNotification('🗓️ 人生規劃時間！請規劃接下來幾輪的投資、保險與生活方式');
+    });
+    // 每輪（4 年）結束自動發薪：顯示這 4 年逐年的入帳
+    s.on('roundPayday', (p: { payouts: { playerId: string; fromAge: number; toAge: number; total: number; taxPaid?: number; taxSaved?: number; years: { age: number; cash: number }[] }[] }) => {
+      const mine = p.payouts.find((payout) => payout.playerId === playerIdRef.current);
+      if (!mine) return;
+      const sign = (n: number) => `${n >= 0 ? '+' : '−'}$${fmt(Math.abs(n))}`;
+      const tax = mine.taxPaid ? `；已扣所得稅 $${fmt(mine.taxPaid)}${mine.taxSaved ? `，稅務規劃省下 $${fmt(mine.taxSaved)}` : ''}` : '';
+      addNotification(`💵 ${mine.fromAge}–${mine.toAge} 歲發薪：這 ${mine.years.length} 年 ${sign(mine.total)}（${mine.years.map((y) => `${y.age} 歲 ${sign(y.cash)}`).join('、')}${tax}）`);
     });
     s.on('basicInvestmentResult', (p: { playerId: string; message: string }) => {
       if (p.playerId === playerIdRef.current) addNotification(`💼 ${p.message}`);
@@ -590,7 +598,7 @@ export default function PlayerPage() {
     // 發薪日結果在主持人收束決策後才公開。
     s.on('paydayPlanResult', (p: { playerId: string; planResult?: { stockDCA?: { executed: boolean; amount: number; newPortfolioValue: number } } }) => {
       if (p.playerId === playerIdRef.current && p.planResult?.stockDCA?.executed) {
-        addNotification(`📈 發薪日定投 $${fmt(p.planResult.stockDCA.amount)}，股票組合總值 $${fmt(p.planResult.stockDCA.newPortfolioValue)}`);
+        addNotification(`📈 人生規劃定投 $${fmt(p.planResult.stockDCA.amount)}，股票組合總值 $${fmt(p.planResult.stockDCA.newPortfolioValue)}`);
       }
       setPaydayForm(null);
     });
@@ -982,7 +990,7 @@ export default function PlayerPage() {
                 <span className="text-xs font-bold bg-blue-700 text-white px-2 py-0.5 rounded-full">E</span>
                 <p className="text-sm font-semibold text-white">受薪族（Employee）</p>
               </div>
-              <p className="text-xs text-gray-400">穩定固定薪資，時間受限（固定行程），每發薪日只能進行一次選擇性活動。</p>
+              <p className="text-xs text-gray-400">穩定固定薪資，時間受限（固定行程），每輪只能進行一次選擇性活動。</p>
               <p className="text-xs text-gray-500">職業由系統依象限隨機分配{hasContinuedEdu ? '（含高階職業：IT工程師、醫生、店長、公職）' : '（基礎職業）'}。</p>
               <button
                 className="w-full bg-blue-800 hover:bg-blue-700 border border-blue-600 text-white font-bold py-2.5 rounded-xl transition-colors"
@@ -1286,10 +1294,10 @@ export default function PlayerPage() {
               <p className="mt-1 text-xs text-gray-400">手機只處理擲骰與私人選擇</p>
               <span className="senior-quarter-label">
                 {gameState.globalPaydayInProgress
-                  ? '本季全體發薪中'
+                  ? '全體人生規劃中'
                   : gameState.finalRoundStarted
                     ? '96 歲 · 第 20 輪（最後一輪）'
-                    : `人生第 ${Math.min(gameState.totalLifeRounds ?? 20, (gameState.completedLifeRounds ?? gameState.turnNumber) + 1)} 輪 · ${gameState.paydayTimer?.enabled ? (gameState.paydayTimer.due ? '發薪即將開始' : `下次發薪 ${formatCountdown(paydayRemaining)}`) : `發薪進度 ${Math.min(3, (gameState.roundsSinceGlobalPayday ?? 0) + 1)}/3`}`}
+                    : `人生第 ${Math.min(gameState.totalLifeRounds ?? 20, (gameState.completedLifeRounds ?? gameState.turnNumber) + 1)} 輪 · ${gameState.paydayTimer?.enabled ? (gameState.paydayTimer.due ? '人生規劃即將開始' : `下次人生規劃 ${formatCountdown(paydayRemaining)}`) : `人生規劃 ${Math.min(3, (gameState.roundsSinceGlobalPayday ?? 0) + 1)}/3`}`}
               </span>
             </div>
           )}

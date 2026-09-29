@@ -64,9 +64,9 @@ export default function MoneyDetailSheet({ player, mode, onClose }: Props) {
               </div>
             )}
             <p className="text-[11px] text-gray-500">
-              {mode === 'income' ? '收入 = 薪資（或退休金／顧問收入）＋ 被動收入 × 財商乘數（外圈再 ×2）＋ 婚姻加成 ＋ 配偶收入。'
-                : mode === 'expenses' ? '支出每月從現金扣；生活支出會隨生活方式與物價變動，保費隨年齡上升，子女支出依孩子年齡分段。'
-                : '每次發薪依結算月數把淨現金流加進手頭現金；被動收入會乘上財商乘數，外圈再加倍。'}
+              {mode === 'income' ? '收入 = 薪資（或退休金／顧問收入）＋ 被動收入 × 財商乘數（外圈再 ×2）＋ 配偶實拿收入。'
+                : mode === 'expenses' ? '支出每月從現金扣；生活支出會隨生活方式與物價變動，已婚多一份配偶生活費、租屋換大一點，保費隨年齡上升，子女支出依孩子年齡分段。'
+                : '每輪（4 年）結束自動發薪：把 48 個月的淨現金流加進手頭現金；被動收入會乘上財商乘數，外圈再加倍。'}
             </p>
           </div>
         )}
@@ -81,7 +81,7 @@ export default function MoneyDetailSheet({ player, mode, onClose }: Props) {
                 </li>
               ))}
             </ol>
-            <p className="text-[11px] text-gray-500">薪資只在發薪結算時重算；退休後改為退休金、顧問收入或創業現金流。</p>
+            <p className="text-[11px] text-gray-500">薪資在每輪發薪時逐月重算；退休後改為退休金、顧問收入或創業現金流。</p>
           </div>
         )}
 
@@ -153,7 +153,7 @@ export default function MoneyDetailSheet({ player, mode, onClose }: Props) {
           <div className="space-y-2 text-sm">
             <section className="rounded-xl bg-gray-800 p-3">
               <p className="font-bold text-blue-300">財商 FQ {fq}：被動收入乘數 ×{info.fqMultipliers[fq] ?? 1}</p>
-              <p className="text-[11px] text-gray-400">發薪規劃可升級；FQ ≥ 7 發薪時看得到股市內幕；乘數表 {info.fqMultipliers.slice(1).map((m, i) => `${i + 1}:${m}`).join(' ')}</p>
+              <p className="text-[11px] text-gray-400">人生規劃可升級；FQ ≥ 7 規劃時看得到股市內幕；乘數表 {info.fqMultipliers.slice(1).map((m, i) => `${i + 1}:${m}`).join(' ')}</p>
             </section>
             <section className="rounded-xl bg-gray-800 p-3">
               <p className="font-bold text-green-300">健康 HP {player.stats.health}：每輪自然衰退 {info.hpDecayPerRound}</p>

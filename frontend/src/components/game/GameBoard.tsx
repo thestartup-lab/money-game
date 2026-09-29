@@ -316,7 +316,6 @@ function QuarterDial({
 }) {
   const remaining = usePaydayCountdown(paydayTimer, Boolean(paydayTimer?.frozen));
   const rounds = paydayTimer ? Math.max(0, paydayTimer.roundsSince) : Math.max(0, completedRounds);
-  const years = Math.max(1, rounds);
   const timerOn = paydayTimer?.enabled ?? false;
   const due = paydayTimer?.due ?? false;
   const roundsLeft = Math.max(0, 3 - Math.min(3, completedRounds));
@@ -324,9 +323,9 @@ function QuarterDial({
   return (
     <div className={`quarter-dial ${isOuter ? 'is-outer' : 'is-inner'}${isGlobalPayday ? ' is-payday' : ''}`}>
       <div className="quarter-dial-rings" />
-      <p className="quarter-dial-kicker">{isOuter ? 'FASTTRACK · 同步薪資曆' : '薪資累積'}</p>
+      <p className="quarter-dial-kicker">{isOuter ? 'FASTTRACK · 人生規劃' : '下次人生規劃'}</p>
       <p className="quarter-dial-title">
-        {isGlobalPayday ? '全體發薪日' : timerOn ? (due ? '發薪即將開始' : formatCountdown(remaining)) : `再 ${roundsLeft} 輪發薪`}
+        {isGlobalPayday ? '全體人生規劃' : timerOn ? (due ? '人生規劃即將開始' : formatCountdown(remaining)) : `再 ${roundsLeft} 輪人生規劃`}
       </p>
       <div className="quarter-dial-segments" aria-label={`已累積 ${rounds} 輪`}>
         {[0, 1, 2].map((index) => (
@@ -340,10 +339,10 @@ function QuarterDial({
       </div>
       <p className="quarter-dial-status">
         {isGlobalPayday
-          ? `本次結算 ${years} 年（${years * 12} 個月）收支`
+          ? '薪水每輪已入帳，這次只做規劃'
           : timerOn
-            ? (clockFrozen ? '時鐘暫停中' : due ? '本位玩家行動結束後發薪' : `已累積 ${years} 年薪資，時間到即發薪`)
-            : `再 ${roundsLeft} 輪進入統一發薪`}
+            ? (clockFrozen ? '時鐘暫停中' : due ? '本位玩家行動結束後開始規劃' : '每輪結束自動發薪；時間到開人生規劃')
+            : `每輪自動發薪；再 ${roundsLeft} 輪人生規劃`}
       </p>
     </div>
   );
