@@ -198,6 +198,31 @@ export function applyMarketCard(gameState: GameState, card: MarketCard): MarketR
  * 建立 Asset（含 linkedLiabilityId）與對應 Liability，從 cash 扣除 downPayment。
  * 若 downPayment 為 0（全額付清），則不建立 Liability。
  */
+/** 依玩家月支出決定交易放大倍數（見 DEAL_SCALE_BASE_EXPENSES） */
+export function dealScaleFor(player: Player): number {
+  const { DEAL_SCALE_BASE_EXPENSES, DEAL_SCALE_MAX } = require('./gameConfig') as typeof import('./gameConfig');
+  const raw = Math.max(0, player.totalExpenses) / DEAL_SCALE_BASE_EXPENSES;
+  return Math.min(DEAL_SCALE_MAX, Math.max(1, Math.round(raw * 2) / 2));
+}
+
+/** 放大一張交易卡的金額（回傳新物件，不改牌庫裡的原卡）；報酬率不變 */
+export function scaleDealCard(card: DealCard, scale: number): DealCard {
+  if (scale === 1) return card;
+  const money = (n: number | undefined, unit: number) => n === undefined ? undefined : Math.round(n * scale / unit) * unit;
+  const cost = money(card.asset.cost, 1000)!;
+  const downPayment = money(card.asset.downPayment, 1000);
+  return {
+    ...card,
+    asset: {
+      ...card.asset,
+      cost,
+      downPayment,
+      monthlyCashflow: money(card.asset.monthlyCashflow, 10)!,
+      liabilityAmount: card.asset.liabilityAmount !== undefined ? Math.max(0, cost - (downPayment ?? cost)) : undefined,
+    },
+  };
+}
+
 export function acceptDealCard(player: Player, card: DealCard, purchasePrice?: number): void {
   const { asset: cardAsset } = card;
 

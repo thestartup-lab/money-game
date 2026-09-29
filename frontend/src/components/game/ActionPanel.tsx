@@ -551,15 +551,15 @@ export default function ActionPanel({
             return <EffectPreview title={`🏦 投入債券基金 $${fmt(amt)}：效果與價值`} rows={[
               { label: '投入', value: `-$${fmt(amt)}`, tone: 'bad' },
               { label: '每月配息（被動收入）', value: `+$${fmt(income)}/月`, tone: 'good' },
-              { label: '年化殖利率', value: `約 ${info.bond.annualized}%`, tone: 'neutral' },
+              { label: '目前年殖利率', value: `${info.bond.annualized}%（會變動）`, tone: 'neutral' },
               { label: '合計本金', value: `$${fmt(info.bond.principal + amt)}`, tone: 'neutral' },
               { label: '剩餘現金', value: `$${fmt(player.cash - amt)}`, tone: 'neutral' },
-            ]} notes={['本金不受股市行情卡影響，賣出時全額拿回、沒有資本利得稅', '報酬比定期定額低（沒有增值），適合把閒置現金換成穩定月收入', '配息乘上財商乘數，算進脫離內圈的被動收入']}
+            ]} notes={['利率每次人生規劃都可能調整（1%–5%），已持有的配息會跟著變；通膨事件會升息', '本金不受股市行情卡影響，賣出時全額拿回、沒有資本利得稅', '報酬比定期定額和棋盤交易低，適合放閒置現金，不適合當唯一的致富方法']}
               confirmLabel="確認投入" onCancel={() => setBondPreview(null)} disabled={player.cash < amt} disabledReason="現金不足"
               onConfirm={() => { onInvestBond(amt); setBondPreview(null); setShowBondPanel(false); }} />;
           })() : showBondPanel ? (
             <div className="space-y-2">
-              <p className="text-xs text-gray-400">不限額；每月配息 {(info.bond.monthlyYield * 100).toFixed(2)}%（年化約 {info.bond.annualized}%），本金穩定</p>
+              <p className="text-xs text-gray-400">不限額；目前年殖利率 {info.bond.annualized}%，利率會隨人生規劃與通膨事件調整，本金穩定</p>
               <div className="grid grid-cols-3 gap-2">
                 {info.bond.amounts.map((amt) => (
                   <button key={amt} disabled={player.cash < amt} onClick={() => setBondPreview(amt)}

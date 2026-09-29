@@ -11,7 +11,7 @@ export type PlayerEventType =
   | 'loan_taken' | 'loan_repaid' | 'bedridden' | 'relationship' | 'death'
   | 'community_choice' | 'decision_echo' | 'cooperation' | 'legacy'
   | 'franchise' | 'bucket_goal_achieved' | 'life_milestone' | 'lucky_card' | 'property_event'
-  | 'payday_plan' | 'insurance';
+  | 'payday_plan' | 'insurance' | 'mentor' | 'advice';
 
 export interface PlayerEvent {
   age: number;
@@ -237,6 +237,14 @@ export interface Player {
   taxPlanningCreditRate?: number;
   /** B1：人生夢想清單（進外圈時隨機抽 3 個） */
   bucketList?: { id: string; claimed: boolean; claimedAt?: number }[];
+  /** 夢想清單的個人化說明與進度（伺服器計算） */
+  bucketGoals?: { id: string; emoji: string; title: string; description: string; progress: string; claimed: boolean; legacyReward: number; lifeExpReward: number }[];
+  /** 外圈指導後輩：累計次數與最後一次的輪數 */
+  mentorCount?: number;
+  lastMentorRound?: number;
+  /** 家族顧問（離世後）：累計建議與最後一次的輪數 */
+  adviceGiven?: number;
+  lastAdviceRound?: number;
   /** B2：已通過的人生里程碑（40/60/80 歲） */
   milestonesPassed?: { age40: boolean; age60: boolean; age80: boolean };
 }
@@ -283,6 +291,10 @@ export interface GameState {
   autoHost?: boolean;
   /** 每次發薪後自動出現全場共同抉擇 */
   communityChoiceAuto?: boolean;
+  /** 利率環境：債券基金年殖利率 */
+  bondRateAnnual?: number;
+  /** 家族顧問可給的建議 */
+  adviceCards?: { id: string; emoji: string; text: string }[];
   /** 終局：大螢幕復盤目前的步驟（主持人控制） */
   reviewView?: ReviewViewState | null;
   /** 全體行動時間已按完成的玩家 */
@@ -576,7 +588,7 @@ export type ActiveEvent =
   | { kind: 'doodad'; title: string; description: string; cashDeducted: number; expenseIncrease: number }
   | { kind: 'crisis_nt_skip'; title: string; description: string; baseCost: number; network: number; timeoutMs: number }
   | { kind: 'crisis_applied'; title: string; description: string; effectiveCost: number; turnsLost: number; wasInsured: boolean }
-  | { kind: 'deal_pick'; cards: { id: string; name: string; description?: string; downPayment: number; monthlyCashflow: number }[]; playerCash: number; creditScore?: number; loanAvailable?: number }
+  | { kind: 'deal_pick'; cards: { id: string; name: string; description?: string; downPayment: number; monthlyCashflow: number; scale?: number }[]; playerCash: number; creditScore?: number; loanAvailable?: number }
   | { kind: 'fast_track_travel'; destinations: { id: string; name: string; region: string; cost: number; lifeExpGained: number }[]; playerCash: number }
   | { kind: 'partnership_pick'; availablePartners: { id: string; name: string }[] }
   | { kind: 'partnership_response'; offerorName: string; dividendEstimate: number }

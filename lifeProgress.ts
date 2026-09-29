@@ -435,7 +435,7 @@ export function promoteSecondLife(gs: GameState, player: Player, secondLifeEligi
       id: g.id,
       emoji: g.emoji,
       title: g.title,
-      description: g.description,
+      description: g.describe?.(player) ?? g.description,
       legacyReward: g.legacyReward,
       lifeExpReward: g.lifeExpReward,
       cashReward: g.cashReward ?? 0,

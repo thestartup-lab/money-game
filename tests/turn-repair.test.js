@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const { io } = require('socket.io-client');
 
-const PORT = 3291;
+const PORT = 3311;
 function wait(s, ev, pred = () => true, ms = 6000) {
   return new Promise((res, rej) => {
     const t = setTimeout(() => { s.off(ev, h); rej(new Error(`等待 ${ev} 逾時`)); }, ms);

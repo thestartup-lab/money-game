@@ -7,7 +7,7 @@ import { HP_ACTIVITY_THRESHOLDS, CRISIS_FREQ_BY_STAGE, CONSULTANT_SK_RATE, CONSU
 import { applyHPChange } from './statsSystem';
 import { rollPropertyEvent } from './propertyRisks';
 import { getSquareType, SquareType, DealCard, CharityCard, CHARITY_CARD, getFastTrackSquareType, FastTrackSquareType, FAST_TRACK_BOARD, CRISIS_POOL_BY_STAGE, CRISIS_EVENTS, RELATIONSHIP_EVENTS, BIG_DEALS, MARKET_CARDS, LUCKY_CARDS } from './gameCards';
-import { applyDoodadCard, applyDownsizingCard, applyMarketCard, acceptDealCard, applyCharityDonation, applyCrisisCard, applyRelationshipCard, applyLuckyCard, getCharityDonationAmount } from './cardSystem';
+import { dealScaleFor, scaleDealCard, applyDoodadCard, applyDownsizingCard, applyMarketCard, acceptDealCard, applyCharityDonation, applyCrisisCard, applyRelationshipCard, applyLuckyCard, getCharityDonationAmount } from './cardSystem';
 import {
   applyCrisisWithRescue, applyPartnershipBenefits, beginHostDecisionPhase, calcNetWorth, checkBucketGoals, eliminatePlayer,
   emitCellEvent, emitClient, emitToRoom, executeTravelAction, getPlayerSocket, io,
@@ -519,11 +519,18 @@ export async function handleLandingSquare(
       const deck = squareType === SquareType.SmallDeal ? gs.smallDealDeck : gs.bigDealDeck;
       const nt = player.stats.network;
       const drawCount = nt >= 5 ? 2 : 1;
+      // 交易金額依落格玩家的生活規模放大；棄牌時放回原卡，牌庫不會越放越大
+      const dealScale = dealScaleFor(player);
+      const originalOf = new Map<DealCard, DealCard>();
       const drawnCards: DealCard[] = [];
       for (let i = 0; i < drawCount; i++) {
         const c = deck.draw();
-        if (c) drawnCards.push(c);
+        if (!c) continue;
+        const scaled = scaleDealCard(c, dealScale);
+        originalOf.set(scaled, c);
+        drawnCards.push(scaled);
       }
+      const discard = (card: DealCard) => deck.discard(originalOf.get(card) ?? card);
 
       if (drawnCards.length === 0) {
         emitCellEvent(socket, roomId, player.name, dealTypeName, `📋 ${dealTypeName}牌庫已空，本次無交易機會。`);
@@ -537,6 +544,7 @@ export async function handleLandingSquare(
         description: c.description,
         downPayment: c.asset.downPayment ?? c.asset.cost,
         monthlyCashflow: c.asset.monthlyCashflow,
+        scale: dealScale,
       }));
       // 計算玩家當前可用「投資槓桿借款」額度（只計算無擔保負債，房貸/事業貸款不計入）
       const _loanAvailable = getAvailableLoan(player);
@@ -549,7 +557,7 @@ export async function handleLandingSquare(
         const cheapest = Math.min(...drawnCards.map(downPaymentOf));
         if (!othersCanBid) {
           emitCellEvent(socket, roomId, player.name, dealTypeName, `📋 ${dealTypeName}「${drawnCards.map((c) => c.title).join('、')}」頭期款 $${cheapest.toLocaleString()}，目前全場都負擔不起，本次略過。`);
-          drawnCards.forEach((c) => deck.discard(c));
+          drawnCards.forEach((c) => discard(c));
           break;
         }
         emitCellEvent(socket, roomId, player.name, dealTypeName, `📋 ${player.name} 現金與可借額度不足以承接（頭期款 $${cheapest.toLocaleString()}），直接開放全場競標。`);
@@ -589,7 +597,7 @@ export async function handleLandingSquare(
             const lvResult = takeLeverageLoan(player, borrowAmount, chosen.title);
             if (!lvResult.success) {
               emitClient(socket, 'error', { message: `投資槓桿借款失敗：${lvResult.message}` });
-              drawnCards.forEach((c) => deck.discard(c));
+              drawnCards.forEach((c) => discard(c));
               emitToRoom(roomId, 'cardApplied', { playerId: player.id, squareType, effect: { type: 'dealDeclined' } });
               break;
             }
@@ -605,7 +613,7 @@ export async function handleLandingSquare(
 
         if (player.cash < downPayment) {
           emitClient(socket, 'error', { message: `現金不足，無法完成此交易（需 $${downPayment.toLocaleString()}，目前 $${player.cash.toLocaleString()}）。` });
-          drawnCards.forEach((c) => deck.discard(c));
+          drawnCards.forEach((c) => discard(c));
           emitToRoom(roomId, 'cardApplied', {
             playerId: player.id,
             squareType,
@@ -617,8 +625,8 @@ export async function handleLandingSquare(
         const _dcCB = player.cash; const _dcFB = player.monthlyCashflow; const _dcNWB = calcNetWorth(player);
         acceptDealCard(player, chosen);
         logPlayerEvent(player, gs, 'asset_buy', `接受交易：${chosen.title}（月現金流 ${(chosen.asset.monthlyCashflow ?? 0) >= 0 ? '+' : ''}$${chosen.asset.monthlyCashflow ?? 0}）`, _dcCB, _dcFB, _dcNWB, { cardId: chosen.id, cardTitle: chosen.title, monthlyCashflow: chosen.asset.monthlyCashflow, squareType });
-        drawnCards.filter((c) => c.id !== chosen.id).forEach((c) => deck.discard(c));
-        deck.discard(chosen);
+        drawnCards.filter((c) => c.id !== chosen.id).forEach((c) => discard(c));
+        discard(chosen);
 
         emitToRoom(roomId, 'cardApplied', {
           playerId: player.id,
@@ -671,7 +679,7 @@ export async function handleLandingSquare(
 
           const auction = gs.activeAuctions?.[auctionId];
           if (!auction) {
-            deck.discard(auctionCard);
+            discard(auctionCard);
             continue;
           }
           delete gs.activeAuctions![auctionId];
@@ -692,7 +700,7 @@ export async function handleLandingSquare(
                 hadBids: true,
               });
               emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
-              deck.discard(auctionCard);
+              discard(auctionCard);
               continue;
             }
           }
@@ -702,7 +710,7 @@ export async function handleLandingSquare(
             winningBid: 0, cardName: auctionCard.title, hadBids: false,
           });
           emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
-          deck.discard(auctionCard);
+          discard(auctionCard);
         }
       }
       break;
@@ -845,8 +853,9 @@ export async function handleLandingSquare(
 
         // SmallDeal 額外抽牌（rel-002 同學會重聚）：走正式的小交易決策，現金購買
         if (relResult.triggerSmallDeal) {
-          const bonusDeal = gs.smallDealDeck.draw();
-          if (bonusDeal) {
+          const bonusOriginal = gs.smallDealDeck.draw();
+          const bonusDeal = bonusOriginal ? scaleDealCard(bonusOriginal, dealScaleFor(player)) : undefined;
+          if (bonusDeal && bonusOriginal) {
             const dealDecision = await waitForCardDecision(socket, gs, player, 'deal', '同學會帶來的小交易', { event: 'dealCardsDrawn', payload: {
               cards: [{
                 id: bonusDeal.id,
@@ -874,7 +883,7 @@ export async function handleLandingSquare(
               }
               emitToRoom(roomId, 'cardApplied', { playerId: player.id, playerName: player.name, squareType: SquareType.SmallDeal, effect: { type: 'dealDeclined' } });
             }
-            gs.smallDealDeck.discard(bonusDeal);
+            gs.smallDealDeck.discard(bonusOriginal);
           }
         }
 

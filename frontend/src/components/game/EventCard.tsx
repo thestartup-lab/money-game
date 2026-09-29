@@ -124,6 +124,9 @@ export default function EventCard({ event, onDecision, onDismiss, reminderEndsAt
         return (
           <>
             <div className="text-green-400 font-bold text-base">📋 交易機會</div>
+            {(event.cards[0]?.scale ?? 1) > 1 && (
+              <p className="text-[11px] text-emerald-300">金額已依你的生活規模放大 ×{event.cards[0].scale}（報酬率不變）</p>
+            )}
             <div className="flex justify-between text-sm mb-1">
               <span className="text-gray-400">手頭現金</span>
               <span className="font-bold text-emerald-400">${event.playerCash.toLocaleString()}</span>

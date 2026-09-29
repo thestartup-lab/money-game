@@ -2,6 +2,7 @@
 import { randomBytes } from 'crypto';
 import { GameState, Player, GamePhase, PlayerEvent, PlayerEventType, FacilitatorSceneState, AssetType } from './gameDataModels';
 import { createSpouse, describeMarriagePreview, payWedding } from './gameLogic';
+import { communityVoters } from './lateLife';
 import { addLifeExperience, getCurrentAge, pauseGameClock, resumeGameClock, confirmMarriage, buyArrangedMarriage, getArrangedMarriageCost } from './gameLogic';
 import { LIFE_EXP, LIFE_EVENT_WINDOWS, MARRIAGE_GIFT, MARRIAGE_GIFT_RANDOM_BONUS, CHILD_GIFT_BASE, CHILD_GIFT_RANDOM_BONUS, MAX_CHILDREN, MIN_CHILD_SPACING_YEARS, MIN_CHILD_AGE, MAX_CHILD_AGE, MARRIED_RENT_INCREASE, RELATIONSHIP_MARRIAGE_THRESHOLD, HP_ACTIVITY_THRESHOLDS } from './gameConfig';
 import { PER_CHILD_EXPENSE } from './gameConstants';
@@ -652,7 +653,8 @@ export function applyLegacyAction(
 export function startCommunityChoice(gs: GameState, cardId: string, reminderSeconds = 90): boolean {
   const card = COMMUNITY_CHOICE_CARDS.find((candidate) => candidate.id === cardId);
   if (!card) return false;
-  const voters = [...gs.players.values()].filter((player) => player.isAlive);
+  // 離世的玩家以「家族顧問」身分一起投票
+  const voters = communityVoters(gs);
   beginFacilitatorScene(gs, {
     kind: 'community',
     kicker: '全場共同抉擇・每人在手機投票',
@@ -675,7 +677,7 @@ export function recordCommunityVote(gs: GameState, playerId: string, sceneId: st
   const context = gs.facilitatorSceneContext;
   if (!scene || !context || scene.kind !== 'community' || scene.stage !== 'prompt' || scene.id !== sceneId) return '這次投票已經結束。';
   const player = gs.players.get(playerId);
-  if (!player?.isAlive) return '只有仍在遊戲中的玩家可以投票。';
+  if (!player) return '玩家不存在。';
   if (!scene.options?.some((option) => option.id === optionId)) return '沒有這個選項。';
   const ballots = (context.ballots ?? {}) as Record<string, string>;
   // 重複投同一票：不重算、不廣播（避免出錯的頁面一直重送造成全房更新風暴）
@@ -686,7 +688,7 @@ export function recordCommunityVote(gs: GameState, playerId: string, sceneId: st
   for (const choice of Object.values(ballots)) votes[choice] = (votes[choice] ?? 0) + 1;
   scene.votes = votes;
   scene.votedCount = Object.keys(ballots).length;
-  scene.voterCount = [...gs.players.values()].filter((candidate) => candidate.isAlive).length;
+  scene.voterCount = Math.max(Object.keys(ballots).length, communityVoters(gs).length);
   emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   return null;
 }

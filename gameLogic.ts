@@ -544,6 +544,14 @@ export function applyGlobalEvent(
     });
   });
 
+  // 利率類效果只作用一次（全場共用利率），不在每位玩家身上重複套用
+  for (const effect of event.effects) {
+    if (effect.type === 'BondRateChange' && effect.flatAmount) {
+      const { shiftBondRate } = require('./bondFund') as typeof import('./bondFund');
+      shiftBondRate(gameState, effect.flatAmount);
+    }
+  }
+
   // 將事件記錄至 gameState.marketEvents（turnsRemaining = 0 表示永久效果，不自動移除）
   gameState.marketEvents.push({
     id: event.id,

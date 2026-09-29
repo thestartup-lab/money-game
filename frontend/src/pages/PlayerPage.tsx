@@ -17,6 +17,7 @@ import { formatCountdown, usePaydayCountdown } from '../components/game/paydayCo
 import CollapsePanel from '../components/game/CollapsePanel';
 import DecisionCountdown from '../components/game/DecisionCountdown';
 import '../components/game/MobileClarity.css';
+import LateLifePanel from '../components/game/LateLifePanel';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
@@ -46,17 +47,6 @@ const GROWTH_FIELDS: { key: 'academic' | 'health' | 'social' | 'resource'; label
   { key: 'resource', label: '資源', desc: '每點 +$3,000 起始現金；亦是 B/I 象限門檻' },
 ];
 
-// B1：人生夢想清單顯示資料（與後端 BUCKET_LIST_GOALS 對應）
-const BUCKET_GOAL_LABELS: Record<string, { emoji: string; title: string; desc: string }> = {
-  world_traveler:     { emoji: '🌍', title: '環遊世界',     desc: '造訪 5 個不同的旅遊目的地' },
-  philanthropist:     { emoji: '❤️', title: '慈善家',       desc: '累積慈善捐款達 $200,000' },
-  tycoon:             { emoji: '💰', title: '財富自由',     desc: '淨資產達到 $5,000,000' },
-  family_man:         { emoji: '👨\u200d👩\u200d👧', title: '溫暖家庭',     desc: '結婚並擁有至少 2 個孩子' },
-  cashflow_king:      { emoji: '👑', title: '被動收入之王', desc: '月被動收入達 $30,000 以上' },
-  real_estate_baron:  { emoji: '🏘️', title: '不動產大亨',   desc: '同時擁有 3 個以上不動產' },
-  high_fq:            { emoji: '🧠', title: '財商達人',     desc: '財商等級提升到 8 以上' },
-  long_life:          { emoji: '🎂', title: '長壽人生',     desc: '健康存活到 80 歲' },
-};
 
 // ── 常數與型別 ──
 
@@ -303,6 +293,16 @@ export default function PlayerPage() {
       setLastRoll(p);
       setRollingLocked(false);
     });
+    // 伺服器的全場通知（升降息、輪次修正、全自動主持的預設選擇…）
+    s.on('notification', (p: { message?: string }) => { if (p?.message) addNotification(p.message); });
+    s.on('mentorshipGiven', (p: { mentorId: string; mentorName: string; targetId: string; targetName: string }) => {
+      if (p.targetId === playerIdRef.current) addNotification(`🧑‍🏫 ${p.mentorName} 指導了你：專長 +10`);
+      else if (p.mentorId === playerIdRef.current) addNotification(`🧑‍🏫 你指導了 ${p.targetName}：傳承 +5、體驗 +5`);
+    });
+    s.on('advisorAdvice', (p: { advisorName: string; targetId: string; targetName: string; emoji: string; text: string }) => {
+      if (p.targetId === playerIdRef.current) addNotification(`👴 家族顧問 ${p.advisorName} 對你說：${p.emoji} ${p.text}`);
+    });
+    s.on('adviceSent', (p: { targetName: string }) => addNotification(`✉️ 已把建議送給 ${p.targetName}`));
     s.on('paydayPlanningRequired', (p: PaydayFormData) => {
       setPaydayForm(p);
       addNotification('🗓️ 人生規劃時間！請規劃接下來幾輪的投資、保險與生活方式');
@@ -520,7 +520,7 @@ export default function PlayerPage() {
     s.on('crisisNTSkipAvailable', (p: { card: { title: string; description: string; baseCost: number }; network?: number; timeoutMs: number }) => {
       setActiveEvent({ kind: 'crisis_nt_skip', title: p.card.title, description: p.card.description, baseCost: p.card.baseCost, network: p.network ?? myNetworkRef.current, timeoutMs: p.timeoutMs });
     });
-    s.on('dealCardsDrawn', (p: { cards: Array<{ id: string; name: string; description?: string; downPayment: number; monthlyCashflow: number }>; playerCash: number; creditScore?: number; loanAvailable?: number }) => {
+    s.on('dealCardsDrawn', (p: { cards: Array<{ id: string; name: string; description?: string; downPayment: number; monthlyCashflow: number; scale?: number }>; playerCash: number; creditScore?: number; loanAvailable?: number }) => {
       setActiveEvent({
         kind: 'deal_pick',
         cards: p.cards,
@@ -1303,7 +1303,11 @@ export default function PlayerPage() {
           )}
 
           {!isGameOver && gameState.facilitatorScene?.kind === 'community' && (
-            <CommunityVotePanel scene={gameState.facilitatorScene} myVote={communityVotes[gameState.facilitatorScene.id]} canVote={Boolean(myPlayer?.isAlive)} emit={emit} />
+            <CommunityVotePanel scene={gameState.facilitatorScene} myVote={communityVotes[gameState.facilitatorScene.id]} canVote={Boolean(myPlayer)} emit={emit} />
+          )}
+          {/* 後半場：外圈玩家的第二人生目標與指導後輩；離世玩家的家族顧問 */}
+          {!isGameOver && myPlayer && (!myPlayer.isAlive || myPlayer.isInFastTrack) && (
+            <LateLifePanel gameState={gameState} me={myPlayer} canUseActions={canUseActions} emit={emit} />
           )}
           {!isGameOver && gameState.facilitatorScene && gameState.facilitatorScene.kind !== 'community' && gameState.facilitatorScene.careerPlayerId !== myId && (
             <div className="mx-4 mb-3 rounded-2xl border-2 border-yellow-500 bg-gradient-to-br from-indigo-950 to-gray-900 px-5 py-6 text-center shadow-xl">
@@ -1343,7 +1347,7 @@ export default function PlayerPage() {
             </div>
           )}
 
-          {gameState.decisionPhase?.kind === 'actions' && !paydayForm && (() => {
+          {gameState.decisionPhase?.kind === 'actions' && !paydayForm && myPlayer.isAlive && (() => {
             const done = new Set(gameState.actionPhaseDone ?? []);
             const alive = gameState.players.filter((p) => p.isAlive && !p.isDisconnected);
             const meDone = done.has(myId);
@@ -1431,27 +1435,6 @@ export default function PlayerPage() {
                 );
               })()}
 
-              {/* 夢想清單 */}
-              {myPlayer.isInFastTrack && (myPlayer.bucketList?.length ?? 0) > 0 && (
-                <div className="space-y-1">
-                  <div className="text-purple-300 text-xs">🎯 人生夢想清單</div>
-                  {(myPlayer.bucketList ?? []).map((entry) => {
-                    const meta = BUCKET_GOAL_LABELS[entry.id];
-                    if (!meta) return null;
-                    return (
-                      <div key={entry.id}
-                        className={`flex items-center gap-2 px-2 py-1 rounded-lg text-xs ${entry.claimed ? 'bg-emerald-900/40 border border-emerald-700' : 'bg-gray-800 border border-gray-700'}`}>
-                        <span className="text-base">{meta.emoji}</span>
-                        <span className={`flex-1 ${entry.claimed ? 'text-emerald-200 line-through' : 'text-gray-200'}`}>
-                          <span className="font-bold">{meta.title}</span>
-                          <span className="ml-1 text-gray-400">— {meta.desc}</span>
-                        </span>
-                        {entry.claimed && <span className="text-emerald-300">✓</span>}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </div>
           )}
 

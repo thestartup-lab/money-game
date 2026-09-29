@@ -44,7 +44,7 @@ export default function CommunityVotePanel({ scene, myVote, canVote, emit }: Pro
           );
         })}
       </div>
-      {!canVote && <p className="mt-2 text-sm text-gray-400">只有仍在遊戲中的玩家可以投票。</p>}
+      {!canVote && <p className="mt-2 text-sm text-gray-400">目前無法投票。</p>}
     </section>
   );
 }

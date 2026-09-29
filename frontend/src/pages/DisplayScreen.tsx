@@ -253,6 +253,9 @@ export default function DisplayScreen() {
       boardFocusTimerRef.current = setTimeout(() => setBoardFocusPlayerId(undefined), 6_000);
     });
     s.on('marriageAnnouncement', (p: { playerName: string }) => addTicker(`💑 ${p.playerName} 結婚了！`));
+    s.on('notification', (p: { message?: string }) => { if (p?.message) addTicker(p.message); });
+    s.on('mentorshipGiven', (p: { mentorName: string; targetName: string }) => addTicker(`🧑‍🏫 ${p.mentorName} 指導後輩 ${p.targetName}：專長 +10`));
+    s.on('advisorAdvice', (p: { advisorName: string; targetName: string; emoji: string; text: string }) => addTicker(`👴 家族顧問 ${p.advisorName} 對 ${p.targetName} 說：${p.emoji} ${p.text}`));
     s.on('roundPayday', (p: { payouts: RoundPaydayPayout[] }) => {
       if (!p.payouts?.length) return;
       setRoundPayday({ key: Date.now(), payouts: p.payouts });

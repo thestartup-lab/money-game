@@ -283,7 +283,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
                 <span className="text-lg">🏦</span>
                 <div>
                   <div className="text-sm text-white font-semibold">債券基金（高股息，不限額）</div>
-                  <div className="text-xs text-teal-300">{info.bond.principal > 0 ? `目前本金 $${info.bond.principal.toLocaleString()}；` : ''}每月配息 {(info.bond.monthlyYield * 100).toFixed(2)}%（年化約 {info.bond.annualized}%），本金不受股市影響</div>
+                  <div className="text-xs text-teal-300">{info.bond.principal > 0 ? `目前本金 $${info.bond.principal.toLocaleString()}；` : ''}目前年殖利率 {info.bond.annualized}%（每次人生規劃可能調整，已持有的配息跟著變），本金不受股市影響</div>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -296,7 +296,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
                 ))}
               </div>
               {bondAmount > 0 && (
-                <p className="mt-2 text-[11px] leading-snug text-emerald-300">價值：投入 ${bondAmount.toLocaleString()} → 每月配息 +${Math.round(bondAmount * info.bond.monthlyYield).toLocaleString()}（被動收入，乘財商乘數）；報酬低於定期定額但本金穩定，賣出全額拿回。</p>
+                <p className="mt-2 text-[11px] leading-snug text-emerald-300">價值：投入 ${bondAmount.toLocaleString()} → 每月配息 +${Math.round(bondAmount * info.bond.monthlyYield).toLocaleString()}（以目前利率計，被動收入，乘財商乘數）；報酬低於定期定額與棋盤交易，但本金穩定、賣出全額拿回。</p>
               )}
             </div>
           )}

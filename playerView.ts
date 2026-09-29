@@ -2,7 +2,9 @@
 import { GameState, Player, GamePhase } from './gameDataModels';
 import { BASIC_INVESTMENTS } from './basicInvestments';
 import { getHomeOffers } from './householdLoans';
-import { BOND_FUND_ID } from './bondFund';
+import { BOND_FUND_ID, currentBondRate } from './bondFund';
+import { describeBucketList } from './bucketList';
+import { ADVICE_CARDS } from './lateLife';
 import { naturalDeathProbability, travelLeaveCost, isOnPayrollSchedule } from './gameLogic';
 import { LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS, CHILD_EXPENSE_BY_AGE, SOCIAL_INSURANCE_RATE, PREMIUM_MULT_BY_STAGE } from './gameConfig';
 import { getAvailableLoan, getCurrentAge, getRemainingActivityTimeMs, getLifeStage } from './gameLogic';
@@ -68,7 +70,7 @@ export function buildSecondLifeProgress(p: Player): object | null {
 }
 
 /** 手機「行動」面板每個動作點選時要標注的效果與價值（全部由伺服器算，避免前端數字失真）。 */
-export function buildActionInfo(p: Player): object {
+export function buildActionInfo(p: Player, gs?: GameState): object {
   const cfg = require('./gameConfig') as typeof import('./gameConfig');
   const { CRISIS_EVENTS } = require('./gameCards') as typeof import('./gameCards');
   const premiumMult = cfg.PREMIUM_MULT_BY_STAGE[p.lifeStage] ?? 1;
@@ -95,7 +97,7 @@ export function buildActionInfo(p: Player): object {
       peakStart: marriageWindow.peakStart, peakEnd: marriageWindow.peakEnd, threshold: RELATIONSHIP_MARRIAGE_THRESHOLD, currentDrs: p.relationshipPoints, active: p.relationshipActive, minHp: HP_ACTIVITY_THRESHOLDS.socialEvent },
     insurance,
     premiumMultiplier: premiumMult,
-    bond: { monthlyYield: cfg.BOND_FUND_MONTHLY_YIELD, annualized: Math.round(cfg.BOND_FUND_MONTHLY_YIELD * 12 * 1000) / 10, amounts: cfg.BOND_FUND_AMOUNTS,
+    bond: { monthlyYield: currentBondRate(gs) / 12, annualized: Math.round(currentBondRate(gs) * 1000) / 10, floating: true, amounts: cfg.BOND_FUND_AMOUNTS,
       principal: p.assets.find((a) => a.id === BOND_FUND_ID)?.cost ?? 0 },
     dca: { monthlyReturnRate: STOCK_DCA_MONTHLY_RETURN_RATE, monthlyDividendRate: STOCK_DCA_MONTHLY_DIVIDEND_RATE,
       annualized: Math.round((Math.pow(1 + STOCK_DCA_MONTHLY_RETURN_RATE, 12) - 1 + STOCK_DCA_MONTHLY_DIVIDEND_RATE * 12) * 1000) / 10,
@@ -247,7 +249,7 @@ export function serializePlayer(p: Player, gs: GameState): object {
     cashflowBreakdown,
     salaryItems: buildSalaryItems(p),
     netWorthBreakdown: buildNetWorthBreakdown(p),
-    actionInfo: buildActionInfo(p),
+    actionInfo: buildActionInfo(p, gs),
     cashLedger,
     careerOptions: p.isAlive && p.stats.careerSkill >= SKILL_CAREER_CHANGE_THRESHOLD ? buildAvailableProfessions(p) : [],
     careerBlockReason: careerBlockReason(p, gs),
@@ -328,6 +330,11 @@ export function serializePlayer(p: Player, gs: GameState): object {
     legacyActionUsed: p.legacyActionUsed,
     charityTotal: p.charityTotal ?? 0,
     bucketList: p.bucketList ?? [],
+    bucketGoals: describeBucketList(p, gs),
+    mentorCount: p.mentorCount ?? 0,
+    lastMentorRound: p.lastMentorRound ?? -1,
+    adviceGiven: p.adviceGiven ?? 0,
+    lastAdviceRound: p.lastAdviceRound ?? -1,
     milestonesPassed: p.milestonesPassed ?? { age40: false, age60: false, age80: false },
   };
 }
@@ -360,6 +367,8 @@ export function serializeGameState(gs: GameState): object {
     autoHost: gs.autoHost,
     communityChoiceAuto: gs.communityChoiceAuto,
     reviewView: gs.gamePhase === GamePhase.GameOver ? (gs.reviewView ?? null) : null,
+    bondRateAnnual: currentBondRate(gs),
+    adviceCards: ADVICE_CARDS,
     actionPhaseDone: gs.decisionPhase?.playerId === '__all_players__' && (gs.decisionPhase.kind === 'actions' || gs.decisionPhase.kind === 'payday') ? [...gs.actionPhaseDone] : [],
     actionPhaseEnabled: gs.actionPhaseEnabled,
     activeAuctions: Object.entries(gs.activeAuctions ?? {}).map(([auctionId, a]) => ({

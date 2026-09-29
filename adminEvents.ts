@@ -11,13 +11,15 @@ import { AssetType } from './gameDataModels';
  * - ExpenseChange:    所有玩家的 otherExpenses 增加固定金額
  * - CashChange:       所有玩家現金增加固定金額
  * - HealthChange:     所有玩家健康值增減固定點數
+ * - BondRateChange:   全場利率增減（flatAmount 為年利率，例如 0.01 = 1 個百分點），債券配息跟著重算
  */
 export type GlobalEventEffectType =
   | 'AssetValueChange'
   | 'CashflowChange'
   | 'ExpenseChange'
   | 'CashChange'
-  | 'HealthChange';
+  | 'HealthChange'
+  | 'BondRateChange';
 
 export interface GlobalEventEffect {
   type: GlobalEventEffectType;
@@ -86,9 +88,10 @@ export const ADMIN_GLOBAL_EVENTS: AdminGlobalEvent[] = [
   {
     id: 'inflation',
     title: '通貨膨脹',
-    description: '物價全面上漲，每位玩家每月生活支出增加 $4,500。',
+    description: '物價全面上漲，每位玩家每月生活支出增加 $4,500；央行升息 1 個百分點，債券配息跟著提高。',
     effects: [
       { type: 'ExpenseChange', flatAmount: 4_500, durationPaydays: 2 },
+      { type: 'BondRateChange', flatAmount: 0.01 },
     ],
   },
   {

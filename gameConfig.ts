@@ -41,8 +41,25 @@ export const STOCK_DCA_MONTHLY_DIVIDEND_RATE = 0.003;
 /** 股票定期定額可選投入金額選項 */
 export const STOCK_DCA_AMOUNTS = [15_000, 30_000, 75_000, 150_000, 300_000, 750_000] as const;
 
-/** 債券基金：月殖利率 0.35%（年化約 4.2%），本金不受股市行情卡影響、不限額 */
+/** 債券基金：舊版固定月殖利率 0.35%（年化約 4.2%）；現在改看全場利率環境，保留給舊程式 */
 export const BOND_FUND_MONTHLY_YIELD = 0.0035;
+/**
+ * 利率環境（2026-09-29 起）：債券基金年殖利率跟著利率浮動，開局 3%，介於 1%–5%。
+ * 每次人生規劃開始前隨機調整一次，世界事件「利率與物價升溫」再加 1 個百分點。
+ * 已持有的債券基金配息跟著新利率重算（浮動利率），所以存債券不再是穩賺的萬用解。
+ */
+export const BOND_RATE_START_ANNUAL = 0.03;
+/**
+ * 交易規模跟著生活規模（2026-09-29 起）：牌卡金額是照原本桌遊比例設計的，
+ * 薪水與支出放大後，一張小交易每月 $1,500 只夠老師支出的二十分之一。
+ * 抽到交易時依落格玩家的月支出放大：倍數 = 月支出 ÷ DEAL_SCALE_BASE_EXPENSES，取 0.5 的倍數，介於 1–8。
+ * 成本、頭期款、貸款、每月現金流一起放大，報酬率不變。
+ */
+export const DEAL_SCALE_BASE_EXPENSES = 16_000;
+export const DEAL_SCALE_MAX = 8;
+export const BOND_RATE_MIN_ANNUAL = 0.01;
+export const BOND_RATE_MAX_ANNUAL = 0.05;
+export const BOND_RATE_STEPS = [-0.01, -0.005, 0, 0, 0.005, 0.01] as const;
 /** 手機借款面板的快速金額 */
 export const LOAN_PRESET_AMOUNTS = [75_000, 150_000, 300_000, 450_000, 750_000] as const;
 export const BOND_FUND_AMOUNTS = [75_000, 150_000, 300_000, 750_000, 1_500_000, 3_000_000] as const;

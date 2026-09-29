@@ -2,7 +2,7 @@
 import type { Socket } from 'socket.io';
 import { repayRoomLoan } from '../playerLoans';
 import { buyHome } from '../householdLoans';
-import { investBondFund } from '../bondFund';
+import { investBondFund, currentBondRate } from '../bondFund';
 import { createPlayer, sellAsset, buyInsurance, cancelInsurance, takeEmergencyLoan, takeLeverageLoan, repayLoan, InsuranceType, goTravel, attendSocialEvent } from '../gameLogic';
 import { FRANCHISE_CASH_THRESHOLD, PROFESSIONS, STOCK_DCA_MONTHLY_DIVIDEND_RATE } from '../gameConfig';
 import {
@@ -170,7 +170,7 @@ export function registerFinanceHandlers(socket: Socket, onSafe: OnSafe): void {
     const player = gs.players.get(playerIdentity(socket));
     if (!player || !player.isAlive) { emitClient(socket, 'error', { message: '玩家不存在或已出局。' }); return; }
     const _bdCB = player.cash; const _bdFB = player.monthlyCashflow; const _bdNWB = calcNetWorth(player);
-    const result = investBondFund(player, payload.amount);
+    const result = investBondFund(player, payload.amount, currentBondRate(gs));
     if (!result.success) { emitClient(socket, 'error', { message: result.message }); return; }
     logPlayerEvent(player, gs, 'asset_buy', result.message, _bdCB, _bdFB, _bdNWB, { source: 'bond', amount: payload.amount });
     emitClient(socket, 'bondResult', result);

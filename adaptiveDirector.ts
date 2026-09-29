@@ -108,8 +108,8 @@ export function getAdaptiveEventPool(
     {
       id: 'adaptive_rate_pressure',
       title: '利率與物價升溫',
-      description: '資金與生活成本同步上升，每位玩家每月其他支出增加 $2,500。',
-      effects: [{ type: 'ExpenseChange', flatAmount: 2_500, durationPaydays: 2 }],
+      description: '資金與生活成本同步上升，每位玩家每月其他支出增加 $2,500；利率升 1 個百分點，債券配息跟著提高。',
+      effects: [{ type: 'ExpenseChange', flatAmount: 2_500, durationPaydays: 2 }, { type: 'BondRateChange', flatAmount: 0.01 }],
     },
     {
       id: 'adaptive_work_pressure',

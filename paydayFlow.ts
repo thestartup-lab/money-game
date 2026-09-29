@@ -2,6 +2,7 @@
 import { Socket } from 'socket.io';
 import { GameState, Player, PaydayPlanPayload, GamePhase } from './gameDataModels';
 import { BASIC_INVESTMENTS, buyBasicInvestment } from './basicInvestments';
+import { currentBondRate, shiftBondRate } from './bondFund';
 import { LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS } from './gameConfig';
 import { syncPlayerAges, triggerPayday, checkAndApplyAnnualTax, getCurrentAge, applyFastTrackAppreciation, applyFastTrackPaydayBonus, pauseGameClock, resumeGameClock } from './gameLogic';
 import { PLAN_COVER_ROUNDS, FAST_TRACK_ROUND_SHARE, MONTHS_PER_GLOBAL_PAYDAY, PAYDAY_MAX_ROUNDS, MONTHS_PER_ROUND, CONSULTANT_HP_COST_PER_CYCLE, GROWTH_CYCLES_PER_GLOBAL_PAYDAY, YEARS_PER_COMPLETED_ROUND, STOCK_DCA_MONTHLY_RETURN_RATE, STOCK_DCA_MONTHLY_DIVIDEND_RATE } from './gameConfig';
@@ -297,6 +298,15 @@ export async function runGlobalPayday(gs: GameState): Promise<void> {
 
   gs.globalPaydayPending = false;
   const playerIds = gs.playerOrder.filter((id) => gs.players.get(id)?.isAlive);
+  // 利率環境：每次人生規劃前調整一次，已持有的債券基金配息跟著重算
+  const rateShift = shiftBondRate(gs);
+  if (rateShift.to !== rateShift.from) {
+    const arrow = rateShift.to > rateShift.from ? '📈 升息' : '📉 降息';
+    emitToRoom(roomId, 'notification', { message: `${arrow}：債券基金年殖利率 ${(rateShift.from * 100).toFixed(1)}% → ${(rateShift.to * 100).toFixed(1)}%，已持有的配息跟著調整。` });
+  }
+  gs.bondRateHistory ??= [];
+  gs.bondRateHistory.push({ age: Math.round(getCurrentAge(gs)), rate: rateShift.to });
+
   // 薪水每輪已經入帳；人生規劃只做決定。健康維護等花費涵蓋接下來 PLAN_COVER_ROUNDS 輪。
   const settlementMonths = 0;
   const growthCycles = PLAN_COVER_ROUNDS;
@@ -336,6 +346,7 @@ export async function runGlobalPayday(gs: GameState): Promise<void> {
     '所有人同時在手機規劃接下來幾輪：投資、保險、進修、生活方式。薪水每輪已自動入帳；全員送出後生效，主持人也可提前以空白方案結束。',
     { publicLines: [
       `🗓️ 每人可配置：財商升級、健康投資（涵蓋 ${PLAN_COVER_ROUNDS} 輪）、專長培訓、人脈投資、保險、股票定期定額、債券`,
+      `🏦 目前利率：債券基金年殖利率 ${(currentBondRate(gs) * 100).toFixed(1)}%（每次人生規劃會變動）`,
       `🏦 基本投資（每人最多一種、最多 10 份）：${BASIC_INVESTMENTS.map((b) => `${b.name} $${b.cost.toLocaleString()}／份、每月 +$${b.monthlyCashflow.toLocaleString()}`).join('；')}`,
     ] },
   );
@@ -378,7 +389,7 @@ export async function runGlobalPayday(gs: GameState): Promise<void> {
       currentInsurance: player.insurance,
       currentLifestyle: player.lifestyle,
       currentHealthHabit: player.healthHabit,
-      actionInfo: buildActionInfo(player),
+      actionInfo: buildActionInfo(player, gs),
       lifestyleOptions: LIFESTYLE_OPTIONS,
       healthHabitOptions: HEALTH_HABIT_OPTIONS,
       livingExpensesBase: player.expenses.otherExpenses,
@@ -423,7 +434,7 @@ export async function runGlobalPayday(gs: GameState): Promise<void> {
       globalPaydayNumber: gs.globalPaydayNumber + 1,
     });
 
-    const quarterlyPlan = { ...plan, settlementMonths, growthCycles };
+    const quarterlyPlan = { ...plan, settlementMonths, growthCycles, bondRateAnnual: currentBondRate(gs) };
     const planCash = player.cash;
     const planFlow = player.monthlyCashflow;
     const planWorth = calcNetWorth(player);

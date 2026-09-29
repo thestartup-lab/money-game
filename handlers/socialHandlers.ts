@@ -5,12 +5,58 @@ import { validatePlayerLoan } from '../playerLoans';
 import { AssetType } from '../gameDataModels';
 import { activateRelationship, buyArrangedMarriage } from '../gameLogic';
 import { RELATIONSHIP_MARRIAGE_THRESHOLD, HOST_ACTIVATION_DRS_BONUS, getLoanLimit } from '../gameConfig';
+import { adviceBlockReason, adviceCard, giveAdvice, mentorBlockReason, mentorPlayer } from '../lateLife';
+import { GamePhase } from '../gameDataModels';
 import {
   OnSafe, calcNetWorth, emitClient, emitToRoom, getPlayerSocket, getRoomState,
   io, isRoomAdmin, logPlayerEvent, playerIdentity, serializeGameState, socketRoomMap,
 } from '../socketServer';
 
 export function registerSocialHandlers(socket: Socket, onSafe: OnSafe): void {
+
+  // ----------------------------------------------------------
+  // 外圈指導後輩（mentorPlayer）：行動時間內，每輪一次
+  // ----------------------------------------------------------
+  onSafe('mentorPlayer', (payload: { targetPlayerId: string }) => {
+    const gs = getRoomState(socket);
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    const mentor = gs.players.get(playerIdentity(socket));
+    const target = gs.players.get(payload.targetPlayerId);
+    const blocked = mentorBlockReason(gs, mentor, target);
+    if (blocked || !mentor || !target) { emitClient(socket, 'error', { message: blocked ?? '玩家不存在。' }); return; }
+    const mCB = mentor.cash; const mFB = mentor.monthlyCashflow; const mNW = calcNetWorth(mentor);
+    const tCB = target.cash; const tFB = target.monthlyCashflow; const tNW = calcNetWorth(target);
+    const message = mentorPlayer(gs, mentor, target);
+    logPlayerEvent(mentor, gs, 'mentor', `指導後輩 ${target.name}（傳承 +5、體驗 +5）`, mCB, mFB, mNW, { targetName: target.name, role: 'mentor' });
+    logPlayerEvent(target, gs, 'mentor', `接受 ${mentor.name} 的指導（專長 +10）`, tCB, tFB, tNW, { mentorName: mentor.name, role: 'mentee' });
+    emitToRoom(gs.gameId, 'mentorshipGiven', { mentorId: mentor.id, mentorName: mentor.name, targetId: target.id, targetName: target.name, message });
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
+  // ----------------------------------------------------------
+  // 家族顧問（sendAdvice）：離世玩家每輪給一位在世玩家一句建議
+  // ----------------------------------------------------------
+  onSafe('sendAdvice', (payload: { targetPlayerId: string; adviceId: string }) => {
+    const gs = getRoomState(socket);
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    if (gs.gamePhase !== GamePhase.RatRace && gs.gamePhase !== GamePhase.FastTrack) {
+      emitClient(socket, 'error', { message: '遊戲進行中才能給建議。' }); return;
+    }
+    const advisor = gs.players.get(playerIdentity(socket));
+    const target = gs.players.get(payload.targetPlayerId);
+    const card = adviceCard(payload.adviceId);
+    const blocked = adviceBlockReason(gs, advisor, target, card);
+    if (blocked || !advisor || !target || !card) { emitClient(socket, 'error', { message: blocked ?? '無法送出建議。' }); return; }
+    const tCB = target.cash; const tFB = target.monthlyCashflow; const tNW = calcNetWorth(target);
+    giveAdvice(gs, advisor, target, card);
+    logPlayerEvent(target, gs, 'advice', `家族顧問 ${advisor.name} 的建議：${card.emoji} ${card.text}`, tCB, tFB, tNW, { advisorName: advisor.name, adviceId: card.id });
+    emitToRoom(gs.gameId, 'advisorAdvice', {
+      advisorId: advisor.id, advisorName: advisor.name, targetId: target.id, targetName: target.name,
+      adviceId: card.id, emoji: card.emoji, text: card.text,
+    });
+    emitClient(socket, 'adviceSent', { targetName: target.name, round: gs.turnNumber });
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
 
   // ----------------------------------------------------------
   // 合夥投資（partnershipOffer / partnershipResponse）

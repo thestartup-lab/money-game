@@ -250,7 +250,7 @@ export function applyPaydayPlan(player: Player, plan: PaydayPlanPayload): Payday
   let bondResult: { executed: boolean; amount: number; monthlyIncome: number } = { executed: false, amount: plan.bondAmount ?? 0, monthlyIncome: 0 };
   if ((plan.bondAmount ?? 0) > 0) {
     const { investBondFund } = require('./bondFund') as typeof import('./bondFund');
-    const r = investBondFund(player, plan.bondAmount!);
+    const r = investBondFund(player, plan.bondAmount!, plan.bondRateAnnual);
     bondResult = { executed: r.success, amount: plan.bondAmount!, monthlyIncome: r.monthlyIncome ?? 0 };
   }
 

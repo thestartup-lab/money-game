@@ -22,7 +22,7 @@ import { Deck, DealCard, DoodadCard, CrisisCard, MarketCard, SMALL_DEALS, BIG_DE
 import type { AdminGlobalEvent, GlobalEventEffect } from './adminEvents';
 import {
   SENIOR_MEDICAL_HP, SENIOR_MEDICAL_EXPENSE, SENIOR_CARE_HP, SENIOR_CARE_EXPENSE, MONTHS_PER_ROUND,
-  CHILD_EXPENSE_BY_AGE, SOCIAL_INSURANCE_RATE, PREMIUM_MULT_BY_STAGE, LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS, SPOUSE_LIVING_COST_RATIO, MARRIED_RENT_INCREASE,
+  CHILD_EXPENSE_BY_AGE, SOCIAL_INSURANCE_RATE, PREMIUM_MULT_BY_STAGE, LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS, SPOUSE_LIVING_COST_RATIO, MARRIED_RENT_INCREASE, BOND_RATE_START_ANNUAL,
 } from './gameConfig';
 import type { Lifestyle, HealthHabit } from './gameConfig';
 
@@ -304,6 +304,8 @@ export interface PaydayPlanPayload {
   stockDCAAmount: number;
   /** 債券基金投入金額（0 = 不投入；不限額） */
   bondAmount?: number;
+  /** 目前債券年殖利率；伺服器填入，客戶端送來的值會被覆蓋 */
+  bondRateAnnual?: number;
   /** 本次購買的保險類型（已持有的將被跳過）*/
   buyInsuranceTypes: Array<'medical' | 'life' | 'property'>;
   /** 生活方式（節儉／普通／享受），送出後持續到下次更改 */
@@ -389,7 +391,9 @@ export type PlayerEventType =
   | 'cooperation'
   | 'legacy'
   | 'payday_plan'
-  | 'insurance';
+  | 'insurance'
+  | 'mentor'
+  | 'advice';
 
 /**
  * 記錄玩家人生中每個關鍵決策與事件的快照。
@@ -522,6 +526,12 @@ export class Player {
   marriageBonus: number;
   /** 人生規劃買的健康維護還涵蓋幾輪（每輪發薪時扣 1；> 0 時該輪 HP 不衰退） */
   healthMaintenanceRounds = 0;
+  /** 外圈指導後輩：累計次數與最後一次的輪數（每輪一次） */
+  mentorCount = 0;
+  lastMentorRound = -1;
+  /** 家族顧問（離世後）：累計給過的建議與最後一次的輪數（每輪一次） */
+  adviceGiven = 0;
+  lastAdviceRound = -1;
   /**
    * 深度關係經營值（Deep Relationship Score）。
    * 透過聯誼活動或主持人觸發累積；達到閾值後可提親結婚。
@@ -906,6 +916,10 @@ export class GameState {
   communityChoiceHistory: string[] = [];
   /** 每次共同抉擇的結果（終局復盤回顧用） */
   communityChoiceLog: CommunityChoiceRecord[] = [];
+  /** 利率環境：債券基金年殖利率（見 BOND_RATE_*） */
+  bondRateAnnual = BOND_RATE_START_ANNUAL;
+  /** 每次人生規劃時的利率（復盤與大螢幕用） */
+  bondRateHistory: { age: number; rate: number }[] = [];
   /** 已經發薪到第幾輪（每輪結束發一次，避免重複或漏發） */
   lastPaidRound = 0;
   /** 大螢幕復盤目前停在哪一步（主持人控制；大螢幕重新整理後可接續） */

@@ -22,19 +22,23 @@ export interface BucketListGoal {
   cashReward?: number;
   /** 達成條件檢查；回傳 true 表示已達成 */
   isAchieved: (player: Player, gs: GameState) => boolean;
+  /** 個人化的目標說明（門檻依玩家生活規模計算時用） */
+  describe?: (player: Player) => string;
+  /** 目前進度（手機顯示） */
+  progress?: (player: Player, gs: GameState) => string;
 }
 
-// ----------------------------------------------------------
-// 工具函數（避免 import socketServer 形成循環依賴）
-// ----------------------------------------------------------
-function netWorth(p: Player): number {
-  const assetValue = p.assets.reduce((s, a) => s + (a.currentValue ?? a.cost), 0);
-  const liabilityTotal = p.liabilities.reduce((s, l) => s + l.totalDebt, 0);
-  return p.cash + assetValue - liabilityTotal;
-}
+/** 慈善家門檻：累積捐款達 24 個月的生活支出（依自己的生活規模，不再是固定金額） */
+export const PHILANTHROPY_MONTHS = 24;
+export const MENTOR_GOAL_COUNT = 3;
+export const HEALTHY_ELDER_AGE = 75;
+export const HEALTHY_ELDER_HP = 70;
+const philanthropyTarget = (p: Player) => Math.max(200_000, Math.round(p.totalExpenses * PHILANTHROPY_MONTHS / 10_000) * 10_000);
+
 
 // ----------------------------------------------------------
-// 8 個夢想目標
+// 8 個夢想目標（2026-09-29：拿掉進外圈就自動達成的「淨資產 $500 萬」「被動收入 $3 萬」，
+// 改成指導後輩、健康到老；慈善門檻改看自己的生活規模）
 // ----------------------------------------------------------
 export const BUCKET_LIST_GOALS: BucketListGoal[] = [
   {
@@ -46,25 +50,28 @@ export const BUCKET_LIST_GOALS: BucketListGoal[] = [
     lifeExpReward: 30,
     cashReward: 20_000,
     isAchieved: (p) => (p.visitedDestinations?.length ?? 0) >= 5,
+    progress: (p) => `已去過 ${p.visitedDestinations?.length ?? 0}／5 個地方`,
   },
   {
     id: 'philanthropist',
     emoji: '❤️',
     title: '慈善家',
-    description: '累積慈善捐款達 $200,000。',
+    description: `累積慈善捐款達 ${PHILANTHROPY_MONTHS} 個月的生活支出。`,
     legacyReward: 25,
     lifeExpReward: 20,
-    isAchieved: (p) => (p.charityTotal ?? 0) >= 200_000,
+    isAchieved: (p) => (p.charityTotal ?? 0) >= philanthropyTarget(p),
+    describe: (p) => `累積慈善捐款達 $${philanthropyTarget(p).toLocaleString()}（${PHILANTHROPY_MONTHS} 個月的生活支出）。外圈慈善格、內圈慈善卡都算。`,
+    progress: (p) => `已捐 $${(p.charityTotal ?? 0).toLocaleString()}／$${philanthropyTarget(p).toLocaleString()}`,
   },
   {
-    id: 'tycoon',
-    emoji: '💰',
-    title: '財富自由',
-    description: '淨資產達到 $5,000,000。',
+    id: 'mentor',
+    emoji: '🧑‍🏫',
+    title: '良師益友',
+    description: `在行動時間指導還在內圈的玩家 ${MENTOR_GOAL_COUNT} 次。`,
     legacyReward: 20,
     lifeExpReward: 25,
-    cashReward: 50_000,
-    isAchieved: (p) => netWorth(p) >= 5_000_000,
+    isAchieved: (p) => (p.mentorCount ?? 0) >= MENTOR_GOAL_COUNT,
+    progress: (p) => `已指導 ${p.mentorCount ?? 0}／${MENTOR_GOAL_COUNT} 次`,
   },
   {
     id: 'family_man',
@@ -75,15 +82,17 @@ export const BUCKET_LIST_GOALS: BucketListGoal[] = [
     lifeExpReward: 30,
     cashReward: 15_000,
     isAchieved: (p) => p.isMarried && p.numberOfChildren >= 2,
+    progress: (p) => `${p.isMarried ? '已婚' : '未婚'}、子女 ${p.numberOfChildren}／2`,
   },
   {
-    id: 'cashflow_king',
-    emoji: '👑',
-    title: '被動收入之王',
-    description: '月被動收入達 $30,000 以上。',
+    id: 'healthy_elder',
+    emoji: '🏃',
+    title: '健康到老',
+    description: `${HEALTHY_ELDER_AGE} 歲時健康值仍在 ${HEALTHY_ELDER_HP} 以上。`,
     legacyReward: 18,
-    lifeExpReward: 20,
-    isAchieved: (p) => p.totalPassiveIncome >= 30_000,
+    lifeExpReward: 25,
+    isAchieved: (p, gs) => getCurrentAge(gs) >= HEALTHY_ELDER_AGE && p.isAlive && (p.stats?.health ?? 0) >= HEALTHY_ELDER_HP,
+    progress: (p, gs) => `現在 ${Math.round(getCurrentAge(gs))} 歲、健康 ${p.stats.health}`,
   },
   {
     id: 'real_estate_baron',
@@ -94,6 +103,7 @@ export const BUCKET_LIST_GOALS: BucketListGoal[] = [
     lifeExpReward: 15,
     cashReward: 30_000,
     isAchieved: (p) => p.assets.filter((a) => a.type === AssetType.RealEstate).length >= 3,
+    progress: (p) => `持有 ${p.assets.filter((a) => a.type === AssetType.RealEstate).length}／3 個不動產`,
   },
   {
     id: 'high_fq',
@@ -103,6 +113,7 @@ export const BUCKET_LIST_GOALS: BucketListGoal[] = [
     legacyReward: 15,
     lifeExpReward: 25,
     isAchieved: (p) => (p.stats?.financialIQ ?? 0) >= 8,
+    progress: (p) => `財商 ${p.stats.financialIQ}／8`,
   },
   {
     id: 'long_life',
@@ -112,6 +123,7 @@ export const BUCKET_LIST_GOALS: BucketListGoal[] = [
     legacyReward: 20,
     lifeExpReward: 25,
     isAchieved: (p, gs) => getCurrentAge(gs) >= 80 && p.isAlive && (p.stats?.health ?? 0) > 0,
+    progress: (_p, gs) => `現在 ${Math.round(getCurrentAge(gs))} 歲`,
   },
 ];
 
@@ -192,4 +204,22 @@ export function evaluateBucketList(player: Player, gs: GameState): BucketCheckRe
   }
 
   return { newlyClaimed, allDone, perfectBonus };
+}
+
+/** 手機顯示用：每個夢想的個人化說明與進度 */
+export function describeBucketList(player: Player, gs: GameState) {
+  return (player.bucketList ?? []).map((entry) => {
+    const goal = BUCKET_GOAL_MAP[entry.id];
+    if (!goal) return null;
+    return {
+      id: goal.id,
+      emoji: goal.emoji,
+      title: goal.title,
+      description: goal.describe?.(player) ?? goal.description,
+      progress: goal.progress?.(player, gs) ?? '',
+      claimed: entry.claimed,
+      legacyReward: goal.legacyReward,
+      lifeExpReward: goal.lifeExpReward,
+    };
+  }).filter(Boolean);
 }

@@ -186,30 +186,62 @@ test('自然壽命：80 歲前 0；之後依 HP 提高；年齡由回合同步',
   assert.equal(p.currentAge, 80);
 });
 
-test('債券基金：不限額、配息算被動收入、本金不受股市卡影響、賣出全額拿回不課稅', () => {
-  const { investBondFund, BOND_FUND_ID } = require('../dist/bondFund');
-  const { sellAsset } = require('../dist/gameLogic');
+test('債券基金：不限額、配息依利率環境、利率變動重算配息、本金不受股市卡影響、賣出全額拿回不課稅', () => {
+  const { investBondFund, BOND_FUND_ID, shiftBondRate, currentBondRate } = require('../dist/bondFund');
+  const { sellAsset, applyGlobalEvent } = require('../dist/gameLogic');
   const { applyMarketCard } = require('../dist/cardSystem');
   const { MARKET_CARDS } = require('../dist/gameCards');
+  const { ADMIN_GLOBAL_EVENTS } = require('../dist/adminEvents');
   const p = createPlayer('b', '存錢族', 'teacher');
   p.cash = 5_000_000;
+  const game = new GameState('B'); game.addPlayer(p);
+  assert.equal(currentBondRate(game), 0.03, '開局年殖利率 3%');
   assert.equal(investBondFund(p, 0).success, false);
   assert.equal(investBondFund(p, 9_000_000).success, false, '現金不足');
-  const r1 = investBondFund(p, 3_000_000);
+  const r1 = investBondFund(p, 3_000_000, currentBondRate(game));
   assert.equal(r1.success, true);
-  assert.equal(r1.monthlyIncome, Math.round(3_000_000 * cfg.BOND_FUND_MONTHLY_YIELD));
-  const r2 = investBondFund(p, 1_000_000);
+  assert.equal(r1.monthlyIncome, Math.round(3_000_000 * 0.03 / 12));
+  const r2 = investBondFund(p, 1_000_000, currentBondRate(game));
   assert.equal(r2.principal, 4_000_000, '同一檔累加');
   assert.equal(p.assets.filter((a) => a.id === BOND_FUND_ID).length, 1);
-  assert.equal(p.totalPassiveIncome, Math.round(4_000_000 * cfg.BOND_FUND_MONTHLY_YIELD));
-  const game = new GameState('B'); game.addPlayer(p);
+  assert.equal(p.totalPassiveIncome, Math.round(4_000_000 * 0.03 / 12));
+  // 降息：已持有的配息跟著重算；上下限 1%–5%
+  assert.deepEqual(shiftBondRate(game, -0.01), { from: 0.03, to: 0.02 });
+  assert.equal(p.totalPassiveIncome, Math.round(4_000_000 * 0.02 / 12));
+  assert.equal(shiftBondRate(game, -0.05).to, 0.01, '不低於 1%');
+  assert.equal(shiftBondRate(game, 0.2).to, 0.05, '不高於 5%');
+  shiftBondRate(game, -0.02);
+  // 通膨事件升息 1 個百分點
+  applyGlobalEvent(game, ADMIN_GLOBAL_EVENTS.find((e) => e.id === 'inflation'));
+  assert.equal(currentBondRate(game), 0.04);
+  assert.equal(p.totalPassiveIncome, Math.round(4_000_000 * 0.04 / 12));
   applyMarketCard(game, MARKET_CARDS.find((c) => c.effect === 'PriceDecrease' && c.targetAssetType === 'Stock'));
   assert.equal(p.assets.find((a) => a.id === BOND_FUND_ID).currentValue, 4_000_000, '股災不影響本金');
   const cashBefore = p.cash;
   const sold = sellAsset(p, BOND_FUND_ID);
   assert.equal(sold.capitalGainsTax, 0);
   assert.equal(p.cash, cashBefore + 4_000_000);
-  assert.ok(cfg.BOND_FUND_MONTHLY_YIELD * 12 < 0.11, '報酬低於定期定額');
+  assert.ok(cfg.BOND_RATE_MAX_ANNUAL < 0.07, '最高利率仍低於定期定額');
+});
+
+test('交易規模跟著生活規模：依月支出放大、報酬率不變、牌庫原卡不被改動', () => {
+  const { dealScaleFor, scaleDealCard } = require('../dist/cardSystem');
+  const { SMALL_DEALS } = require('../dist/gameCards');
+  const p = createPlayer('d', '老師', 'teacher'); p.salary = p.profession.startingSalary;
+  const scale = dealScaleFor(p);
+  assert.equal(scale, Math.min(8, Math.max(1, Math.round(p.totalExpenses / 16000 * 2) / 2)));
+  assert.ok(scale >= 2, `老師的生活規模要放大交易（${scale}）`);
+  const card = SMALL_DEALS[0];
+  const before = JSON.stringify(card);
+  const scaled = scaleDealCard(card, scale);
+  assert.equal(JSON.stringify(card), before, '原卡不變');
+  assert.equal(scaled.asset.monthlyCashflow, Math.round(card.asset.monthlyCashflow * scale / 10) * 10);
+  assert.equal(scaled.asset.downPayment, Math.round(card.asset.downPayment * scale / 1000) * 1000);
+  assert.equal(scaled.asset.liabilityAmount, scaled.asset.cost - scaled.asset.downPayment);
+  const roi = (c) => c.asset.monthlyCashflow * 12 / c.asset.downPayment;
+  assert.ok(Math.abs(roi(scaled) - roi(card)) < 0.01, '報酬率不變');
+  const poor = createPlayer('q', '低支出', 'teacher'); poor.expenses.otherExpenses = 0; poor.expenses.rent = 0; poor.salary = 0;
+  assert.equal(dealScaleFor(poor), 1, '最少 1 倍');
 });
 
 test('房東風險：空置期間沒有租金且逐月恢復、大修扣房價 2%、租屋族不受影響、自住房也要修', () => {

@@ -8,7 +8,7 @@ export const EVENT_ICONS: Record<string, string> = {
   relationship: '🤝', franchise: '🏪', global_event: '🌍',
   bucket_goal_achieved: '🎯', life_milestone: '🏅', lucky_card: '🍀',
   property_event: '🏚️', community_choice: '🗳️', decision_echo: '🔁',
-  cooperation: '🤲', legacy: '🌟',
+  cooperation: '🤲', legacy: '🌟', mentor: '🧑‍🏫', advice: '👴',
 };
 
 export const EVENT_LABELS: Record<string, string> = {
@@ -20,7 +20,7 @@ export const EVENT_LABELS: Record<string, string> = {
   relationship: '人際', franchise: '加盟創業', global_event: '世界事件',
   bucket_goal_achieved: '夢想達成', life_milestone: '人生里程碑', lucky_card: '幸運卡',
   property_event: '房東事件', community_choice: '共同抉擇', decision_echo: '決策回聲',
-  cooperation: '合作契約', legacy: '傳承',
+  cooperation: '合作契約', legacy: '傳承', mentor: '指導後輩', advice: '家族顧問建議',
 };
 
 export const eventIcon = (type: string, fallback = '•') => EVENT_ICONS[type] ?? fallback;
