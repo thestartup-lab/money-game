@@ -12,6 +12,7 @@ import {
   pendingSubmissions, playerIdentity, playerSessions, privateReplay, removeRoomAdmin, roomAdminCredentials,
   roomAdminSocketIds, roomCreationRate, rooms, scheduleEmptyRoomCleanup, serializeGameState, skipCurrentEducationTurns, payCompletedRounds,
   socketRoomMap, tryOpenWorldEvent, verifyRoomAdminPassword,
+  repairCurrentTurn,
 } from '../socketServer';
 
 export function registerRoomHandlers(socket: Socket, onSafe: OnSafe): void {
@@ -350,8 +351,9 @@ export function registerRoomHandlers(socket: Socket, onSafe: OnSafe): void {
       gs.advanceToNextTurn();
     }
     gs.removePlayer(payload.playerId);
+    // 開局前移除第一位加入者時也要換人，否則開局後沒有人能擲骰
+    if (wasCurrentTurn) repairCurrentTurn(gs);
     if (wasCurrentTurn && inPlay && gs.playerOrder.length > 0) {
-      if (gs.currentPlayerTurnId === payload.playerId) gs.currentPlayerTurnId = gs.playerOrder[0];
       skipCurrentEducationTurns(gs);
       payCompletedRounds(gs);
       continueAfterTurnAdvance(gs);

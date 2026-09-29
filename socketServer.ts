@@ -566,6 +566,7 @@ export function restorePersistedRooms(): void {
       gs.restoredAt = snap.savedAt;
       queueSecondLifeCandidates(gs);
     }
+    repairCurrentTurn(gs);
     rooms.set(snap.roomId, gs);
     if (snap.credential) roomAdminCredentials.set(snap.roomId, snap.credential);
     for (const [playerId, session] of snap.sessions) playerSessions.set(playerId, { ...session, socketId: '' });
@@ -1005,6 +1006,19 @@ export function continueAfterTurnAdvance(gs: GameState): void {
   }
 }
 
+/**
+ * 目前輪到的玩家已經不在房間（例如開局前被移除的是第一位加入者）時，改由順序上第一位還活著的玩家接手。
+ * 回傳是否有修正。
+ */
+export function repairCurrentTurn(gs: GameState): boolean {
+  if (gs.players.has(gs.currentPlayerTurnId)) return false;
+  const next = gs.playerOrder.find((id) => gs.players.get(id)?.isAlive) ?? gs.playerOrder[0] ?? '';
+  if (next === gs.currentPlayerTurnId) return false;
+  console.log(`[repairCurrentTurn] 房間 ${gs.gameId}：輪次指向不存在的玩家，改由 ${gs.players.get(next)?.name ?? '—'} 接手`);
+  gs.currentPlayerTurnId = next;
+  return true;
+}
+
 export function advanceTurn(gs: GameState): void {
   if (gs.gamePhase === GamePhase.GameOver) return;
   gs.advanceToNextTurn();
@@ -1058,6 +1072,8 @@ setInterval(() => {
 setInterval(() => {
   for (const gs of rooms.values()) {
     if (gs.gamePhase !== GamePhase.RatRace && gs.gamePhase !== GamePhase.FastTrack) continue;
+    // 保險：輪次若指向已不存在的玩家，自動交給下一位，避免全場卡住
+    if (repairCurrentTurn(gs)) emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
     if (gs.turnInProgress || gs.decisionPhase || gs.facilitatorScene || gs.globalPaydayInProgress) continue;
     if (gs.globalPaydayPending || schedulePaydayIfDue(gs)) {
       continueAfterTurnAdvance(gs);

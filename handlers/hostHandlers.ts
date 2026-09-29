@@ -10,6 +10,7 @@ import {
   OnSafe, announceCareerUnlock, autoCompletePre20, boardNotices, continueAfterTurnAdvance, emitAdaptiveDirectorStatus,
   emitClient, emitToRoom, getPlayerSocket, getRoomState, isRoomAdmin, pausePaydayClock,
   playerSessions, privateReplay, resumePaydayClock, secondLifeQueue, serializeGameState, skipCurrentEducationTurns,
+  repairCurrentTurn,
 } from '../socketServer';
 
 export function registerHostHandlers(socket: Socket, onSafe: OnSafe): void {
@@ -110,6 +111,7 @@ export function registerHostHandlers(socket: Socket, onSafe: OnSafe): void {
 
     gs.gameDurationMs = durationMs;
     gs.gamePhase = GamePhase.RatRace;
+    repairCurrentTurn(gs);
     syncPlayerAges(gs);
     gs.turnNumber = 0;
     gs.roundsSinceGlobalPayday = 0;

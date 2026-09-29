@@ -11,6 +11,7 @@ import {
   decisionReleaseWaiters, eliminatePlayer, emitClient, emitToRoom, enqueueBoardNotice, getRoomState,
   handleLandingSquare, isRoomAdmin, maybeCompleteActionPhase, playerIdentity, queueSecondLifeCandidates, readBoardNotices,
   runGlobalPayday, serializeGameState, tryOpenWorldEvent,
+  repairCurrentTurn,
 } from '../socketServer';
 
 export function registerTurnHandlers(socket: Socket, onSafe: OnSafe): void {
@@ -317,8 +318,15 @@ export function registerTurnHandlers(socket: Socket, onSafe: OnSafe): void {
       emitClient(socket, 'error', { message: '目前有決策或結算進行中，請先收束再跳過回合。' });
       return;
     }
+    // 輪次指向已不存在的玩家：直接交給下一位，不需要再跳過
+    if (repairCurrentTurn(gs)) {
+      const now = gs.players.get(gs.currentPlayerTurnId);
+      emitToRoom(roomId, 'notification', { message: `輪次已修正，現在輪到 ${now?.name ?? '下一位玩家'}。` });
+      emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
+      return;
+    }
     const target = gs.players.get(gs.currentPlayerTurnId);
-    if (!target) { emitClient(socket, 'error', { message: '找不到目前輪到的玩家。' }); return; }
+    if (!target) { emitClient(socket, 'error', { message: '房間裡沒有可以行動的玩家。' }); return; }
     if (payload?.playerId && payload.playerId !== target.id) {
       emitClient(socket, 'error', { message: `目前輪到的是 ${target.name}，不是你選的玩家。` });
       return;
