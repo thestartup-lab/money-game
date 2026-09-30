@@ -9,6 +9,7 @@ import RetirementStagePanel from '../components/game/RetirementStagePanel';
 import MarriageChoicePanel from '../components/game/MarriageChoicePanel';
 import RetirementOutlookCard from '../components/game/RetirementOutlookCard';
 import FamilyActionsCard from '../components/game/FamilyActionsCard';
+import TransportCard from '../components/game/TransportCard';
 import AnalysisPage from './AnalysisPage';
 import EventCard from '../components/game/EventCard';
 import PaydayPlanForm from '../components/game/PaydayPlanForm';
@@ -307,6 +308,7 @@ export default function PlayerPage() {
       if (p.targetId === playerIdRef.current) addNotification(`👴 家族顧問 ${p.advisorName} 對你說：${p.emoji} ${p.text}`);
     });
     s.on('adviceSent', (p: { targetName: string }) => addNotification(`✉️ 已把建議送給 ${p.targetName}`));
+    s.on('carResult', (p: { message: string }) => addNotification(`🚗 ${p.message}`));
     s.on('familyActionResult', (p: { message: string }) => addNotification(`👨‍👩‍👧 ${p.message}`));
     s.on('matchmakingResult', (p: { gained: number; relationshipPoints: number; threshold: number; reached: boolean }) => {
       addNotification(`💞 相親：關係經營值 +${p.gained}（${p.relationshipPoints}/${p.threshold}）${p.reached ? '，下一個空檔會問你要不要結婚' : ''}`);
@@ -1498,6 +1500,7 @@ export default function PlayerPage() {
                 onRequestAnalysis={() => { emit('requestPlayerAnalysis'); }}
                 isGameOver={isGameOver}
               />
+              {!isGameOver && <TransportCard player={myPlayer} canUseActions={canUseActions} emit={emit} />}
               {!isGameOver && <FamilyActionsCard player={myPlayer} canUseActions={canUseActions} emit={emit} />}
             </CollapsePanel>}
 

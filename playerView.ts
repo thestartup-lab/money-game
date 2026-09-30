@@ -71,6 +71,20 @@ export function buildSecondLifeProgress(p: Player): object | null {
 }
 
 /** 手機「行動」面板每個動作點選時要標注的效果與價值（全部由伺服器算，避免前端數字失真）。 */
+/** 交通：目前的車或交通費、各車種報價、二手價 */
+function buildTransportInfo(p: Player) {
+  const cars = require('./cars') as typeof import('./cars');
+  const { carAssetId, carLoanId } = require('./householdLoans') as typeof import('./householdLoans');
+  return {
+    car: p.car,
+    monthly: p.transportExpense,
+    transitFee: cars.transitFeeWithoutCar(p),
+    offers: cars.getCarOffers(p),
+    resaleValue: p.car ? Math.round(p.assets.find((a) => a.id === carAssetId(p.id))?.currentValue ?? 0) : 0,
+    loanRemaining: p.liabilities.find((l) => l.id === carLoanId(p.id))?.totalDebt ?? 0,
+  };
+}
+
 /** 家庭行動的費用、機率與「現在不能做的原因」（手機直接顯示） */
 function buildFamilyInfo(p: Player, gs: GameState) {
   const cfg = require('./gameConfig') as typeof import('./gameConfig');
@@ -114,6 +128,7 @@ export function buildActionInfo(p: Player, gs?: GameState): object {
     matchmaking: { cost: cfg.MATCHMAKING_COST, drsMin: cfg.MATCHMAKING_DRS_MIN, drsMax: inPeak ? cfg.MATCHMAKING_DRS_PEAK_MAX : cfg.MATCHMAKING_DRS_MAX,
       usedThisRound: gs ? p.lastMatchmakingRound === gs.turnNumber : false },
     family: gs ? buildFamilyInfo(p, gs) : null,
+    transport: buildTransportInfo(p),
     insurance,
     premiumMultiplier: premiumMult,
     bond: { monthlyYield: currentBondRate(gs) / 12, annualized: Math.round(currentBondRate(gs) * 1000) / 10, floating: true, amounts: cfg.BOND_FUND_AMOUNTS,
@@ -218,6 +233,7 @@ export function serializePlayer(p: Player, gs: GameState): object {
   ].filter(Boolean).join('；'));
   pushExpense('房貸月付', p.expenses.homeMortgagePayment, '可用「提前還款」降低');
   pushExpense('車貸月付', p.expenses.carLoanPayment, '可用「提前還款」降低');
+  pushExpense(p.car ? `養車費（${p.car.name}）` : '交通費', p.transportExpense, p.car ? '油錢、保險、停車、保養；賣車後改付交通費' : '沒有車：大眾運輸與計程車；配偶與未成年孩子各多一半');
   pushExpense('信用卡', p.expenses.creditCardPayment);
   {
     const style = LIFESTYLE_OPTIONS[p.lifestyle] ?? LIFESTYLE_OPTIONS.normal;

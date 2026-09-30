@@ -799,6 +799,44 @@ export const PROFESSIONS: Profession[] = [
 ];
 
 /**
+ * 交通與車子（2026-10-01 起）：不再強迫每個人背車貸。
+ * 沒有車就付交通費（配偶與每個未成年孩子各多一半）；想買車可選代步車、進口車、跑車。
+ * 車子要付養車費（油錢、保險、停車、保養），每年折舊 15%，可以賣二手車。
+ * 靠車工作的職業（計程車、外送、水電、房仲、攤販）開局就有工作用車。
+ */
+export interface CarOption {
+  id: 'scooter' | 'economy' | 'import' | 'sports';
+  name: string;
+  price: number;
+  /** 每月養車費（隨物價上漲） */
+  runningCost: number;
+  /** 每輪生命體驗加分（開好車的享受） */
+  lifeExpPerRound: number;
+  /** 買車當下的體驗加分 */
+  lifeExpOnPurchase: number;
+  purchasable: boolean;
+}
+export const CAR_OPTIONS: readonly CarOption[] = [
+  { id: 'scooter', name: '工作用機車', price: 90_000, runningCost: 2_000, lifeExpPerRound: 0, lifeExpOnPurchase: 0, purchasable: false },
+  { id: 'economy', name: '代步車', price: 600_000, runningCost: 5_000, lifeExpPerRound: 0, lifeExpOnPurchase: 2, purchasable: true },
+  { id: 'import', name: '進口車', price: 1_800_000, runningCost: 12_000, lifeExpPerRound: 3, lifeExpOnPurchase: 5, purchasable: true },
+  { id: 'sports', name: '跑車', price: 5_000_000, runningCost: 30_000, lifeExpPerRound: 8, lifeExpOnPurchase: 10, purchasable: true },
+];
+export const TRANSPORT_BASE_MONTHLY = 2_500;
+export const TRANSPORT_FAMILY_SHARE = 0.5;
+export const CAR_DOWN_PAYMENT_RATIO = 0.2;
+export const CAR_LOAN_MONTHLY_RATE = 0.004;
+export const CAR_LOAN_TERM_MONTHS = 60;
+export const CAR_DEPRECIATION_PER_YEAR = 0.15;
+/** 靠車工作的職業：開局保留原本的車貸，並有工作用車 */
+export const WORK_VEHICLE_BY_PROFESSION: Readonly<Record<string, CarOption['id']>> = {
+  taxi_driver: 'economy', delivery_rider: 'scooter', renovation_contractor: 'economy', real_estate_agent: 'economy', market_vendor: 'economy',
+};
+for (const profession of PROFESSIONS) {
+  if (!WORK_VEHICLE_BY_PROFESSION[profession.id]) profession.startingCarLoan = 0;
+}
+
+/**
  * 真實生活成本：職業表的生活支出沿用桌遊的精簡設定，很多職業開局存錢率高達五成以上。
  * 以前每輪只結算 24 個月，等於把存錢率打對折；改成每輪誠實結算 48 個月（4 年）後要校正。
  * 2026-09-30 起改為逐職業校正（見 gameLogic 的 calibrateStartingLivingCosts）：

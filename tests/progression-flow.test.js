@@ -27,6 +27,7 @@ async function fixture(t, port, passed, passive, autoReading = true, outer = fal
       p.growthStats={academic:1,health:0,social:0,resource:0};
       p.expenses={taxes:0,homeMortgagePayment:0,carLoanPayment:0,creditCardPayment:0,otherExpenses:10000};
       p.liabilities=[];p.assets=[{id:'fixture',name:'測試收入',type:'Other',cost:1,currentValue:1,monthlyCashflow:${passive}}];
+      p.car={optionId:'test',name:'測試',runningCost:0,lifeExpPerRound:0,workVehicle:false};
       return p;
     };
     const cards=require('./dist/gameCards');

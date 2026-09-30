@@ -3,6 +3,7 @@ import type { Socket } from 'socket.io';
 import { repayRoomLoan } from '../playerLoans';
 import { buyHome } from '../householdLoans';
 import { investBondFund, currentBondRate } from '../bondFund';
+import { buyCar, sellCar } from '../cars';
 import { createPlayer, sellAsset, buyInsurance, cancelInsurance, takeEmergencyLoan, takeLeverageLoan, repayLoan, InsuranceType, goTravel, attendSocialEvent } from '../gameLogic';
 import { FRANCHISE_CASH_THRESHOLD, PROFESSIONS, STOCK_DCA_MONTHLY_DIVIDEND_RATE } from '../gameConfig';
 import {
@@ -177,6 +178,33 @@ export function registerFinanceHandlers(socket: Socket, onSafe: OnSafe): void {
     if (!result.success) { emitClient(socket, 'error', { message: result.message }); return; }
     logPlayerEvent(player, gs, 'asset_buy', result.message, _bdCB, _bdFB, _bdNWB, { source: 'bond', amount: payload.amount });
     emitClient(socket, 'bondResult', result);
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
+  // 買車（buyCar）／賣二手車（sellCar）：行動時間內
+  onSafe('buyCar', (payload: { optionId: string; payCash?: boolean }) => {
+    const gs = getRoomState(socket);
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    const player = gs.players.get(playerIdentity(socket));
+    if (!player?.isAlive) { emitClient(socket, 'error', { message: '玩家不存在或已出局。' }); return; }
+    const cb = player.cash; const fb = player.monthlyCashflow; const nw = calcNetWorth(player);
+    const result = buyCar(player, payload.optionId, payload.payCash === true);
+    if (!result.success) { emitClient(socket, 'error', { message: result.message }); return; }
+    logPlayerEvent(player, gs, 'asset_buy', result.message, cb, fb, nw, { source: 'car', optionId: payload.optionId });
+    emitClient(socket, 'carResult', { message: result.message });
+    emitToRoom(gs.gameId, 'cellEventBroadcast', { playerId: player.id, playerName: player.name, cellName: '買車', message: `🚗 ${player.name} ${result.message.split('；')[0]}`, ts: Date.now() });
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+  onSafe('sellCar', () => {
+    const gs = getRoomState(socket);
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    const player = gs.players.get(playerIdentity(socket));
+    if (!player?.isAlive) { emitClient(socket, 'error', { message: '玩家不存在或已出局。' }); return; }
+    const cb = player.cash; const fb = player.monthlyCashflow; const nw = calcNetWorth(player);
+    const result = sellCar(player);
+    if (!result.success) { emitClient(socket, 'error', { message: result.message }); return; }
+    logPlayerEvent(player, gs, 'asset_sell', result.message, cb, fb, nw, { source: 'car' });
+    emitClient(socket, 'carResult', { message: result.message });
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 

@@ -36,7 +36,8 @@ export function resolveNegativeCash(gs: GameState, player: Player): NegativeCash
 
   if (player.cash < 0) {
     const sellable = player.assets
-      .filter((a) => !isHouseholdAsset(a.id) && !a.id.startsWith('home-') && !a.id.startsWith('p2p-'))
+      // 自住房保留；車子（含好車）會被賣掉
+      .filter((a) => !a.id.startsWith('home-') && !a.id.startsWith('p2p-') && (a.id.startsWith('car-') || !isHouseholdAsset(a.id)))
       .sort((a, b) => (a.currentValue - (a.cost ?? 0)) - (b.currentValue - (b.cost ?? 0)));
     for (const asset of sellable) {
       if (player.cash >= 0) break;

@@ -4,6 +4,7 @@ import { GameState, Player, PaydayPlanPayload, GamePhase } from './gameDataModel
 import { BASIC_INVESTMENTS, buyBasicInvestment } from './basicInvestments';
 import { currentBondRate, shiftBondRate } from './bondFund';
 import { resolveNegativeCash } from './bankruptcy';
+import { ageCar } from './cars';
 import { LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS } from './gameConfig';
 import { syncPlayerAges, triggerPayday, checkAndApplyAnnualTax, getCurrentAge, applyFastTrackAppreciation, applyFastTrackPaydayBonus, pauseGameClock, resumeGameClock } from './gameLogic';
 import { PLAN_COVER_ROUNDS, FAST_TRACK_ROUND_SHARE, MONTHS_PER_GLOBAL_PAYDAY, PAYDAY_MAX_ROUNDS, MONTHS_PER_ROUND, CONSULTANT_HP_COST_PER_CYCLE, GROWTH_CYCLES_PER_GLOBAL_PAYDAY, YEARS_PER_COMPLETED_ROUND, STOCK_DCA_MONTHLY_RETURN_RATE, STOCK_DCA_MONTHLY_DIVIDEND_RATE } from './gameConfig';
@@ -207,6 +208,8 @@ export function settleRound(gs: GameState): RoundPayout[] {
     const taxTotals = { paid: 0, saved: 0 };
     const yearly = settleQuarterMonths(getPlayerSocket(player.id), gs, player, covered, months, 1, FAST_TRACK_ROUND_SHARE * yearsLived / YEARS_PER_COMPLETED_ROUND, taxTotals);
     if (covered) player.healthMaintenanceRounds -= 1;
+    // 車子折舊、好車帶來的體驗
+    ageCar(player, yearsLived);
     const ageStep = yearly.length > 0 ? yearsLived / yearly.length : 1;
     payouts.push({
       playerId: player.id,

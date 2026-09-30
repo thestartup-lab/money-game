@@ -68,6 +68,8 @@ function ensure(player: Player, kind: 'home' | 'car'): void {
 
 /** 依目前的房貸／車貸月付，建立或同步對應的資產與負債。職業指派後呼叫。 */
 export function syncHouseholdLoans(player: Player): void {
+  const { assignStartingVehicle } = require('./cars') as typeof import('./cars');
+  assignStartingVehicle(player);
   ensure(player, 'home');
   ensure(player, 'car');
 }

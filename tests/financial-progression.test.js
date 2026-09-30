@@ -58,6 +58,8 @@ test('基本投資一人一期一份、可放棄、不能偽造價格、不能�
 test('資格保留雙路徑、財商乘數與人生指標，轉職後 SK 歸零會改變資格', () => {
   const p = createPlayer('p', '玩家');
   p.expenses = { taxes: 0, rent: 0, homeMortgagePayment: 0, carLoanPayment: 0, creditCardPayment: 0, otherExpenses: 10000 };
+  // 這個測試只看資格門檻；給一台沒有養車費的車，讓交通費不影響支出
+  p.car = { optionId: 'test', name: '測試', runningCost: 0, lifeExpPerRound: 0, workVehicle: false };
   p.liabilities = []; p.stats.financialIQ = 1;
   p.assets = [{ id: 'a', type: 'Other', name: '收入', cost: 1, monthlyCashflow: 7500 }];
   p.stats.health = 70; p.stats.careerSkill = 60; p.relationshipPoints = 0; p.lifeExperience = 0;

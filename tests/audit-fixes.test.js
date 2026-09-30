@@ -177,7 +177,7 @@ test('開局租屋；買房後房租歸零、30 年房貸可提前還款且月�
   assert.equal(p.expenses.homeMortgagePayment, 0, '開局沒有房貸');
   assert.equal(p.rentExpense, p.profession.startingHomeMortgage, '職業的房貸數字變成月租');
   assert.ok(!p.liabilities.some((l) => l.id === 'home-loan-h'));
-  assert.ok(p.liabilities.some((l) => l.id === 'car-loan-h'), '車貸照舊');
+  assert.ok(!p.liabilities.some((l) => l.id === 'car-loan-h'), '一般職業開局沒有車貸（改付交通費）');
   const offers = getHomeOffers(p);
   assert.equal(offers.length, 3);
   assert.ok(offers.every((o) => o.affordable));

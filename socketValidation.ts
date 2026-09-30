@@ -13,11 +13,11 @@ const required: Record<string, string[]> = {
   triggerRelationship: ['targetPlayerId'], setPlayerStats: ['targetPlayerId', 'stats'], goTravel: ['destinationId'],
   submitCardDecision: ['phaseId'], submitPaydayPlan: ['phaseId'],
   startCareerScene: ['requestId'], cancelCareerRequest: ['requestId'],
-  confirmCareerScene: ['sceneId', 'accepted'], buyHome: ['optionId'], investBond: ['amount'], setAutoHost: ['enabled'], setCommunityChoiceAuto: ['enabled'], voteCommunityChoice: ['sceneId', 'optionId'], mentorPlayer: ['targetPlayerId'], answerMarriage: ['sceneId', 'accept'], sendAdvice: ['targetPlayerId', 'adviceId'], setMonthsPerRound: ['months'],
+  confirmCareerScene: ['sceneId', 'accepted'], buyHome: ['optionId'], investBond: ['amount'], setAutoHost: ['enabled'], setCommunityChoiceAuto: ['enabled'], voteCommunityChoice: ['sceneId', 'optionId'], mentorPlayer: ['targetPlayerId'], answerMarriage: ['sceneId', 'accept'], buyCar: ['optionId'], sendAdvice: ['targetPlayerId', 'adviceId'], setMonthsPerRound: ['months'],
 };
 const numeric = new Set(['amount', 'fraction', 'monthlyRate', 'bidAmount', 'academic', 'health', 'social', 'resource',
   'seconds', 'addSeconds', 'durationMinutes', 'diceCount', 'cash', 'hp', 'mp', 'fq', 'creditScore', 'basicInvestmentQuantity', 'minutes', 'startupAmount', 'months']);
-const boolean = new Set(['accepted', 'accept', 'rescued', 'enabled', 'force', 'useLeverage', 'useLiquid', 'donate', 'investInFQUpgrade',
+const boolean = new Set(['accepted', 'accept', 'rescued', 'enabled', 'force', 'useLeverage', 'useLiquid', 'payCash', 'donate', 'investInFQUpgrade',
   'investInHealthMaintenance', 'investInHealthBoost', 'investInSkillTraining', 'investInNetwork']);
 
 function safeTree(value: unknown, depth = 0): boolean {

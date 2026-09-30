@@ -32,7 +32,7 @@ import { applyHPDecay, applyNTAutoGrowth } from './statsSystem';
 import {
   SALARY_GROWTH_BY_STAGE, SALARY_GROWTH_SKILL_THRESHOLD, SALARY_GROWTH_SKILL_BONUS,
   LIVING_COST_GROWTH_PER_ROUND, LIVING_COST_GROWTH_STOP_AGE, LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS,
-  LAYOFF_MONTHS_BY_STAGE, SPOUSE_INCOME_RATIO_MIN, SPOUSE_INCOME_RATIO_MAX, SPOUSE_INCOME_MIN, SPOUSE_INCOME_MAX, SPOUSE_RETIRED_RATIO, FAMILY_TIE_CAP, BASIC_PENSION_MONTHLY, RETIREMENT_LIVING_COST_FACTOR, LIVING_COST_REALISM, LIVING_COST_TARGET_SAVINGS, SPOUSE_NET_INCOME_RATIO, SPOUSE_LIVING_COST_RATIO, MARRIED_RENT_INCREASE, WEDDING_COST_MONTHS, WEDDING_COST_MIN,
+  LAYOFF_MONTHS_BY_STAGE, SPOUSE_INCOME_RATIO_MIN, SPOUSE_INCOME_RATIO_MAX, SPOUSE_INCOME_MIN, SPOUSE_INCOME_MAX, SPOUSE_RETIRED_RATIO, TRANSPORT_BASE_MONTHLY, TRANSPORT_FAMILY_SHARE, FAMILY_TIE_CAP, BASIC_PENSION_MONTHLY, RETIREMENT_LIVING_COST_FACTOR, LIVING_COST_REALISM, LIVING_COST_TARGET_SAVINGS, SPOUSE_NET_INCOME_RATIO, SPOUSE_LIVING_COST_RATIO, MARRIED_RENT_INCREASE, WEDDING_COST_MONTHS, WEDDING_COST_MIN,
   CAPITAL_GAINS_TAX_RATE, NATURAL_DEATH_MIN_AGE, NATURAL_DEATH_BASE_PROBABILITY, NATURAL_DEATH_HP_FACTOR,
 } from './gameConfig';
 import { sellHome } from './householdLoans';
@@ -322,15 +322,17 @@ export function previewMarriageFinances(player: Player, ratioScale = 1, withWedd
   const style = LIFESTYLE_OPTIONS[player.lifestyle] ?? LIFESTYLE_OPTIONS.normal;
   const extraLiving = Math.round(player.expenses.otherExpenses * style.expenseMultiplier * player.livingCostMultiplier * SPOUSE_LIVING_COST_RATIO);
   const extraRent = player.housing === 'own' ? 0 : Math.round((player.expenses.rent ?? 0) * player.livingCostMultiplier * MARRIED_RENT_INCREASE);
+  // 沒有車時，配偶的交通費也算（交通費依家庭人數增加）
+  const extraTransport = player.car ? 0 : Math.round(TRANSPORT_BASE_MONTHLY * TRANSPORT_FAMILY_SHARE * player.livingCostMultiplier);
   const wedding = withWedding ? weddingCost(player, Math.round((spouseMin + spouseMax) / 2)) : 0;
-  return { spouseMin, spouseMax, extraLiving, extraRent, extraExpenses: extraLiving + extraRent, wedding };
+  return { spouseMin, spouseMax, extraLiving, extraRent, extraTransport, extraExpenses: extraLiving + extraRent + extraTransport, wedding };
 }
 
 export function describeMarriagePreview(player: Player, ratioScale = 1, withWedding = true): string {
   const p = previewMarriageFinances(player, ratioScale, withWedding);
   const parts = [
     `配偶每月實拿約 $${p.spouseMin.toLocaleString()}–$${p.spouseMax.toLocaleString()}`,
-    `家裡每月多 $${p.extraExpenses.toLocaleString()} 支出（配偶生活費${p.extraRent ? '、房租多 50%' : ''}）`,
+    `家裡每月多 $${p.extraExpenses.toLocaleString()} 支出（配偶生活費${p.extraRent ? '、房租多 50%' : ''}${p.extraTransport ? '、交通費' : ''}）`,
   ];
   if (withWedding) parts.push(`婚禮約 $${p.wedding.toLocaleString()}（現金不夠就簡單辦）`);
   return parts.join('；');
@@ -650,7 +652,12 @@ export function sellAsset(player: Player, assetId: string, fraction = 1): SellAs
     if (!home.success) return { success: false, message: home.message };
     return { success: true, assetId, proceeds: home.proceeds, debtSettled: home.debtSettled, netCashChange: home.netCashChange, capitalGainsTax: 0, message: home.message };
   }
-  if (isHouseholdAsset(assetId)) return { success: false, message: '自用車不能出售；想降低月付請用「提前還款」。' };
+  if (assetId.startsWith('car-')) {
+    const { sellCar } = require('./cars') as typeof import('./cars');
+    const car = sellCar(player);
+    return { success: car.success, assetId, proceeds: car.proceeds, debtSettled: car.debtSettled, netCashChange: car.netCashChange, capitalGainsTax: 0, message: car.message };
+  }
+  if (isHouseholdAsset(assetId)) return { success: false, message: '這項資產不能出售。' };
   const assetIndex = player.assets.findIndex((a) => a.id === assetId);
   if (assetIndex === -1) {
     return { success: false, message: `找不到資產 ID：${assetId}` };

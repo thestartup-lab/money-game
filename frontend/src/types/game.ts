@@ -637,6 +637,12 @@ export interface ActionInfo {
   travelOnPayroll: boolean;
   social: { cost: number; drsMin: number; drsMax: number; inPeak: boolean; peakStart: number; peakEnd: number; threshold: number; currentDrs: number; active: boolean; minHp: number };
   matchmaking?: { cost: number; drsMin: number; drsMax: number; usedThisRound: boolean };
+  transport?: {
+    car: { optionId: string; name: string; runningCost: number; lifeExpPerRound: number; workVehicle: boolean } | null;
+    monthly: number; transitFee: number; resaleValue: number; loanRemaining: number;
+    offers: { id: string; name: string; price: number; downPayment: number; loan: number; loanMonthly: number; runningCost: number;
+      lifeExpPerRound: number; monthlyWithLoan: number; transitSaved: number; canLoan: boolean; canCash: boolean; reason?: string }[];
+  };
   family?: {
     familyTies: number; familyTieCap: number;
     fertility: { cost: number; chance: number; blocked: string | null };

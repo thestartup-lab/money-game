@@ -22,7 +22,7 @@ import { Deck, DealCard, DoodadCard, CrisisCard, MarketCard, SMALL_DEALS, BIG_DE
 import type { AdminGlobalEvent, GlobalEventEffect } from './adminEvents';
 import {
   SENIOR_MEDICAL_HP, SENIOR_MEDICAL_EXPENSE, SENIOR_CARE_HP, SENIOR_CARE_EXPENSE, MONTHS_PER_ROUND,
-  CHILD_EXPENSE_BY_AGE, SOCIAL_INSURANCE_RATE, PREMIUM_MULT_BY_STAGE, LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS, SPOUSE_LIVING_COST_RATIO, MARRIED_RENT_INCREASE, BOND_RATE_START_ANNUAL, RETIREMENT_LIVING_COST_FACTOR,
+  CHILD_EXPENSE_BY_AGE, SOCIAL_INSURANCE_RATE, PREMIUM_MULT_BY_STAGE, LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS, SPOUSE_LIVING_COST_RATIO, MARRIED_RENT_INCREASE, BOND_RATE_START_ANNUAL, RETIREMENT_LIVING_COST_FACTOR, TRANSPORT_BASE_MONTHLY, TRANSPORT_FAMILY_SHARE, CAR_OPTIONS, WORK_VEHICLE_BY_PROFESSION,
 } from './gameConfig';
 import type { Lifestyle, HealthHabit } from './gameConfig';
 
@@ -526,6 +526,8 @@ export class Player {
   marriageBonus: number;
   /** 人生規劃買的健康維護還涵蓋幾輪（每輪發薪時扣 1；> 0 時該輪 HP 不衰退） */
   healthMaintenanceRounds = 0;
+  /** 名下的車（null = 沒有車，每月付交通費） */
+  car: { optionId: string; name: string; runningCost: number; lifeExpPerRound: number; workVehicle: boolean } | null = null;
   /** 家庭連結分數：助養兒童、照顧長輩、指導後輩（最多 FAMILY_TIE_CAP，計入家庭分數） */
   familyTiePoints = 0;
   /** 助養兒童的份數 */
@@ -736,6 +738,9 @@ export class Player {
     this.legacyActionUsed = false;
     this.charityTotal = 0;
     this.bucketList = [];
+    // 靠車工作的職業開局就有工作用車（車貸沿用職業設定）
+    const workVehicle = CAR_OPTIONS.find((option) => option.id === WORK_VEHICLE_BY_PROFESSION[profession.id]);
+    this.car = workVehicle ? { optionId: workVehicle.id, name: workVehicle.id === 'scooter' ? workVehicle.name : '工作用車', runningCost: workVehicle.runningCost, lifeExpPerRound: 0, workVehicle: true } : null;
     this.milestonesPassed = { age40: false, age60: false, age80: false };
 
     this.currentAge = 20;
@@ -793,6 +798,13 @@ export class Player {
   }
 
   /** 生活支出（其他支出 × 生活方式 × 生活成本上漲）＋ 健康習慣附帶支出 */
+  /** 交通：有車付養車費；沒車付交通費（配偶與未成年孩子各多一半）；都隨物價上漲 */
+  get transportExpense(): number {
+    if (this.car) return Math.round(this.car.runningCost * this.livingCostMultiplier);
+    const members = 1 + (this.isMarried && this.spouse ? TRANSPORT_FAMILY_SHARE : 0) + this.dependentChildren * TRANSPORT_FAMILY_SHARE;
+    return Math.round(TRANSPORT_BASE_MONTHLY * members * this.livingCostMultiplier);
+  }
+
   /** 離開全職工作（退休、顧問、退休創業）後生活支出打折 */
   get retirementLivingFactor(): number {
     return this.retirementStatus === 'working' ? 1 : RETIREMENT_LIVING_COST_FACTOR;
@@ -896,6 +908,7 @@ export class Player {
       e.creditCardPayment +
       this.livingExpenses +
       this.spouseLivingExpenses +
+      this.transportExpense +
       this.worldExpenseAdjustment +
       this.insurancePremiums +
       this.childExpenses +

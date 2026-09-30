@@ -190,8 +190,8 @@ export function startFamilyScene(gs: GameState, player: Player, source: 'inner' 
 
 /** 結婚後的金錢說明：配偶實拿、家裡多的支出、每月淨變化、婚禮與禮金 */
 function marriageMoneyText(player: Player, cashflowBefore: number, wedding: ReturnType<typeof payWedding> | null, gift: number): string {
-  const extra = player.spouseLivingExpenses + (player.housing === 'own' ? 0 : Math.round((player.expenses.rent ?? 0) * player.livingCostMultiplier * MARRIED_RENT_INCREASE));
   const net = player.monthlyCashflow - cashflowBefore;
+  const extra = (player.spouse?.income ?? 0) - net;
   const parts = [
     `配偶每月實拿 +$${(player.spouse?.income ?? 0).toLocaleString()}`,
     `家裡每月多 $${extra.toLocaleString()} 支出`,
