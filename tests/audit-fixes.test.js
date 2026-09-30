@@ -222,7 +222,7 @@ test('出售一般資產課 20% 資本利得稅；虧損不課', () => {
   assert.equal(p.cash, 220000);
 });
 
-test('65 歲轉折：退休金依象限替代率、顧問收入依專長人脈、高齡支出依 HP', () => {
+test('65 歲轉折：退休金依象限替代率（至少基本年金）、顧問收入依專長人脈另加基本年金、高齡支出依 HP', () => {
   const game = new GameState('RETIRE');
   const p = createPlayer('r', '退休者', 'teacher');
   p.cash = 100000;
@@ -235,7 +235,7 @@ test('65 歲轉折：退休金依象限替代率、顧問收入依專長人脈�
   assert.equal(p.salary, p.pensionMonthly, '退休後薪資 = 退休金');
   p.retirementStatus = 'consultant'; p.stats.health = 70; p.stats.careerSkill = 40; p.stats.network = 4;
   triggerPayday(p, game);
-  assert.equal(p.salary, 40 * 300 + 4 * 3000);
+  assert.equal(p.salary, 40 * 300 + 4 * 3000 + 8000, '顧問收入另加基本年金');
   assert.equal(computeConsultantIncome({ ...p, stats: { ...p.stats, health: 49 } }), 0, 'HP 不足接不到案');
   const before = p.totalExpenses;
   p.isSenior = true; p.stats.health = 55;
@@ -243,6 +243,6 @@ test('65 歲轉折：退休金依象限替代率、顧問收入依專長人脈�
   p.stats.health = 25;
   assert.equal(p.totalExpenses, before + 30000, 'HP < 30 再加長照 +25,000');
   const investor = createPlayer('i', '投資人', 'angel_investor');
-  assert.equal(computePension(investor), 0, 'I 象限沒有退休金');
+  assert.equal(computePension(investor), 8000, 'I 象限沒有職業退休金，但有基本年金');
 });
 

@@ -3,7 +3,7 @@ import type { Socket } from 'socket.io';
 import { GameState, GamePhase, PlayerEvent, AssetType } from '../gameDataModels';
 import { previewCareerChange } from '../careerStage';
 import { applyGlobalEvent, getCurrentAge, rollDice, computePension, computeConsultantIncome, getArrangedMarriageCost } from '../gameLogic';
-import { RELATIONSHIP_MARRIAGE_THRESHOLD, HP_ACTIVITY_THRESHOLDS, RETIREMENT_STARTUP_SUCCESS_ROLL, RETIREMENT_STARTUP_RETURN_RATE, RETIREMENT_STARTUP_FAILURE_LOSS, RETIREMENT_DEFER_HP_COST, CONSULTANT_HP_COST_PER_CYCLE, CONSULTANT_MIN_HP } from '../gameConfig';
+import { BASIC_PENSION_MONTHLY, RELATIONSHIP_MARRIAGE_THRESHOLD, HP_ACTIVITY_THRESHOLDS, RETIREMENT_STARTUP_SUCCESS_ROLL, RETIREMENT_STARTUP_RETURN_RATE, RETIREMENT_STARTUP_FAILURE_LOSS, RETIREMENT_DEFER_HP_COST, CONSULTANT_HP_COST_PER_CYCLE, CONSULTANT_MIN_HP } from '../gameConfig';
 import { worldEventRestriction, hasFragilePlayers, describeWorldEvent } from '../worldEvents';
 import { executeCareerChange, applyHPChange } from '../statsSystem';
 import {
@@ -269,17 +269,17 @@ export function resolveFacilitatorSceneChoice(gs: GameState, sceneId: string | u
       player.pensionMonthly = computePension(player);
       player.salary = player.pensionMonthly;
       title = `${player.name} 退休了`;
-      detail = `每月領退休金 $${player.pensionMonthly.toLocaleString()}，被動收入照領。月現金流 ${player.monthlyCashflow >= 0 ? '+' : ''}$${player.monthlyCashflow.toLocaleString()}。`;
+      detail = `每月領退休金 $${player.pensionMonthly.toLocaleString()}（至少是基本年金 $${BASIC_PENSION_MONTHLY.toLocaleString()}），被動收入照領，生活支出降兩成。月現金流 ${player.monthlyCashflow >= 0 ? '+' : ''}$${player.monthlyCashflow.toLocaleString()}。`;
     } else if (choice === 'consultant') {
       player.retirementStatus = 'consultant';
-      player.salary = computeConsultantIncome(player);
+      player.salary = computeConsultantIncome(player) + BASIC_PENSION_MONTHLY;
       title = `${player.name} 轉任顧問`;
-      detail = `顧問月收入 $${player.salary.toLocaleString()}（隨第二專長與人脈變動），每輪扣 HP ${CONSULTANT_HP_COST_PER_CYCLE}；HP 低於 ${CONSULTANT_MIN_HP} 就接不到案。`;
+      detail = `顧問月收入 $${computeConsultantIncome(player).toLocaleString()}（隨第二專長與人脈變動）加基本年金 $${BASIC_PENSION_MONTHLY.toLocaleString()}，生活支出降兩成；每輪扣 HP ${CONSULTANT_HP_COST_PER_CYCLE}，HP 低於 ${CONSULTANT_MIN_HP} 就接不到案，只剩基本年金。`;
     } else if (choice === 'startup') {
       const amount = Number(context.startupAmount ?? 0);
       const roll = rollDice(1) + (player.stats.network >= 5 ? 1 : 0);
       player.retirementStatus = 'founder';
-      player.salary = 0;
+      player.salary = BASIC_PENSION_MONTHLY;
       if (roll >= RETIREMENT_STARTUP_SUCCESS_ROLL) {
         player.cash -= amount;
         const monthly = Math.round(amount * RETIREMENT_STARTUP_RETURN_RATE);
@@ -290,7 +290,7 @@ export function resolveFacilitatorSceneChoice(gs: GameState, sceneId: string | u
         const loss = Math.round(amount * RETIREMENT_STARTUP_FAILURE_LOSS);
         player.cash -= loss;
         title = `${player.name} 退休創業失敗`;
-        detail = `擲出 ${roll}，未達 ${RETIREMENT_STARTUP_SUCCESS_ROLL}，損失 $${loss.toLocaleString()}；之後沒有薪資，靠被動收入生活。`;
+        detail = `擲出 ${roll}，未達 ${RETIREMENT_STARTUP_SUCCESS_ROLL}，損失 $${loss.toLocaleString()}；之後靠基本年金 $${BASIC_PENSION_MONTHLY.toLocaleString()} 與被動收入生活。`;
       }
     } else {
       player.retirementDeferrals += 1;

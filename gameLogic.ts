@@ -32,7 +32,7 @@ import { applyHPDecay, applyNTAutoGrowth } from './statsSystem';
 import {
   SALARY_GROWTH_BY_STAGE, SALARY_GROWTH_SKILL_THRESHOLD, SALARY_GROWTH_SKILL_BONUS,
   LIVING_COST_GROWTH_PER_ROUND, LIVING_COST_GROWTH_STOP_AGE, LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS,
-  LAYOFF_MONTHS_BY_STAGE, SPOUSE_INCOME_RATIO_MIN, SPOUSE_INCOME_RATIO_MAX, SPOUSE_INCOME_MIN, SPOUSE_INCOME_MAX, SPOUSE_RETIRED_RATIO, LIVING_COST_REALISM, LIVING_COST_TARGET_SAVINGS, SPOUSE_NET_INCOME_RATIO, SPOUSE_LIVING_COST_RATIO, MARRIED_RENT_INCREASE, WEDDING_COST_MONTHS, WEDDING_COST_MIN,
+  LAYOFF_MONTHS_BY_STAGE, SPOUSE_INCOME_RATIO_MIN, SPOUSE_INCOME_RATIO_MAX, SPOUSE_INCOME_MIN, SPOUSE_INCOME_MAX, SPOUSE_RETIRED_RATIO, BASIC_PENSION_MONTHLY, RETIREMENT_LIVING_COST_FACTOR, LIVING_COST_REALISM, LIVING_COST_TARGET_SAVINGS, SPOUSE_NET_INCOME_RATIO, SPOUSE_LIVING_COST_RATIO, MARRIED_RENT_INCREASE, WEDDING_COST_MONTHS, WEDDING_COST_MIN,
   CAPITAL_GAINS_TAX_RATE, NATURAL_DEATH_MIN_AGE, NATURAL_DEATH_BASE_PROBABILITY, NATURAL_DEATH_HP_FACTOR,
 } from './gameConfig';
 import { sellHome } from './householdLoans';
@@ -216,15 +216,13 @@ export function triggerPayday(player: Player, gameState: GameState, maintenanceD
     player.travelPenaltyRemaining -= 1;
   }
 
-  // 65 歲人生轉折後的收入
+  // 65 歲人生轉折後的收入（退休金至少是基本年金；顧問與創業者另加基本年金）
   if (player.retirementStatus === 'retired') {
-    player.salary = player.pensionMonthly;
+    player.salary = Math.max(player.pensionMonthly, BASIC_PENSION_MONTHLY);
   } else if (player.retirementStatus === 'consultant') {
-    player.salary = player.stats.health >= CONSULTANT_MIN_HP
-      ? player.stats.careerSkill * CONSULTANT_SK_RATE + player.stats.network * CONSULTANT_NT_RATE
-      : 0;
+    player.salary = computeConsultantIncome(player) + BASIC_PENSION_MONTHLY;
   } else if (player.retirementStatus === 'founder') {
-    player.salary = 0;
+    player.salary = BASIC_PENSION_MONTHLY;
   } else if (player.salary > 0) {
     // 職涯期間累計，作為退休金基準
     player.salaryMonthsWorked += 1;
@@ -1603,9 +1601,10 @@ export function buyArrangedMarriage(player: Player, currentAge: number): Confirm
 // ============================================================
 
 /** 退休金月額 = 職涯平均月薪 × 象限替代率（E 40%、S 25%、B/I 0%） */
+/** 退休金 = 職涯平均月薪 × 象限替代率，至少是基本年金 */
 export function computePension(player: Player): number {
   const rate = PENSION_RATE_BY_QUADRANT[player.profession.quadrant] ?? 0;
-  return Math.round(player.averageCareerSalary * rate);
+  return Math.max(BASIC_PENSION_MONTHLY, Math.round(player.averageCareerSalary * rate));
 }
 
 /** 顧問月收入（HP 不足時為 0） */

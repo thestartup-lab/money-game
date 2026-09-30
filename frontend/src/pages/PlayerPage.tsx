@@ -7,6 +7,7 @@ import ActionPanel from '../components/game/ActionPanel';
 import CareerStagePanel from '../components/game/CareerStagePanel';
 import RetirementStagePanel from '../components/game/RetirementStagePanel';
 import MarriageChoicePanel from '../components/game/MarriageChoicePanel';
+import RetirementOutlookCard from '../components/game/RetirementOutlookCard';
 import AnalysisPage from './AnalysisPage';
 import EventCard from '../components/game/EventCard';
 import PaydayPlanForm from '../components/game/PaydayPlanForm';
@@ -1319,6 +1320,7 @@ export default function PlayerPage() {
           {!isGameOver && gameState.facilitatorScene?.kind === 'community' && (
             <CommunityVotePanel scene={gameState.facilitatorScene} myVote={communityVotes[gameState.facilitatorScene.id]} canVote={Boolean(myPlayer)} emit={emit} />
           )}
+          {!isGameOver && myPlayer?.retirementOutlook && <RetirementOutlookCard player={myPlayer} />}
           {/* 後半場：外圈玩家的第二人生目標與指導後輩；離世玩家的家族顧問 */}
           {!isGameOver && myPlayer && (!myPlayer.isAlive || myPlayer.isInFastTrack) && (
             <LateLifePanel gameState={gameState} me={myPlayer} canUseActions={canUseActions} emit={emit} />

@@ -22,7 +22,7 @@ import { Deck, DealCard, DoodadCard, CrisisCard, MarketCard, SMALL_DEALS, BIG_DE
 import type { AdminGlobalEvent, GlobalEventEffect } from './adminEvents';
 import {
   SENIOR_MEDICAL_HP, SENIOR_MEDICAL_EXPENSE, SENIOR_CARE_HP, SENIOR_CARE_EXPENSE, MONTHS_PER_ROUND,
-  CHILD_EXPENSE_BY_AGE, SOCIAL_INSURANCE_RATE, PREMIUM_MULT_BY_STAGE, LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS, SPOUSE_LIVING_COST_RATIO, MARRIED_RENT_INCREASE, BOND_RATE_START_ANNUAL,
+  CHILD_EXPENSE_BY_AGE, SOCIAL_INSURANCE_RATE, PREMIUM_MULT_BY_STAGE, LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS, SPOUSE_LIVING_COST_RATIO, MARRIED_RENT_INCREASE, BOND_RATE_START_ANNUAL, RETIREMENT_LIVING_COST_FACTOR,
 } from './gameConfig';
 import type { Lifestyle, HealthHabit } from './gameConfig';
 
@@ -786,10 +786,15 @@ export class Player {
   }
 
   /** 生活支出（其他支出 × 生活方式 × 生活成本上漲）＋ 健康習慣附帶支出 */
+  /** 離開全職工作（退休、顧問、退休創業）後生活支出打折 */
+  get retirementLivingFactor(): number {
+    return this.retirementStatus === 'working' ? 1 : RETIREMENT_LIVING_COST_FACTOR;
+  }
+
   get livingExpenses(): number {
     const style = LIFESTYLE_OPTIONS[this.lifestyle] ?? LIFESTYLE_OPTIONS.normal;
     const habit = HEALTH_HABIT_OPTIONS[this.healthHabit] ?? HEALTH_HABIT_OPTIONS.normal;
-    return Math.round(this.expenses.otherExpenses * style.expenseMultiplier * this.livingCostMultiplier) + habit.monthlyCost;
+    return Math.round(this.expenses.otherExpenses * style.expenseMultiplier * this.livingCostMultiplier * this.retirementLivingFactor) + habit.monthlyCost;
   }
 
   /** 房租（隨生活成本上漲；買房後為 0） */
@@ -803,7 +808,7 @@ export class Player {
   get spouseLivingExpenses(): number {
     if (!this.isMarried || !this.spouse) return 0;
     const style = LIFESTYLE_OPTIONS[this.lifestyle] ?? LIFESTYLE_OPTIONS.normal;
-    return Math.round(this.expenses.otherExpenses * style.expenseMultiplier * this.livingCostMultiplier * SPOUSE_LIVING_COST_RATIO);
+    return Math.round(this.expenses.otherExpenses * style.expenseMultiplier * this.livingCostMultiplier * SPOUSE_LIVING_COST_RATIO * this.retirementLivingFactor);
   }
 
   /** 配偶收入（失業中為 0） */

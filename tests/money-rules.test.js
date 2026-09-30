@@ -69,3 +69,39 @@ test('生活支出逐職業校正：存錢率補到約 30%，原本就花很多�
     assert.ok(row.after <= row.before * 2 && row.after >= row.before, `${row.name} 介於原本與 2 倍之間`);
   }
 });
+
+test('退休：生活支出降兩成、退休金至少基本年金（企業主與投資者也有）、顧問與創業另加基本年金', () => {
+  const { computePension, triggerPayday } = require('../dist/gameLogic');
+  const cfg = require('../dist/gameConfig');
+  const gs = new GameState('R');
+  const teacher = createPlayer('t', '老師', 'teacher'); teacher.salary = teacher.profession.startingSalary; gs.addPlayer(teacher);
+  const livingBefore = teacher.livingExpenses;
+  teacher.retirementStatus = 'retired';
+  assert.equal(teacher.livingExpenses, Math.round(teacher.expenses.otherExpenses * teacher.livingCostMultiplier * 0.8), '生活支出降兩成');
+  assert.ok(teacher.livingExpenses < livingBefore);
+  const owner = createPlayer('o', '老闆', 'restaurant_owner');
+  assert.equal(owner.profession.quadrant, 'B');
+  assert.equal(computePension(owner), cfg.BASIC_PENSION_MONTHLY, '企業主至少有基本年金');
+  owner.retirementStatus = 'founder'; gs.addPlayer(owner);
+  triggerPayday(owner, gs, true, false);
+  assert.equal(owner.salary, cfg.BASIC_PENSION_MONTHLY, '退休創業也領基本年金');
+  const consultant = createPlayer('c', '顧問', 'teacher'); consultant.retirementStatus = 'consultant'; consultant.stats.health = 20; gs.addPlayer(consultant);
+  triggerPayday(consultant, gs, true, false);
+  assert.equal(consultant.salary, cfg.BASIC_PENSION_MONTHLY, '健康太低接不到案時，至少還有基本年金');
+});
+
+test('退休準備度：55 歲起、還在工作才顯示，估算退休後缺口與存款可撐年數', () => {
+  const { buildRetirementOutlook } = require('../dist/retirementOutlook');
+  const gs = new GameState('O');
+  const p = createPlayer('p', '老師', 'teacher'); p.salary = p.profession.startingSalary; gs.addPlayer(p);
+  gs.turnNumber = 8; // 52 歲
+  assert.equal(buildRetirementOutlook(p, gs), null, '55 歲前不顯示');
+  gs.turnNumber = 9; p.currentAge = 56; // 56 歲
+  p.cash = 1_000_000;
+  const o = buildRetirementOutlook(p, gs);
+  assert.ok(o && o.gap < 0, '只靠退休金會有缺口');
+  assert.equal(o.expensesAfter, p.totalExpenses - p.socialInsurance - Math.round((p.livingExpenses + p.spouseLivingExpenses) * 0.2));
+  assert.equal(o.yearsCovered, Math.floor(1_000_000 / (-o.gap * 12)));
+  p.retirementStatus = 'retired';
+  assert.equal(buildRetirementOutlook(p, gs), null, '退休後不再顯示');
+});

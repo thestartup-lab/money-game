@@ -4,6 +4,7 @@ import { BASIC_INVESTMENTS } from './basicInvestments';
 import { getHomeOffers } from './householdLoans';
 import { BOND_FUND_ID, currentBondRate } from './bondFund';
 import { describeBucketList } from './bucketList';
+import { buildRetirementOutlook } from './retirementOutlook';
 import { ADVICE_CARDS } from './lateLife';
 import { naturalDeathProbability, travelLeaveCost, isOnPayrollSchedule } from './gameLogic';
 import { LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS, CHILD_EXPENSE_BY_AGE, SOCIAL_INSURANCE_RATE, PREMIUM_MULT_BY_STAGE } from './gameConfig';
@@ -208,6 +209,7 @@ export function serializePlayer(p: Player, gs: GameState): object {
     const notes: string[] = [];
     if (style.expenseMultiplier !== 1) notes.push(`${style.label} ×${style.expenseMultiplier}`);
     if (p.livingCostMultiplier > 1) notes.push(`物價 ×${p.livingCostMultiplier.toFixed(2)}`);
+    if (p.retirementLivingFactor < 1) notes.push(`退休後 ×${p.retirementLivingFactor}`);
     pushExpense('生活支出', p.livingExpenses - habit.monthlyCost, notes.length ? `基準 $${p.expenses.otherExpenses.toLocaleString()}，${notes.join('、')}` : undefined);
     pushExpense('配偶生活費', p.spouseLivingExpenses, '和你的生活支出一樣，隨生活方式與物價變動');
     if (habit.monthlyCost) pushExpense(`健康習慣：${habit.label}`, habit.monthlyCost);
@@ -333,6 +335,7 @@ export function serializePlayer(p: Player, gs: GameState): object {
     charityTotal: p.charityTotal ?? 0,
     bucketList: p.bucketList ?? [],
     bucketGoals: describeBucketList(p, gs),
+    retirementOutlook: buildRetirementOutlook(p, gs),
     mentorCount: p.mentorCount ?? 0,
     lastMentorRound: p.lastMentorRound ?? -1,
     adviceGiven: p.adviceGiven ?? 0,

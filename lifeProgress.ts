@@ -1,7 +1,7 @@
 /** 人生進程：里程碑、夢想清單、第二人生、65 歲轉折、死亡與終局 */
 import { GameState, Player, GamePhase } from './gameDataModels';
 import { computePension, computeConsultantIncome, addLifeExperience, getCurrentAge, calculateLifeScore } from './gameLogic';
-import { LIFE_EXP, RETIREMENT_ROUND, RETIREMENT_STARTUP_AMOUNTS, RETIREMENT_STARTUP_SUCCESS_ROLL, RETIREMENT_STARTUP_RETURN_RATE, RETIREMENT_DEFER_HP_COST, RETIREMENT_MAX_DEFERRALS, CONSULTANT_HP_COST_PER_CYCLE, CONSULTANT_MIN_HP, CONSULTANT_SK_RATE, CONSULTANT_NT_RATE, PENSION_RATE_BY_QUADRANT, SKILL_CAREER_CHANGE_THRESHOLD } from './gameConfig';
+import { BASIC_PENSION_MONTHLY, LIFE_EXP, RETIREMENT_ROUND, RETIREMENT_STARTUP_AMOUNTS, RETIREMENT_STARTUP_SUCCESS_ROLL, RETIREMENT_STARTUP_RETURN_RATE, RETIREMENT_DEFER_HP_COST, RETIREMENT_MAX_DEFERRALS, CONSULTANT_HP_COST_PER_CYCLE, CONSULTANT_MIN_HP, CONSULTANT_SK_RATE, CONSULTANT_NT_RATE, PENSION_RATE_BY_QUADRANT, SKILL_CAREER_CHANGE_THRESHOLD } from './gameConfig';
 import { handlePlayerDeath, evaluateSecondLifeEligibility } from './cardSystem';
 import { assignBucketList, evaluateBucketList, getBucketGoal } from './bucketList';
 import { serializeGameState, buildAvailableProfessions, careerBlockReason } from './playerView';
@@ -334,10 +334,11 @@ export function retirementSceneDescription(player: Player): string {
   const rate = Math.round((PENSION_RATE_BY_QUADRANT[player.profession.quadrant] ?? 0) * 100);
   const lines = [
     `${player.name}（${player.profession.name}）滿 65 歲。職涯平均月薪 $${player.averageCareerSalary.toLocaleString()}，目前月薪 $${player.salary.toLocaleString()}，被動收入 $${player.totalPassiveIncome.toLocaleString()}／月。`,
-    `1. 退休：薪資歸零，改領退休金 $${pension.toLocaleString()}／月（${player.profession.quadrant} 象限替代率 ${rate}%）。`,
-    `2. 當顧問：月收入 = 第二專長 ${player.stats.careerSkill} × ${CONSULTANT_SK_RATE} + 人脈 ${player.stats.network} × ${CONSULTANT_NT_RATE.toLocaleString()} = $${consultant.toLocaleString()}；每輪扣 HP ${CONSULTANT_HP_COST_PER_CYCLE}，HP 低於 ${CONSULTANT_MIN_HP} 接不到案。`,
+    `1. 退休：薪資歸零，改領退休金 $${pension.toLocaleString()}／月（${player.profession.quadrant} 象限替代率 ${rate}%，至少是基本年金 $${BASIC_PENSION_MONTHLY.toLocaleString()}）。`,
+    `2. 當顧問：月收入 = 第二專長 ${player.stats.careerSkill} × ${CONSULTANT_SK_RATE} + 人脈 ${player.stats.network} × ${CONSULTANT_NT_RATE.toLocaleString()} = $${consultant.toLocaleString()}，另加基本年金；每輪扣 HP ${CONSULTANT_HP_COST_PER_CYCLE}，HP 低於 ${CONSULTANT_MIN_HP} 接不到案。`,
     `3. 創業：投入 $${RETIREMENT_STARTUP_AMOUNTS.map((a) => (a / 10000) + '萬').join('／')}，擲骰 ≥ ${RETIREMENT_STARTUP_SUCCESS_ROLL}（人脈 ≥ 5 加 1）成功，月現金流 = 投入 × ${RETIREMENT_STARTUP_RETURN_RATE * 100}%；失敗損失一半。`,
     player.retirementDeferrals < RETIREMENT_MAX_DEFERRALS ? `4. 延後一輪退休：多領一輪薪水，HP 額外 −${RETIREMENT_DEFER_HP_COST}。` : '',
+    `選退休、顧問或創業後，生活支出降兩成；創業另領基本年金 $${BASIC_PENSION_MONTHLY.toLocaleString()}。`,
     '65 歲起 HP 低於 60 每月多 $3,000 醫療，低於 30 再加 $9,000 長照。',
   ].filter(Boolean);
   return lines.join('\n');

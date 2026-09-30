@@ -1113,6 +1113,15 @@ export const SALARY_MULT_BY_STAGE: Readonly<Record<LifeStage, number>> = {
 export const RETIREMENT_ROUND = 11;
 /** 退休金替代率（依象限）：退休金 = 職涯平均月薪 × 替代率 */
 export const PENSION_RATE_BY_QUADRANT: Readonly<Record<'E' | 'S' | 'B' | 'I', number>> = { E: 0.4, S: 0.25, B: 0, I: 0 };
+/**
+ * 基本年金（2026-10-01 起）：像國民年金，65 歲離開全職工作後每個人都有，企業主與投資者也一樣。
+ * 退休者領「退休金與基本年金取高者」；顧問與退休創業者另外加領基本年金。
+ */
+export const BASIC_PENSION_MONTHLY = 8_000;
+/** 退休後生活支出降兩成（不再通勤、治裝、在外用餐）；醫療與長照費用照舊 */
+export const RETIREMENT_LIVING_COST_FACTOR = 0.8;
+/** 幾歲起在手機顯示「退休準備度」預警 */
+export const RETIREMENT_OUTLOOK_AGE = 55;
 /** 顧問月收入 = 第二專長 × 300 + 人脈 × 3,000；HP 低於 50 接不到案；每個成長週期扣 HP */
 export const CONSULTANT_SK_RATE = 300;
 export const CONSULTANT_NT_RATE = 3_000;

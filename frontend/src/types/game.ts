@@ -237,6 +237,8 @@ export interface Player {
   taxPlanningCreditRate?: number;
   /** B1：人生夢想清單（進外圈時隨機抽 3 個） */
   bucketList?: { id: string; claimed: boolean; claimedAt?: number }[];
+  /** 退休準備度：55 歲起、還在全職工作時才有 */
+  retirementOutlook?: { age: number; yearsToRetire: number; pension: number; passive: number; spouse: number; incomeAfter: number; expensesAfter: number; gap: number; yearsCovered: number | null; passiveNeeded: number } | null;
   /** 夢想清單的個人化說明與進度（伺服器計算） */
   bucketGoals?: { id: string; emoji: string; title: string; description: string; progress: string; claimed: boolean; legacyReward: number; lifeExpReward: number }[];
   /** 外圈指導後輩：累計次數與最後一次的輪數 */
