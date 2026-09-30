@@ -526,6 +526,12 @@ export class Player {
   marriageBonus: number;
   /** 人生規劃買的健康維護還涵蓋幾輪（每輪發薪時扣 1；> 0 時該輪 HP 不衰退） */
   healthMaintenanceRounds = 0;
+  /** 關係經營值達門檻，等下一個空檔開求婚舞台（本人決定） */
+  marriageProposalPending = false;
+  /** 主動相親：最後一次的輪數（每輪一次） */
+  lastMatchmakingRound = -1;
+  /** 破產重整的次數（現金為負、賣光流動資產與借款仍不夠時） */
+  bankruptcies = 0;
   /** 外圈指導後輩：累計次數與最後一次的輪數（每輪一次） */
   mentorCount = 0;
   lastMentorRound = -1;

@@ -3,6 +3,7 @@ import { Socket } from 'socket.io';
 import { GameState, Player, PaydayPlanPayload, GamePhase } from './gameDataModels';
 import { BASIC_INVESTMENTS, buyBasicInvestment } from './basicInvestments';
 import { currentBondRate, shiftBondRate } from './bondFund';
+import { resolveNegativeCash } from './bankruptcy';
 import { LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS } from './gameConfig';
 import { syncPlayerAges, triggerPayday, checkAndApplyAnnualTax, getCurrentAge, applyFastTrackAppreciation, applyFastTrackPaydayBonus, pauseGameClock, resumeGameClock } from './gameLogic';
 import { PLAN_COVER_ROUNDS, FAST_TRACK_ROUND_SHARE, MONTHS_PER_GLOBAL_PAYDAY, PAYDAY_MAX_ROUNDS, MONTHS_PER_ROUND, CONSULTANT_HP_COST_PER_CYCLE, GROWTH_CYCLES_PER_GLOBAL_PAYDAY, YEARS_PER_COMPLETED_ROUND, STOCK_DCA_MONTHLY_RETURN_RATE, STOCK_DCA_MONTHLY_DIVIDEND_RATE } from './gameConfig';
@@ -219,6 +220,15 @@ export function settleRound(gs: GameState): RoundPayout[] {
       taxPaid: taxTotals.paid,
       taxSaved: taxTotals.saved,
     });
+    // 現金為負：賣流動資產 → 應急借款 → 賣其他投資 → 破產重整
+    const beforeResolveCash = player.cash; const beforeResolveFlow = player.monthlyCashflow; const beforeResolveWorth = calcNetWorth(player);
+    const resolution = resolveNegativeCash(gs, player);
+    if (resolution) {
+      const text = resolution.steps.join('；');
+      logPlayerEvent(player, gs, 'crisis', `${resolution.bankrupt ? '💥 破產重整' : '💸 現金透支處理'}：${text}`, beforeResolveCash, beforeResolveFlow, beforeResolveWorth, { bankrupt: resolution.bankrupt, source: 'negative_cash' });
+      emitToRoom(gs.gameId, 'notification', { message: `${resolution.bankrupt ? '💥' : '💸'} ${player.name}：${text}` });
+      if (resolution.bankrupt) emitToRoom(gs.gameId, 'playerBankrupt', { playerId: player.id, playerName: player.name, steps: resolution.steps });
+    }
     queueSecondLifeCandidates(gs, player);
   }
   if (payouts.length > 0) {

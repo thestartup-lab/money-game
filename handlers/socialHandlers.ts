@@ -3,8 +3,9 @@ import type { Socket } from 'socket.io';
 import { randomBytes } from 'crypto';
 import { validatePlayerLoan } from '../playerLoans';
 import { AssetType } from '../gameDataModels';
-import { activateRelationship, buyArrangedMarriage } from '../gameLogic';
-import { RELATIONSHIP_MARRIAGE_THRESHOLD, HOST_ACTIVATION_DRS_BONUS, getLoanLimit } from '../gameConfig';
+import { activateRelationship, buyArrangedMarriage, getCurrentAge } from '../gameLogic';
+import { RELATIONSHIP_MARRIAGE_THRESHOLD, HOST_ACTIVATION_DRS_BONUS, getLoanLimit, HP_ACTIVITY_THRESHOLDS, LIFE_EVENT_WINDOWS, MATCHMAKING_COST, MATCHMAKING_DRS_MIN, MATCHMAKING_DRS_MAX, MATCHMAKING_DRS_PEAK_MAX } from '../gameConfig';
+import { liquidValue } from '../liquidity';
 import { adviceBlockReason, adviceCard, giveAdvice, mentorBlockReason, mentorPlayer } from '../lateLife';
 import { GamePhase } from '../gameDataModels';
 import {
@@ -30,6 +31,38 @@ export function registerSocialHandlers(socket: Socket, onSafe: OnSafe): void {
     logPlayerEvent(mentor, gs, 'mentor', `指導後輩 ${target.name}（傳承 +5、體驗 +5）`, mCB, mFB, mNW, { targetName: target.name, role: 'mentor' });
     logPlayerEvent(target, gs, 'mentor', `接受 ${mentor.name} 的指導（專長 +10）`, tCB, tFB, tNW, { mentorName: mentor.name, role: 'mentee' });
     emitToRoom(gs.gameId, 'mentorshipGiven', { mentorId: mentor.id, mentorName: mentor.name, targetId: target.id, targetName: target.name, message });
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
+  // ----------------------------------------------------------
+  // 主動相親（seekMarriage）：行動時間內，每輪一次；關係經營值達門檻就在下一個空檔開求婚舞台
+  // ----------------------------------------------------------
+  onSafe('seekMarriage', () => {
+    const gs = getRoomState(socket);
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    const player = gs.players.get(playerIdentity(socket));
+    if (!player?.isAlive) { emitClient(socket, 'error', { message: '玩家不存在或已出局。' }); return; }
+    if (player.isMarried) { emitClient(socket, 'error', { message: '已婚，不需要相親。' }); return; }
+    if (player.isBedridden || player.stats.health < HP_ACTIVITY_THRESHOLDS.socialEvent) {
+      emitClient(socket, 'error', { message: `健康值需要 ${HP_ACTIVITY_THRESHOLDS.socialEvent} 以上才能相親。` }); return;
+    }
+    if (player.lastMatchmakingRound === gs.turnNumber) { emitClient(socket, 'error', { message: '這一輪已經相親過了，下一輪再來。' }); return; }
+    if (player.cash < MATCHMAKING_COST) { emitClient(socket, 'error', { message: `相親需要 $${MATCHMAKING_COST.toLocaleString()}（介紹費、見面、交通）。` }); return; }
+    const cashBefore = player.cash; const flowBefore = player.monthlyCashflow; const worthBefore = calcNetWorth(player);
+    player.cash -= MATCHMAKING_COST;
+    player.lastMatchmakingRound = gs.turnNumber;
+    player.relationshipActive = true;
+    const age = Math.round(getCurrentAge(gs));
+    const inPeak = age >= LIFE_EVENT_WINDOWS.marriage.peakStart && age <= LIFE_EVENT_WINDOWS.marriage.peakEnd;
+    const max = inPeak ? MATCHMAKING_DRS_PEAK_MAX : MATCHMAKING_DRS_MAX;
+    const gained = MATCHMAKING_DRS_MIN + Math.floor(Math.random() * (max - MATCHMAKING_DRS_MIN + 1));
+    player.relationshipPoints += gained;
+    const reached = player.relationshipPoints >= RELATIONSHIP_MARRIAGE_THRESHOLD;
+    if (reached) player.marriageProposalPending = true;
+    logPlayerEvent(player, gs, 'relationship', `主動相親：關係經營值 +${gained}（${player.relationshipPoints}/${RELATIONSHIP_MARRIAGE_THRESHOLD}）`, cashBefore, flowBefore, worthBefore, { source: 'matchmaking', gained });
+    emitClient(socket, 'matchmakingResult', { gained, relationshipPoints: player.relationshipPoints, threshold: RELATIONSHIP_MARRIAGE_THRESHOLD, reached });
+    emitToRoom(gs.gameId, 'cellEventBroadcast', { playerId: player.id, playerName: player.name, cellName: '主動相親',
+      message: `💞 ${player.name} 主動相親，關係經營值 +${gained}（${player.relationshipPoints}/${RELATIONSHIP_MARRIAGE_THRESHOLD}）${reached ? '，下一個空檔由本人決定要不要結婚！' : ''}`, ts: Date.now() });
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 
@@ -382,7 +415,8 @@ export function registerSocialHandlers(socket: Socket, onSafe: OnSafe): void {
     const auction = gs.activeAuctions[payload.auctionId];
     if (!auction) { emitClient(socket, 'error', { message: '競標已結束或不存在。' }); return; }
     if (auction.triggeredBy === bidder.id) { emitClient(socket, 'error', { message: '這是你放棄的交易，不能自己出價。' }); return; }
-    if (bidder.cash < payload.bidAmount) { emitClient(socket, 'error', { message: `現金不足（目前 $${bidder.cash.toLocaleString()}）。` }); return; }
+    // 可以用債券／基金／股票補足；得標時系統會依序賣出
+    if (bidder.cash + liquidValue(bidder) < payload.bidAmount) { emitClient(socket, 'error', { message: `現金加上可賣的債券、基金、股票都不夠（目前現金 $${bidder.cash.toLocaleString()}，流動資產約 $${liquidValue(bidder).toLocaleString()}）。` }); return; }
     if (payload.bidAmount < (auction.minBid ?? 0)) { emitClient(socket, 'error', { message: `出價不得低於起標金額 $${(auction.minBid ?? 0).toLocaleString()}。` }); return; }
     if (payload.bidAmount <= (auction.highestBid ?? 0)) { emitClient(socket, 'error', { message: '出價需高於目前最高標。' }); return; }
 

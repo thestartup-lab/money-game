@@ -25,6 +25,7 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
     networkInvest: false,
   });
   const [dcaAmount, setDcaAmount] = useState(0);
+  const [dcaCustom, setDcaCustom] = useState('');
   const [bondAmount, setBondAmount] = useState(0);
   const info = data.actionInfo;
   const activationFee = (type: 'medical' | 'life' | 'property') => info?.insurance[type].activationFee ?? 0;
@@ -269,9 +270,16 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
                 >${amt >= 1000 ? `${(amt / 1000).toFixed(0)}k` : amt}</button>
               ))}
             </div>
+            <div className="mt-2 flex gap-2">
+              <input type="number" inputMode="numeric" min={1000} step={1000} value={dcaCustom} onChange={(e) => setDcaCustom(e.target.value)}
+                placeholder="自訂金額，例如 50000" className="flex-1 rounded-lg bg-gray-700 border border-gray-600 text-white text-xs px-2 py-1.5" />
+              <button className="rounded-lg bg-blue-700 px-3 text-xs font-bold text-white disabled:bg-gray-800 disabled:text-gray-500"
+                disabled={!(Number(dcaCustom) >= 1000 && Number(dcaCustom) <= remaining + dcaAmount)}
+                onClick={() => setDcaAmount(Math.round(Number(dcaCustom)))}>用這個金額</button>
+            </div>
             {dcaAmount > 0 && (
               <p className="mt-2 text-[11px] leading-snug text-emerald-300">
-                價值：投入 ${dcaAmount.toLocaleString()} → 每月股息約 +${Math.round(dcaAmount * (data.actionInfo?.dca.monthlyDividendRate ?? 0.003)).toLocaleString()}（被動收入）、市值每月約 +${Math.round(dcaAmount * (data.actionInfo?.dca.monthlyReturnRate ?? 0.006)).toLocaleString()}；{data.settlementMonths ?? 24} 個月後市值約 ${Math.round(dcaAmount * Math.pow(1 + (data.actionInfo?.dca.monthlyReturnRate ?? 0.006), data.settlementMonths ?? 24)).toLocaleString()}。受股市行情卡影響。
+                價值：投入 ${dcaAmount.toLocaleString()} → 每月股息約 +${Math.round(dcaAmount * (data.actionInfo?.dca.monthlyDividendRate ?? 0.003)).toLocaleString()}（被動收入）、市值每月約 +${Math.round(dcaAmount * (data.actionInfo?.dca.monthlyReturnRate ?? 0.006)).toLocaleString()}；一輪（4 年）後市值約 ${Math.round(dcaAmount * Math.pow(1 + (data.actionInfo?.dca.monthlyReturnRate ?? 0.006), 48)).toLocaleString()}。受股市行情卡影響。
               </p>
             )}
           </div>

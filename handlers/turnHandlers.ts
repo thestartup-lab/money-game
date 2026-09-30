@@ -107,6 +107,8 @@ export function registerTurnHandlers(socket: Socket, onSafe: OnSafe): void {
       // 未指定時預設使用兩顆骰子，加快棋盤推進；玩家仍可主動選一顆精準移動。
       const baseDice = payload?.diceCount ?? 2;
       const diceCount = Math.min(3, baseDice + player.bonusDice) as 1 | 2 | 3;
+      // 慈善捐款的獎勵：下一次擲骰多一顆（畫面要說明第三顆骰子從哪來）
+      const charityBonusDice = diceCount - baseDice;
       player.bonusDice = 0;
 
       // ⚠ 修正：以前 actualDiceCount = diceCount > 2 ? 2 : diceCount，
@@ -131,6 +133,7 @@ export function registerTurnHandlers(socket: Socket, onSafe: OnSafe): void {
       );
 
       emitClient(socket, 'rollResult', {
+        charityBonusDice,
         diceCount,
         rolled,
         newPosition: newPos,
@@ -141,6 +144,7 @@ export function registerTurnHandlers(socket: Socket, onSafe: OnSafe): void {
       // 廣播給整個房間（含 DisplayScreen），讓大螢幕播放骰子動畫
       const playerColorIndex = gs.playerOrder.indexOf(player.id);
       emitToRoom(roomId, 'playerRolled', {
+        charityBonusDice,
         playerId: player.id,
         playerName: player.name,
         colorIndex: (playerColorIndex >= 0 ? playerColorIndex : 0) % 6,

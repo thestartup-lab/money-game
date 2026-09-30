@@ -6,6 +6,7 @@ import DiceRoller from '../components/game/DiceRoller';
 import ActionPanel from '../components/game/ActionPanel';
 import CareerStagePanel from '../components/game/CareerStagePanel';
 import RetirementStagePanel from '../components/game/RetirementStagePanel';
+import MarriageChoicePanel from '../components/game/MarriageChoicePanel';
 import AnalysisPage from './AnalysisPage';
 import EventCard from '../components/game/EventCard';
 import PaydayPlanForm from '../components/game/PaydayPlanForm';
@@ -289,8 +290,9 @@ export default function PlayerPage() {
       setPre20Step('done');
     });
 
-    s.on('rollResult', (p: { rolled: number; newPosition: number }) => {
+    s.on('rollResult', (p: { rolled: number; newPosition: number; charityBonusDice?: number }) => {
       setLastRoll(p);
+      if ((p.charityBonusDice ?? 0) > 0) addNotification(`❤️ 慈善捐款的獎勵：這次多擲 ${p.charityBonusDice} 顆骰子，一共 ${p.rolled} 點`);
       setRollingLocked(false);
     });
     // 伺服器的全場通知（升降息、輪次修正、全自動主持的預設選擇…）
@@ -303,6 +305,10 @@ export default function PlayerPage() {
       if (p.targetId === playerIdRef.current) addNotification(`👴 家族顧問 ${p.advisorName} 對你說：${p.emoji} ${p.text}`);
     });
     s.on('adviceSent', (p: { targetName: string }) => addNotification(`✉️ 已把建議送給 ${p.targetName}`));
+    s.on('matchmakingResult', (p: { gained: number; relationshipPoints: number; threshold: number; reached: boolean }) => {
+      addNotification(`💞 相親：關係經營值 +${p.gained}（${p.relationshipPoints}/${p.threshold}）${p.reached ? '，下一個空檔會問你要不要結婚' : ''}`);
+    });
+    s.on('marriageThresholdReached', () => addNotification('💞 關係經營值已達門檻，下一個空檔會問你要不要結婚'));
     s.on('paydayPlanningRequired', (p: PaydayFormData) => {
       setPaydayForm(p);
       addNotification('🗓️ 人生規劃時間！請規劃接下來幾輪的投資、保險與生活方式');
@@ -517,16 +523,19 @@ export default function PlayerPage() {
       setActiveEvent({ kind: 'crisis_rescue', title: p.card.title, description: p.card.description, effectiveCost: p.effectiveCost, shortfall: p.shortfall, cash: p.cash });
       addNotification(`🆘 「${p.card.title}」需要 $${fmt(p.effectiveCost)}，現金差 $${fmt(p.shortfall)}。請在「行動」賣資產或借款自救。`);
     });
-    s.on('crisisNTSkipAvailable', (p: { card: { title: string; description: string; baseCost: number }; network?: number; timeoutMs: number }) => {
-      setActiveEvent({ kind: 'crisis_nt_skip', title: p.card.title, description: p.card.description, baseCost: p.card.baseCost, network: p.network ?? myNetworkRef.current, timeoutMs: p.timeoutMs });
+    s.on('crisisNTSkipAvailable', (p: { card: { title: string; description: string; baseCost: number }; network?: number; timeoutMs: number; preview?: { effectiveCost: number; turnsLost: number; deathRisk: boolean; insurable: boolean; insuredCost: number; cash: number } }) => {
+      setActiveEvent({ kind: 'crisis_nt_skip', title: p.card.title, description: p.card.description, baseCost: p.card.baseCost, network: p.network ?? myNetworkRef.current, timeoutMs: p.timeoutMs, preview: p.preview });
     });
-    s.on('dealCardsDrawn', (p: { cards: Array<{ id: string; name: string; description?: string; downPayment: number; monthlyCashflow: number; scale?: number }>; playerCash: number; creditScore?: number; loanAvailable?: number }) => {
+    s.on('dealCardsDrawn', (p: { cards: Array<{ id: string; name: string; description?: string; downPayment: number; monthlyCashflow: number; scale?: number }>; playerCash: number; creditScore?: number; loanAvailable?: number; loanLimit?: number; liquidValue?: number; bonusDeal?: boolean }) => {
       setActiveEvent({
         kind: 'deal_pick',
         cards: p.cards,
         playerCash: p.playerCash ?? 0,
         creditScore: p.creditScore,
         loanAvailable: p.loanAvailable,
+        loanLimit: p.loanLimit,
+        liquidValue: p.liquidValue,
+        bonusDeal: p.bonusDeal,
       });
     });
     s.on('charityCardPending', (p: { amount: number }) => {
@@ -1141,6 +1150,11 @@ export default function PlayerPage() {
               }}>出價</button>
               <button className="btn-secondary text-sm" onClick={() => setActiveAuction(null)}>略過</button>
             </div>
+            {(() => {
+              const liquid = (myPlayer?.assets ?? []).filter((a) => !a.linkedLiabilityId && (a.id === 'bond-fund' || a.id === 'stock-dca' || a.type === 'Stock'))
+                .reduce((sum, a) => sum + (a.currentValue ?? 0), 0);
+              return liquid > 0 ? <p className="text-[11px] text-teal-300">可以出價到現金 + 債券／基金／股票約 ${(( myPlayer?.cash ?? 0) + liquid).toLocaleString()}；得標時系統會先賣這些資產補足。</p> : null;
+            })()}
           </div>
         )}
 
@@ -1319,6 +1333,7 @@ export default function PlayerPage() {
 
           {!isGameOver && myPlayer ? <RetirementStagePanel gameState={gameState} player={myPlayer} emit={emit} /> : null}
           {!isGameOver && myPlayer ? <CareerStagePanel gameState={gameState} player={myPlayer} emit={emit} /> : null}
+          {!isGameOver && myPlayer ? <MarriageChoicePanel gameState={gameState} player={myPlayer} emit={emit} /> : null}
 
           {/* 事件卡（有事件時取代格子顯示，或加在下面） */}
           {activeEvent && gameState.decisionPhase?.kind !== 'reading' && (
@@ -1472,7 +1487,8 @@ export default function PlayerPage() {
                 onInvestBond={(amt) => emit('investBond', { amount: amt })}
                 onLoanOffer={(targetId, amount, monthlyRate) => emit('loanOffer', { targetPlayerId: targetId, amount, monthlyRate })}
                 onLoanRequest={(targetId, amount, monthlyRate) => emit('loanRequest', { targetPlayerId: targetId, amount, monthlyRate })}
-                onSellAsset={(assetId) => emit('sellAsset', { assetId })}
+                onSellAsset={(assetId, fraction) => emit('sellAsset', fraction ? { assetId, fraction } : { assetId })}
+                onSeekMarriage={() => emit('seekMarriage')}
                 onBuyHome={(optionId) => emit('buyHome', { optionId })}
                 onShowDetail={(mode) => setMoneyDetail(mode)}
                 onRequestAnalysis={() => { emit('requestPlayerAnalysis'); }}

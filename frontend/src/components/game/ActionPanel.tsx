@@ -26,7 +26,8 @@ interface Props {
   onInvestBond?: (amount: number) => void;
   onLoanOffer: (targetId: string, amount: number, monthlyRate: number) => void;
   onLoanRequest: (targetId: string, amount: number, monthlyRate: number) => void;
-  onSellAsset: (assetId: string) => void;
+  onSellAsset: (assetId: string, fraction?: number) => void;
+  onSeekMarriage?: () => void;
   onBuyHome?: (optionId: string) => void;
   onShowDetail?: (mode: MoneyDetailMode) => void;
   onRequestAnalysis: () => void;
@@ -49,6 +50,7 @@ export default function ActionPanel({
   onLoanOffer,
   onLoanRequest,
   onSellAsset,
+  onSeekMarriage,
   onBuyHome,
   onShowDetail,
   onRequestAnalysis,
@@ -74,6 +76,9 @@ export default function ActionPanel({
   const [sellConfirmId, setSellConfirmId] = useState<string | null>(null);
   // 點選任何行動先顯示「效果與價值」，確認後才執行
   const [travelPreview, setTravelPreview] = useState<string | null>(null);
+  const [matchPreview, setMatchPreview] = useState(false);
+  const [dcaCustom, setDcaCustom] = useState('');
+  const [sellFraction, setSellFraction] = useState(1);
   const [socialPreview, setSocialPreview] = useState(false);
   const [repayPreview, setRepayPreview] = useState<{ loanId: string; amount: number } | null>(null);
   const [dcaPreview, setDcaPreview] = useState<number | null>(null);
@@ -224,13 +229,23 @@ export default function ActionPanel({
                 })}
               </div>
             </div>
+          ) : matchPreview && info?.matchmaking ? (
+            <EffectPreview title="💞 主動相親：效果與價值" rows={[
+              { label: '費用', value: `-$${fmt(info.matchmaking.cost)}`, tone: 'bad' },
+              { label: '深度關係 DRS', value: `+${info.matchmaking.drsMin}～${info.matchmaking.drsMax}`, tone: 'good' },
+              { label: '目前 DRS', value: `${info.social.currentDrs}／${info.social.threshold} 可結婚`, tone: 'neutral' },
+              { label: '剩餘現金', value: `$${fmt(player.cash - info.matchmaking.cost)}`, tone: 'neutral' },
+            ]} notes={['比聯誼貴，但關係經營值加得多；每輪一次', '達到門檻後，下一個空檔會開求婚舞台，要不要結婚由你決定', '結婚後有配偶收入，也多一份家庭支出與婚禮費用']}
+              confirmLabel="確認相親" onCancel={() => setMatchPreview(false)} disabled={player.cash < info.matchmaking.cost || info.matchmaking.usedThisRound}
+              disabledReason={info.matchmaking.usedThisRound ? '這一輪已經相親過' : '現金不足'}
+              onConfirm={() => { onSeekMarriage?.(); setMatchPreview(false); }} />
           ) : socialPreview && info ? (
             <EffectPreview title="💑 參加聯誼：效果與價值" rows={[
               { label: '費用', value: `-$${fmt(info.social.cost)}`, tone: 'bad' },
               { label: '深度關係 DRS', value: `+${info.social.drsMin}～${info.social.drsMax}${info.social.inPeak ? '（黃金期）' : ''}`, tone: 'good' },
               { label: '目前 DRS', value: `${info.social.currentDrs}／${info.social.threshold} 可提親`, tone: 'neutral' },
               { label: '剩餘現金', value: `$${fmt(player.cash - info.social.cost)}`, tone: 'neutral' },
-            ]} notes={[tokenNote, info.social.active ? '關係路徑已啟動，累積到門檻後由主持人開啟婚姻舞台' : '第一次聯誼會啟動關係路徑', `婚姻黃金期 ${info.social.peakStart}–${info.social.peakEnd} 歲加成較高；DRS ≥ 50 完成人生指標「關係」`, '結婚後有配偶收入與婚姻加成']}
+            ]} notes={[tokenNote, info.social.active ? '關係路徑已啟動；達到門檻後，下一個空檔會開求婚舞台，由你在手機決定答不答應' : '第一次聯誼會啟動關係路徑', `婚姻黃金期 ${info.social.peakStart}–${info.social.peakEnd} 歲加成較高；DRS ≥ 50 完成人生指標「關係」`, '結婚後有配偶收入，也多一份家庭支出']}
               confirmLabel="確認參加" onCancel={() => setSocialPreview(false)} disabled={player.cash < info.social.cost} disabledReason="現金不足"
               onConfirm={() => { onSocialEvent(); setSocialPreview(false); }} />
           ) : (
@@ -257,6 +272,15 @@ export default function ActionPanel({
                 </button>
                 {socialReason && <p className="text-[11px] leading-snug text-orange-300">{socialReason}</p>}
               </div>
+              {!player.isMarried && onSeekMarriage && info?.matchmaking && (
+                <div className="col-span-2 space-y-1">
+                  <button className="btn-secondary text-sm w-full" disabled={socialDisabled || info.matchmaking.usedThisRound}
+                    onClick={() => setMatchPreview(true)}>
+                    💞 主動相親（想結婚就主動出擊）
+                  </button>
+                  {info.matchmaking.usedThisRound && <p className="text-[11px] text-gray-400">這一輪已經相親過了。</p>}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -492,7 +516,7 @@ export default function ActionPanel({
               { label: '投入', value: `-$${fmt(amt)}`, tone: 'bad' },
               { label: '每月現金股息', value: `+$${fmt(Math.round(amt * dv))}/月（被動收入）`, tone: 'good' },
               { label: '每月市值增值', value: `約 +$${fmt(Math.round(amt * r))}（${(r * 100).toFixed(1)}%）`, tone: 'good' },
-              { label: '24 個月後市值', value: `約 $${fmt(Math.round(amt * Math.pow(1 + r, 24)))}`, tone: 'good' },
+              { label: '一輪（4 年）後市值', value: `約 $${fmt(Math.round(amt * Math.pow(1 + r, 48)))}`, tone: 'good' },
               { label: '年化報酬', value: `約 ${info?.dca.annualized ?? 11}%`, tone: 'neutral' },
               { label: '持倉後合計', value: `$${fmt(Math.round(dcaPortfolioValue + amt))}`, tone: 'neutral' },
               { label: '剩餘現金', value: `$${fmt(player.cash - amt)}`, tone: 'neutral' },
@@ -525,6 +549,13 @@ export default function ActionPanel({
                     </button>
                   );
                 })}
+              </div>
+              <div className="flex gap-2">
+                <input type="number" inputMode="numeric" min={1000} step={1000} value={dcaCustom} onChange={(e) => setDcaCustom(e.target.value)}
+                  placeholder="自訂金額，例如 50000" className="flex-1 rounded-lg bg-gray-700 border border-gray-600 text-white text-sm px-2 py-1.5" />
+                <button className="rounded-lg bg-blue-800 px-3 text-sm font-bold text-white disabled:bg-gray-800 disabled:text-gray-500"
+                  disabled={!(Number(dcaCustom) >= 1000 && Number(dcaCustom) <= player.cash)}
+                  onClick={() => setDcaPreview(Math.round(Number(dcaCustom)))}>自訂</button>
               </div>
               <button className="text-xs text-gray-400 underline" onClick={() => setShowDCAPanel(false)}>取消</button>
             </div>
@@ -860,25 +891,40 @@ export default function ActionPanel({
                     )}
                   </div>
                   {isSellConfirming ? (() => {
-                    const value = asset.currentValue ?? asset.cost;
+                    const partialOk = !asset.linkedLiabilityId && (asset.id === 'bond-fund' || asset.id === 'stock-dca' || asset.type === 'Stock');
+                    const fraction = partialOk ? sellFraction : 1;
+                    const fullValue = asset.currentValue ?? asset.cost;
+                    const value = Math.round(fullValue * fraction);
                     const debt = asset.linkedLiabilityId ? (player.liabilities?.find((l) => l.id === asset.linkedLiabilityId)?.totalDebt ?? 0) : 0;
                     const isHome = asset.id.startsWith('home-');
                     const fee = isHome ? Math.round(value * (info?.homeTransactionCostRate ?? 0.03)) : 0;
-                    const tax = isHome ? 0 : Math.round(Math.max(0, value - asset.cost) * (info?.capitalGainsTaxRate ?? 0.2));
+                    const tax = isHome ? 0 : Math.round(Math.max(0, value - asset.cost * fraction) * (info?.capitalGainsTaxRate ?? 0.2));
                     const net = value - debt - fee - tax;
                     return (
-                      <EffectPreview title={`賣出 ${asset.name}：效果與價值`} rows={[
+                      <>
+                      {partialOk && (
+                        <div className="my-1 flex gap-1">
+                          {[0.25, 0.5, 0.75, 1].map((f) => (
+                            <button key={f} onClick={() => setSellFraction(f)}
+                              className={`flex-1 rounded-lg py-1 text-xs font-bold ${sellFraction === f ? 'bg-red-700 text-white' : 'bg-gray-800 text-gray-300'}`}>
+                              {f === 1 ? '全部' : `${f * 100}%`}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <EffectPreview title={`賣出 ${asset.name}${fraction < 1 ? ` ${fraction * 100}%` : ''}：效果與價值`} rows={[
                         { label: '市價', value: `+$${fmt(value)}`, tone: 'good' },
                         ...(debt ? [{ label: '清償連結負債', value: `-$${fmt(debt)}`, tone: 'bad' as const }] : []),
                         ...(fee ? [{ label: '交易稅費 3%', value: `-$${fmt(fee)}`, tone: 'bad' as const }] : []),
-                        ...(isHome ? [] : [{ label: `資本利得稅（獲利 $${fmt(Math.max(0, value - asset.cost))} × 20%）`, value: `-$${fmt(tax)}`, tone: (tax ? 'bad' : 'neutral') as 'bad' | 'neutral' }]),
+                        ...(isHome ? [] : [{ label: `資本利得稅（獲利 $${fmt(Math.max(0, value - asset.cost * fraction))} × 20%）`, value: `-$${fmt(tax)}`, tone: (tax ? 'bad' : 'neutral') as 'bad' | 'neutral' }]),
                         { label: '淨入帳', value: `${net >= 0 ? '+' : '-'}$${fmt(Math.abs(net))}`, tone: net >= 0 ? 'good' : 'bad' },
-                        ...(asset.monthlyCashflow ? [{ label: '失去月現金流', value: `${asset.monthlyCashflow > 0 ? '-' : '+'}$${fmt(Math.abs(asset.monthlyCashflow))}/月`, tone: (asset.monthlyCashflow > 0 ? 'bad' : 'good') as 'bad' | 'good' }] : []),
+                        ...(asset.monthlyCashflow ? [{ label: '失去月現金流', value: `${asset.monthlyCashflow > 0 ? '-' : '+'}$${fmt(Math.abs(Math.round(asset.monthlyCashflow * fraction)))}/月`, tone: (asset.monthlyCashflow > 0 ? 'bad' : 'good') as 'bad' | 'good' }] : []),
                         ...(isHome ? [{ label: '之後房租', value: `-$${fmt(player.profession ? Math.round((player.expenses.rent || 0) || 0) : 0)}/月起（回到租屋）`, tone: 'bad' as const }] : []),
                         { label: '賣出後現金', value: `$${fmt(player.cash + net)}`, tone: 'neutral' },
                       ]} notes={[isHome ? '自住房免資本利得稅；賣掉後房租依職業設定並隨物價上漲' : '成本 $' + fmt(asset.cost) + '；賣出後就沒有這筆被動收入', '賣出不影響信用分；危機自救時可用來補足費用']}
-                        confirmLabel="確認賣出" onCancel={() => setSellConfirmId(null)}
-                        onConfirm={() => { onSellAsset(asset.id); setSellConfirmId(null); }} />
+                        confirmLabel="確認賣出" onCancel={() => { setSellConfirmId(null); setSellFraction(1); }}
+                        onConfirm={() => { onSellAsset(asset.id, fraction < 1 ? fraction : undefined); setSellConfirmId(null); setSellFraction(1); }} />
+                      </>
                     );
                   })() : (
                     <button

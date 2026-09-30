@@ -69,8 +69,18 @@ export default function EventCard({ event, onDecision, onDismiss, reminderEndsAt
           </div>
           <p className="text-sm font-semibold text-white">{event.title}</p>
           <p className="text-sm text-gray-300">{event.description}</p>
-          <p className="text-sm text-red-300">未保險費用：<span className="font-bold">${event.baseCost.toLocaleString()}</span></p>
-          <p className="text-sm text-blue-300">人脈值：<span className="font-bold">{event.network}</span>（≥3 可跳過）</p>
+          {event.preview ? (
+            <div className="rounded-lg bg-gray-800 p-2 text-sm">
+              <p className="text-red-300">不用人脈：付 <span className="font-bold">${event.preview.effectiveCost.toLocaleString()}</span>{event.preview.turnsLost > 0 ? `、停 ${event.preview.turnsLost} 回合` : ''}{event.preview.deathRisk ? '（現金不夠，可能有生命危險）' : ''}</p>
+              <p className="text-blue-300">用人脈護盾：完全免除，但<span className="font-bold">整場只能用一次</span>（人脈值 {event.network}）</p>
+              {event.preview.insurable && <p className="mt-1 text-xs text-gray-400">你沒有這類保險；有保險的話只要付 ${event.preview.insuredCost.toLocaleString()}，也不會問你要不要用人脈。</p>}
+            </div>
+          ) : (
+            <>
+              <p className="text-sm text-red-300">未保險費用：<span className="font-bold">${event.baseCost.toLocaleString()}</span></p>
+              <p className="text-sm text-blue-300">人脈值：<span className="font-bold">{event.network}</span>（≥3 可跳過，整場一次）</p>
+            </>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <button
               className="py-2 rounded-xl text-sm bg-blue-700 hover:bg-blue-600 text-white"
@@ -145,7 +155,8 @@ export default function EventCard({ event, onDecision, onDismiss, reminderEndsAt
                 const shortfall = Math.max(0, dp - event.playerCash);
                 // 即使現金夠，若可借款也允許選擇（主動槓桿）
                 const canAffordLeverage = dp > 0 && shortfall <= loanAvailable;
-                const selectable = canAffordCash || canAffordLeverage;
+                const canAffordLiquid = shortfall > 0 && shortfall <= (event.liquidValue ?? 0);
+                const selectable = canAffordCash || canAffordLeverage || canAffordLiquid;
                 const remaining = event.playerCash - dp;
                 return (
                   <button
@@ -165,7 +176,8 @@ export default function EventCard({ event, onDecision, onDismiss, reminderEndsAt
                     <div className="flex items-center justify-between">
                       <span className="font-semibold text-white">{card.name}</span>
                       {!canAffordCash && canAffordLeverage && <span className="text-[10px] text-emerald-400">可槓桿購買</span>}
-                      {!canAffordCash && !canAffordLeverage && <span className="text-xs text-red-400">超出借款上限</span>}
+                      {!canAffordCash && !canAffordLeverage && canAffordLiquid && <span className="text-[10px] text-teal-300">可賣債券／基金補足</span>}
+                      {!canAffordCash && !canAffordLeverage && !canAffordLiquid && <span className="text-xs text-red-400">現金、借款、流動資產都不夠</span>}
                     </div>
                     {card.description && <div className="text-gray-400 text-xs mb-1">{card.description}</div>}
                     <div className="text-gray-300 text-xs">
@@ -189,6 +201,13 @@ export default function EventCard({ event, onDecision, onDismiss, reminderEndsAt
                 );
               })}
             </div>
+            {/* 現金不夠：可以先賣債券、基金、股票補足（系統依序部分賣出） */}
+            {selected && selectedShortfall > 0 && selectedShortfall <= (event.liquidValue ?? 0) && (
+              <button
+                className="w-full py-2 rounded-xl text-sm bg-teal-700 hover:bg-teal-600 text-white"
+                onClick={() => onDecision({ accepted: true, selectedCardId, useLiquid: true })}
+              >💱 賣債券／基金／股票補足 ${selectedShortfall.toLocaleString()} 後買下</button>
+            )}
             <div className="grid grid-cols-3 gap-2">
               <button
                 className={`col-span-1 py-2 rounded-xl text-sm ${selectedCardId && event.playerCash >= selectedDownPayment ? 'bg-green-700 hover:bg-green-600 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}
@@ -207,6 +226,16 @@ export default function EventCard({ event, onDecision, onDismiss, reminderEndsAt
                 onClick={() => onDecision({ accepted: false })}
               >拒絕</button>
             </div>
+            {selected && !canUseLeverageForSelected && (
+              <p className="text-[11px] text-gray-400">
+                {event.bonusDeal ? '同學會帶來的小交易只能用現金買，不能槓桿。'
+                  : loanAvailable <= 0 ? `不能槓桿：信用額度已用完（信用分 ${creditScore} 的上限 $${(event.loanLimit ?? 0).toLocaleString()}，應急與槓桿借款都算在內）。先還一部分借款就能再借。`
+                  : `不能槓桿：還差 $${selectedShortfall.toLocaleString()}，超過可借的 $${loanAvailable.toLocaleString()}。`}
+              </p>
+            )}
+            {(event.liquidValue ?? 0) > 0 && (
+              <p className="text-[11px] text-teal-300">你的債券、基金、股票約值 ${(event.liquidValue ?? 0).toLocaleString()}，現金不夠時可以先賣來補頭期款。</p>
+            )}
           </>
         );
       })()}
@@ -216,7 +245,7 @@ export default function EventCard({ event, onDecision, onDismiss, reminderEndsAt
           <div className="text-pink-400 font-bold text-base">❤️ 慈善機會</div>
           <p className="text-sm text-gray-300">捐出現金流的 10%，獲得生命體驗與傳承加成</p>
           <p className="text-sm text-white">捐款金額：<span className="font-bold text-pink-300">${event.amount.toLocaleString()}</span></p>
-          <p className="text-xs text-gray-400">效益：生命體驗 +15、傳承分 +5</p>
+          <p className="text-xs text-gray-400">效益：生命體驗 +8、累計捐款計入傳承與夢想「慈善家」，下一次擲骰多一顆骰子（最多 3 顆，走得更遠）</p>
           <div className="grid grid-cols-2 gap-2">
             <button
               className="py-2 rounded-xl text-sm bg-pink-700 hover:bg-pink-600 text-white"

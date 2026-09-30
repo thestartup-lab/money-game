@@ -178,6 +178,21 @@ export function registerSceneHandlers(socket: Socket, onSafe: OnSafe): void {
   });
 
   // 全場共同抉擇：每位玩家在手機投票（可改票），大螢幕只公開票數
+  // 婚姻舞台：本人在手機決定答應或婉拒
+  onSafe('answerMarriage', (payload: { sceneId: string; accept: boolean }) => {
+    const gs = getRoomState(socket);
+    const scene = gs?.facilitatorScene;
+    const context = gs?.facilitatorSceneContext;
+    if (!gs || !scene || !context || scene.kind !== 'marriage' || scene.id !== payload.sceneId || scene.stage !== 'prompt' || scene.careerPlayerId !== playerIdentity(socket)) {
+      emitClient(socket, 'error', { message: '只有這次婚姻的當事人可以回答。' }); return;
+    }
+    const answer = payload.accept === true ? 'accept' : 'decline';
+    context.marriageAnswer = answer;
+    scene.careerConfirmed = true;
+    scene.options = [{ id: 'reveal', label: `本人已選：${answer === 'accept' ? '答應' : '婉拒'}・揭曉`, description: '照本人的選擇揭曉結果。' }];
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
   onSafe('voteCommunityChoice', (payload: { sceneId: string; optionId: string }) => {
     const gs = getRoomState(socket);
     if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
@@ -445,6 +460,13 @@ export function resolveFacilitatorSceneChoice(gs: GameState, sceneId: string | u
     const player = gs.players.get(String(context.playerId ?? ''));
     if (!player?.isAlive || player.isMarried) {
       fail('這次婚姻事件已失效。');
+      return;
+    }
+    // 結不結婚由本人在手機決定；本人已選就照本人的選擇揭曉。主持人只能在本人沒回應時代為婉拒（或本人離線時代答）。
+    const answer = context.marriageAnswer as 'accept' | 'decline' | undefined;
+    if (answer) choiceId = answer;
+    else if (choiceId === 'accept' && !player.isDisconnected) {
+      fail(`要不要結婚由 ${player.name} 在手機決定；請等對方選擇，或按「婉拒」跳過。`);
       return;
     }
     if (choiceId === 'decline') {

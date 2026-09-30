@@ -16,7 +16,7 @@ export function registerFinanceHandlers(socket: Socket, onSafe: OnSafe): void {
   // ----------------------------------------------------------
   // 出售資產 (sellAsset)
   // ----------------------------------------------------------
-  onSafe('sellAsset', (payload: { assetId: string }) => {
+  onSafe('sellAsset', (payload: { assetId: string; fraction?: number }) => {
     const gs = getRoomState(socket);
     if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
 
@@ -27,7 +27,10 @@ export function registerFinanceHandlers(socket: Socket, onSafe: OnSafe): void {
     }
 
     const _saCB = player.cash; const _saFB = player.monthlyCashflow; const _saNWB = calcNetWorth(player);
-    const result = sellAsset(player, payload.assetId);
+    // 股票、定期定額、債券可以只賣一部分（fraction 0–1）；其他資產整筆出售
+    const fraction = payload.fraction === undefined ? 1 : Number(payload.fraction);
+    if (!Number.isFinite(fraction) || fraction <= 0 || fraction > 1) { emitClient(socket, 'error', { message: '賣出比例要介於 0 到 100%。' }); return; }
+    const result = sellAsset(player, payload.assetId, fraction);
     if (!result.success) {
       emitClient(socket, 'error', { message: result.message });
       return;

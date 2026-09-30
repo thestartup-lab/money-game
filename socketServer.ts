@@ -159,7 +159,7 @@ import { registerSceneHandlers } from './handlers/sceneHandlers';
 import { registerReviewHandlers } from './handlers/reviewHandlers';
 import { handleLandingSquare } from './landingSquare';
 import { serializeGameState, serializePlayer, buildSecondLifeProgress, buildActionInfo, buildSalaryItems, buildNetWorthBreakdown, buildAffordableOptions, buildAvailableProfessions, careerBlockReason } from './playerView';
-import { clampFacilitatorStat, adjustFacilitatorHealth, spendAvailableCash, beginFacilitatorScene, revealFacilitatorResult, pickMarriageCard, buildMarriageScene, startMarriageScene, transitionFamilySceneToMarriage, startFamilyScene, applyMarriageScene, resolveFamilyScene, closeFacilitatorScene, applyCommunityChoice, applyCooperationContract, findDecisionEcho, applyDecisionEcho, applyLegacyAction, startCommunityChoice, recordCommunityVote, majorityCommunityChoice, describeCommunityVotes, tryOpenScheduledCommunityChoice } from './facilitatorScenes';
+import { tryOpenMarriageProposal, clampFacilitatorStat, adjustFacilitatorHealth, spendAvailableCash, beginFacilitatorScene, revealFacilitatorResult, pickMarriageCard, buildMarriageScene, startMarriageScene, transitionFamilySceneToMarriage, startFamilyScene, applyMarriageScene, resolveFamilyScene, closeFacilitatorScene, applyCommunityChoice, applyCooperationContract, findDecisionEcho, applyDecisionEcho, applyLegacyAction, startCommunityChoice, recordCommunityVote, majorityCommunityChoice, describeCommunityVotes, tryOpenScheduledCommunityChoice } from './facilitatorScenes';
 import { emitQuarterMilestones, settleQuarterMonths, getActiveElapsedMs, roundsSinceLastPayday, paydaySettlementMonths, getPaydayElapsedMs, pausePaydayClock, resumePaydayClock, paydayRemainingMs, isPaydayDue, schedulePaydayIfDue, runGlobalPayday, settleRound, payCompletedRounds } from './paydayFlow';
 import { beginHostDecisionPhase, waitForHostControlledDecision, waitForHostRelease, describePrompt, waitForCardDecision, applyCrisisWithRescue, scaleFastTrackCrisis } from './decisionPhases';
 import { checkBucketGoals, checkLifeMilestones, buildSecondLifeReview, deathAgeLabel, eliminatePlayer, finishGame, startFinalRound, retirementSceneDescription, queueRetirementCandidates, tryOpenRetirementScene, queueSecondLifeCandidates, tryOpenSecondLife, revealSecondLife, promoteSecondLife, announceCareerUnlock } from './lifeProgress';
@@ -830,6 +830,8 @@ export function executeSocialAction(socket: Socket, gs: GameState, player: Playe
       relationshipPoints: result.newRelationshipPoints,
       threshold,
     });
+    // 達到門檻：下一個空檔自動開求婚舞台，由本人決定
+    player.marriageProposalPending = true;
   }
   emitToRoom(gs.gameId, 'cellEventBroadcast', {
     playerId: player.id,
@@ -1000,6 +1002,9 @@ export function continueAfterTurnAdvance(gs: GameState): void {
   queueRetirementCandidates(gs);
   if (tryOpenRetirementScene(gs)) return;
 
+  // 主動相親或聯誼達到關係門檻：開求婚舞台，由本人在手機決定
+  if (tryOpenMarriageProposal(gs)) return;
+
   // 每輪開始：全體行動時間（發薪、舞台、第二人生都處理完之後才開）
   if (gs.actionPhaseEnabled && gs.actionPhaseRound !== gs.turnNumber && !gs.turnInProgress && !gs.globalPaydayInProgress) {
     void runActionPhase(gs).catch((error) => console.error(`[actionPhase] 房間 ${gs.gameId}：`, error));
@@ -1110,7 +1115,7 @@ export function emitClient(socket: Socket, event: string, ...args: unknown[]) {
 export const financialActions = new Set(['sellAsset', 'buyInsurance', 'cancelInsurance',
   'takeEmergencyLoan', 'investStockDCA', 'investBond', 'buyHome', 'takeLeverageLoan', 'repayLoan', 'buyFranchise',
   'partnershipOffer', 'partnershipResponse', 'loanOffer', 'loanResponse', 'loanRequest', 'loanRequestResponse',
-  'goTravel', 'attendSocialEvent', 'mentorPlayer']);
+  'goTravel', 'attendSocialEvent', 'mentorPlayer', 'seekMarriage']);
 /** 可以做主動行動的時段：全體行動時間，或沒有任何決策、舞台、發薪的回合空檔（時段的總開關在連線中介層） */
 export function isActionWindowOpen(gs: GameState): boolean {
   if (gs.facilitatorScene) return false;

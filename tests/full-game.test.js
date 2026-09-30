@@ -84,7 +84,12 @@ test('整場回歸：玩到終局不卡住、計時發薪至少 5 次、有人�
       const i = ids.indexOf(scene.careerPlayerId);
       if (i >= 0) players[i].emit('chooseRetirement', { sceneId: scene.id, choice: ['retire', 'consultant', 'retire'][i] });
     }
-    if (scene?.stage === 'prompt' && (scene.kind !== 'retirement' || scene.careerConfirmed)) {
+    // 婚姻由當事人在手機回答（主持人不能代為答應）
+    if (scene?.kind === 'marriage' && scene.stage === 'prompt' && !scene.careerConfirmed) {
+      const i = ids.indexOf(scene.careerPlayerId);
+      if (i >= 0) players[i].emit('answerMarriage', { sceneId: scene.id, accept: true });
+    }
+    if (scene?.stage === 'prompt' && ((scene.kind !== 'retirement' && scene.kind !== 'marriage') || scene.careerConfirmed)) {
       const opt = (scene.options ?? [])[0];
       if (opt) setTimeout(() => admin.emit('resolveFacilitatorScene', { sceneId: scene.id, choiceId: opt.id }), 100);
     }

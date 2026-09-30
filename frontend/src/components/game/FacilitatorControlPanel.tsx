@@ -81,6 +81,7 @@ export default function FacilitatorControlPanel({ gameState, emit }: Props) {
         {scene.stage === 'prompt' ? (
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
             {(scene.kind === 'career' || scene.kind === 'retirement') && !scene.careerConfirmed ? <p className="text-base font-bold text-yellow-200">等待本人在手機{scene.kind === 'retirement' ? '選擇' : '確認'}，主持人不能代為決定。</p> : null}
+            {scene.kind === 'marriage' && !scene.careerConfirmed ? <p className="text-base font-bold text-yellow-200 sm:col-span-2">等待本人在手機決定答不答應；主持人不能代為答應，只能按「婉拒」跳過（本人離線時才可代答）。</p> : null}
             {scene.kind === 'community' ? (
               <button
                 className="min-h-14 rounded-xl border-2 border-cyan-300 bg-cyan-700 px-3 py-2 text-base font-black text-white hover:bg-cyan-600 sm:col-span-2"

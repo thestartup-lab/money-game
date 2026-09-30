@@ -95,6 +95,8 @@ export function buildActionInfo(p: Player, gs?: GameState): object {
     travelMinHp: HP_ACTIVITY_THRESHOLDS.travel,
     social: { cost: cfg.SOCIAL_EVENT_COST, drsMin: cfg.SOCIAL_EVENT_DRS_MIN, drsMax: inPeak ? cfg.SOCIAL_EVENT_DRS_PEAK_MAX : cfg.SOCIAL_EVENT_DRS_MAX, inPeak,
       peakStart: marriageWindow.peakStart, peakEnd: marriageWindow.peakEnd, threshold: RELATIONSHIP_MARRIAGE_THRESHOLD, currentDrs: p.relationshipPoints, active: p.relationshipActive, minHp: HP_ACTIVITY_THRESHOLDS.socialEvent },
+    matchmaking: { cost: cfg.MATCHMAKING_COST, drsMin: cfg.MATCHMAKING_DRS_MIN, drsMax: inPeak ? cfg.MATCHMAKING_DRS_PEAK_MAX : cfg.MATCHMAKING_DRS_MAX,
+      usedThisRound: gs ? p.lastMatchmakingRound === gs.turnNumber : false },
     insurance,
     premiumMultiplier: premiumMult,
     bond: { monthlyYield: currentBondRate(gs) / 12, annualized: Math.round(currentBondRate(gs) * 1000) / 10, floating: true, amounts: cfg.BOND_FUND_AMOUNTS,

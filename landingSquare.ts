@@ -2,12 +2,14 @@
 import { Socket } from 'socket.io';
 import { GameState, Player, AssetType } from './gameDataModels';
 import { getLayoffMonths } from './gameLogic';
+import { getLoanLimit } from './gameConfig';
 import { rollDice, triggerPayday, takeLeverageLoan, getAvailableLoan, getCurrentAge, getLifeStage, applyFastTrackAppreciation, applyFastTrackPaydayBonus } from './gameLogic';
 import { HP_ACTIVITY_THRESHOLDS, CRISIS_FREQ_BY_STAGE, CONSULTANT_SK_RATE, CONSULTANT_NT_RATE } from './gameConfig';
 import { applyHPChange } from './statsSystem';
 import { rollPropertyEvent } from './propertyRisks';
 import { getSquareType, SquareType, DealCard, CharityCard, CHARITY_CARD, getFastTrackSquareType, FastTrackSquareType, FAST_TRACK_BOARD, CRISIS_POOL_BY_STAGE, CRISIS_EVENTS, RELATIONSHIP_EVENTS, BIG_DEALS, MARKET_CARDS, LUCKY_CARDS } from './gameCards';
-import { dealScaleFor, scaleDealCard, applyDoodadCard, applyDownsizingCard, applyMarketCard, acceptDealCard, applyCharityDonation, applyCrisisCard, applyRelationshipCard, applyLuckyCard, getCharityDonationAmount } from './cardSystem';
+import { liquidValue, raiseCashFromLiquid } from './liquidity';
+import { previewCrisisCost, dealScaleFor, scaleDealCard, applyDoodadCard, applyDownsizingCard, applyMarketCard, acceptDealCard, applyCharityDonation, applyCrisisCard, applyRelationshipCard, applyLuckyCard, getCharityDonationAmount } from './cardSystem';
 import {
   applyCrisisWithRescue, applyPartnershipBenefits, beginHostDecisionPhase, calcNetWorth, checkBucketGoals, eliminatePlayer,
   emitCellEvent, emitClient, emitToRoom, executeTravelAction, getPlayerSocket, io,
@@ -520,7 +522,9 @@ export async function handleLandingSquare(
       const nt = player.stats.network;
       const drawCount = nt >= 5 ? 2 : 1;
       // 交易金額依落格玩家的生活規模放大；棄牌時放回原卡，牌庫不會越放越大
-      const dealScale = dealScaleFor(player);
+      // 大交易的頭期款本來就上百萬，放大倍數取平方根，避免全場都付不起
+      const fullScale = dealScaleFor(player);
+      const dealScale = squareType === SquareType.BigDeal ? Math.max(1, Math.round(Math.sqrt(fullScale) * 2) / 2) : fullScale;
       const originalOf = new Map<DealCard, DealCard>();
       const drawnCards: DealCard[] = [];
       for (let i = 0; i < drawCount; i++) {
@@ -548,12 +552,14 @@ export async function handleLandingSquare(
       }));
       // 計算玩家當前可用「投資槓桿借款」額度（只計算無擔保負債，房貸/事業貸款不計入）
       const _loanAvailable = getAvailableLoan(player);
+      const _liquid = liquidValue(player);
       const downPaymentOf = (c: DealCard) => c.asset.downPayment ?? c.asset.cost ?? 0;
-      const affordableByMe = drawnCards.some((c) => downPaymentOf(c) <= player.cash + _loanAvailable);
+      // 現金 + 可借額度 + 可賣的債券／基金／股票，任何一種湊得出頭期款就讓本人決定
+      const affordableByMe = drawnCards.some((c) => downPaymentOf(c) <= player.cash + Math.max(_loanAvailable, _liquid));
       if (!affordableByMe) {
         // 本人連槓桿都買不起：不必開決策；若全場也沒人出得起頭期款，直接略過，省下主持人三次點擊
         const othersCanBid = [...gs.players.values()].some((p) =>
-          p.isAlive && p.id !== player.id && drawnCards.some((c) => p.cash >= downPaymentOf(c)));
+          p.isAlive && p.id !== player.id && drawnCards.some((c) => p.cash + liquidValue(p) >= downPaymentOf(c)));
         const cheapest = Math.min(...drawnCards.map(downPaymentOf));
         if (!othersCanBid) {
           emitCellEvent(socket, roomId, player.name, dealTypeName, `📋 ${dealTypeName}「${drawnCards.map((c) => c.title).join('、')}」頭期款 $${cheapest.toLocaleString()}，目前全場都負擔不起，本次略過。`);
@@ -571,6 +577,8 @@ export async function handleLandingSquare(
               playerCash: player.cash,
               creditScore: player.creditScore,
               loanAvailable: _loanAvailable,
+              loanLimit: getLoanLimit(player.creditScore),
+              liquidValue: _liquid,
             },
           })
         : null;
@@ -609,6 +617,12 @@ export async function handleLandingSquare(
               newCreditScore: lvResult.newCreditScore,
             });
           }
+        }
+
+        // 選擇「賣債券／基金補足」：依序部分賣出流動資產湊頭期款
+        if (decision.useLiquid === true && player.cash < downPayment) {
+          const raised = raiseCashFromLiquid(player, downPayment);
+          if (raised.sold.length) emitCellEvent(socket, roomId, player.name, dealTypeName, `💱 ${player.name} 賣出 ${raised.sold.join('、')} 湊頭期款。`);
         }
 
         if (player.cash < downPayment) {
@@ -686,6 +700,8 @@ export async function handleLandingSquare(
 
           if (auction.highestBidderId && auction.highestBid >= minBid) {
             const winner = gs.players.get(auction.highestBidderId);
+            // 得標者現金不夠時，用債券／基金／股票補足（出價時已確認湊得出來）
+            if (winner && winner.cash < auction.highestBid) raiseCashFromLiquid(winner, auction.highestBid);
             if (winner && winner.cash >= auction.highestBid) {
               const _wCB = winner.cash; const _wFB = winner.monthlyCashflow; const _wNWB = calcNetWorth(winner);
               // 得標金由銀行收取；付給放棄者會變成兩人串通把頭期款互相轉手
@@ -767,8 +783,14 @@ export async function handleLandingSquare(
 
       emitCellEvent(socket, roomId, player.name, '危機事件', `⚠️ 危機來臨：${card.title}！`);
 
-      if (player.stats.network >= 3 && !player.stats.networkCrisisSkipUsed) {
-        const decision = await waitForCardDecision(socket, gs, player, 'crisis', '危機應對', { event: 'crisisNTSkipAvailable', payload: { card, timeoutMs: 0, controlledByHost: true } });
+      // 人脈護盾（整場一次）只在沒有對應保險時才問；有保險就直接由保險處理，不必動用人脈
+      const crisisPreview = previewCrisisCost(player, card);
+      if (player.stats.network >= 3 && !player.stats.networkCrisisSkipUsed && !crisisPreview.wasInsured) {
+        const decision = await waitForCardDecision(socket, gs, player, 'crisis', '危機應對', { event: 'crisisNTSkipAvailable', payload: {
+          card, timeoutMs: 0, controlledByHost: true,
+          preview: { effectiveCost: crisisPreview.effectiveCost, turnsLost: crisisPreview.baseTurns, deathRisk: crisisPreview.deathRisk,
+            insurable: card.requiredInsurance !== 'none', insuredCost: card.insuredCost, cash: player.cash },
+        } });
 
         if (decision?.useNTSkip === true) {
           player.stats.networkCrisisSkipUsed = true;

@@ -362,7 +362,7 @@ export default function DisplayScreen() {
       });
     });
 
-    s.on('playerRolled', (p: { playerId: string; playerName: string; colorIndex: number; dice: number[]; total: number; oldPosition: number; newPosition: number; isInFastTrack?: boolean }) => {
+    s.on('playerRolled', (p: { playerId: string; playerName: string; colorIndex: number; dice: number[]; total: number; oldPosition: number; newPosition: number; isInFastTrack?: boolean; charityBonusDice?: number }) => {
       if (boardSettlingTimer.current) clearTimeout(boardSettlingTimer.current);
       setBoardSettling(true);
       const data = { ...p, key: Date.now() };

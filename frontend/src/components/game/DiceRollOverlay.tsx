@@ -10,6 +10,8 @@ export interface DiceRollData {
   total: number;
   oldPosition: number;
   newPosition: number;
+  /** 慈善捐款獎勵的額外骰子數 */
+  charityBonusDice?: number;
 }
 
 interface Props {
@@ -90,6 +92,9 @@ export default function DiceRollOverlay({ data, onDone, size = 'large' }: Props)
             </>
           )}
         </div>
+        {(data.charityBonusDice ?? 0) > 0 && (
+          <div className="mt-2 text-center text-sm font-bold text-pink-300">❤️ 慈善捐款的獎勵：這次多擲 {data.charityBonusDice} 顆骰子</div>
+        )}
       </div>
     </div>
   );

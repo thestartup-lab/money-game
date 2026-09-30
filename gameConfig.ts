@@ -799,17 +799,14 @@ export const PROFESSIONS: Profession[] = [
 ];
 
 /**
- * 真實生活成本係數：職業表的生活支出沿用桌遊的精簡設定，開局存錢率高達五成以上。
- * 以前每輪只結算 24 個月，等於把存錢率打對折；改成每輪誠實結算 48 個月（4 年）後，
- * 把開局生活支出放大到讓一般職業的存錢率回到真實的 25–30%。
- * 只調整開局基準；卡片、世界事件加上的支出照原金額。
- * 只套用在靠薪水的 E、S 象限；B、I 象限收入來自資產，開局存錢率本來就只有兩成多。
+ * 真實生活成本：職業表的生活支出沿用桌遊的精簡設定，很多職業開局存錢率高達五成以上。
+ * 以前每輪只結算 24 個月，等於把存錢率打對折；改成每輪誠實結算 48 個月（4 年）後要校正。
+ * 2026-09-30 起改為逐職業校正（見 gameLogic 的 calibrateStartingLivingCosts）：
+ * 以開局的預期收入計算，把生活支出補到存錢率約 LIVING_COST_TARGET_SAVINGS，最多補到原本的 LIVING_COST_REALISM 倍。
+ * 原本就花很多的職業（例如財務顧問、管理顧問）不再加碼；卡片、世界事件加上的支出照原金額。
  */
 export const LIVING_COST_REALISM = 2.0;
-for (const profession of PROFESSIONS) {
-  if (profession.quadrant !== 'E' && profession.quadrant !== 'S') continue;
-  profession.startingOtherExpenses = Math.round(profession.startingOtherExpenses * LIVING_COST_REALISM / 100) * 100;
-}
+export const LIVING_COST_TARGET_SAVINGS = 0.3;
 
 /**
  * 以職業 ID 快速查詢職業物件。
@@ -1020,6 +1017,11 @@ export const LIFE_EXP = {
 
 /** 每次參加聯誼活動的費用 */
 export const SOCIAL_EVENT_COST = 7_500;
+/** 主動相親（2026-09-30 起）：比聯誼貴、關係經營值加得多；每輪一次，達門檻就在下一個空檔開求婚舞台 */
+export const MATCHMAKING_COST = 30_000;
+export const MATCHMAKING_DRS_MIN = 30;
+export const MATCHMAKING_DRS_MAX = 50;
+export const MATCHMAKING_DRS_PEAK_MAX = 60;
 /** 每次聯誼活動獲得的 DRS 最小值 */
 export const SOCIAL_EVENT_DRS_MIN = 10;
 /** 每次聯誼活動獲得的 DRS 最大值 */

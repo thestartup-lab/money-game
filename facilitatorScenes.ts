@@ -82,6 +82,7 @@ export function buildMarriageScene(
     const cost = getArrangedMarriageCost(currentAge);
     return {
       kind: 'marriage',
+      careerPlayerId: player.id,
       kicker: '婚姻與人生選擇',
       title: `${player.name} 的付費婚配機會`,
       description: `需要 $${cost.toLocaleString()}，生命體驗 +${LIFE_EXP.MARRIAGE_ARRANGED}。${describeMarriagePreview(player, 0.8, false)}。`,
@@ -99,6 +100,7 @@ export function buildMarriageScene(
     const lifeExp = isMatchmaker ? LIFE_EXP.MARRIAGE_MATCHMAKER : LIFE_EXP.MARRIAGE_LOVE;
     return {
       kind: 'marriage',
+      careerPlayerId: player.id,
       kicker: isMatchmaker ? '主持人媒合・關係達標' : '深度關係達標',
       title: `${player.name}，要一起走下去嗎？`,
       description: `關係經營值已達 ${player.relationshipPoints}/${RELATIONSHIP_MARRIAGE_THRESHOLD}。${isMatchmaker ? '由主持人促成這段緣分，' : ''}生命體驗 +${lifeExp}。${describeMarriagePreview(player)}。`,
@@ -114,6 +116,7 @@ export function buildMarriageScene(
   const selectedCard = card ?? pickMarriageCard(currentAge);
   return {
     kind: 'marriage',
+    careerPlayerId: player.id,
     kicker: '緣分來到人生路口',
     title: `${player.name}｜${selectedCard.title}`,
     description: `${selectedCard.description} 生命體驗 +${selectedCard.lifeExpGain}。${describeMarriagePreview(player)}。`,
@@ -140,6 +143,22 @@ export function startMarriageScene(
     buildMarriageScene(player, route, selectedCard, getPlayerAge(gs, player)),
     { playerId: player.id, marriageRoute: route, marriageCard: selectedCard },
   );
+}
+
+/**
+ * 本人主動相親或聯誼達到關係門檻後，在下一個空檔自動開啟求婚舞台（不必等主持人），由本人在手機決定答不答應。
+ */
+export function tryOpenMarriageProposal(gs: GameState): boolean {
+  if (gs.facilitatorScene || gs.decisionPhase || gs.turnInProgress || gs.globalPaydayInProgress) return false;
+  for (const id of gs.playerOrder) {
+    const player = gs.players.get(id);
+    if (!player?.marriageProposalPending) continue;
+    player.marriageProposalPending = false;
+    if (!player.isAlive || player.isMarried || player.relationshipPoints < RELATIONSHIP_MARRIAGE_THRESHOLD) continue;
+    startMarriageScene(gs, player, 'love');
+    return true;
+  }
+  return false;
 }
 
 export function transitionFamilySceneToMarriage(gs: GameState, player: Player): void {

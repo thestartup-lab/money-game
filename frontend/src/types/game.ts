@@ -586,9 +586,11 @@ export interface DiseaseCrisisCard {
 /** 格子落點後的互動事件（在 PlayerPage 以 activeEvent state 控制顯示）*/
 export type ActiveEvent =
   | { kind: 'doodad'; title: string; description: string; cashDeducted: number; expenseIncrease: number }
-  | { kind: 'crisis_nt_skip'; title: string; description: string; baseCost: number; network: number; timeoutMs: number }
+  | { kind: 'crisis_nt_skip'; title: string; description: string; baseCost: number; network: number; timeoutMs: number;
+      preview?: { effectiveCost: number; turnsLost: number; deathRisk: boolean; insurable: boolean; insuredCost: number; cash: number } }
   | { kind: 'crisis_applied'; title: string; description: string; effectiveCost: number; turnsLost: number; wasInsured: boolean }
-  | { kind: 'deal_pick'; cards: { id: string; name: string; description?: string; downPayment: number; monthlyCashflow: number; scale?: number }[]; playerCash: number; creditScore?: number; loanAvailable?: number }
+  | { kind: 'deal_pick'; cards: { id: string; name: string; description?: string; downPayment: number; monthlyCashflow: number; scale?: number }[]; playerCash: number; creditScore?: number; loanAvailable?: number;
+      loanLimit?: number; liquidValue?: number; bonusDeal?: boolean }
   | { kind: 'fast_track_travel'; destinations: { id: string; name: string; region: string; cost: number; lifeExpGained: number }[]; playerCash: number }
   | { kind: 'partnership_pick'; availablePartners: { id: string; name: string }[] }
   | { kind: 'partnership_response'; offerorName: string; dividendEstimate: number }
@@ -632,6 +634,7 @@ export interface ActionInfo {
   /** 固定班表的在職受僱者：出國要請假扣薪 */
   travelOnPayroll: boolean;
   social: { cost: number; drsMin: number; drsMax: number; inPeak: boolean; peakStart: number; peakEnd: number; threshold: number; currentDrs: number; active: boolean; minHp: number };
+  matchmaking?: { cost: number; drsMin: number; drsMax: number; usedThisRound: boolean };
   insurance: { medical: ActionInsuranceInfo; life: ActionInsuranceInfo; property: ActionInsuranceInfo };
   premiumMultiplier: number;
   dca: { monthlyReturnRate: number; monthlyDividendRate: number; annualized: number; amounts: number[] };

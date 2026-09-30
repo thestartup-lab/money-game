@@ -35,7 +35,7 @@ const wait = (ms: number) => ms * TIME_SCALE;
 /** 檢查間隔；測試可縮短 */
 export const AUTO_HOST_TICK_MS = Number(process.env.AUTO_HOST_TICK_MS) > 0 ? Number(process.env.AUTO_HOST_TICK_MS) : 1_000;
 
-const AUTO_REVEAL_KINDS = new Set(['second_life', 'family', 'global_event', 'echo', 'marriage']);
+const AUTO_REVEAL_KINDS = new Set(['second_life', 'family', 'global_event', 'echo']);
 const sceneSeen = new Map<string, { firstAt: number; resultAt?: number }>();
 
 function release(gs: GameState, phaseId: string): boolean {
@@ -107,6 +107,19 @@ export function runAutoHost(gs: GameState, now = Date.now()): string | null {
       }
       return null;
     }
+    if (scene.kind === 'marriage') {
+      // 結不結婚由本人決定：本人選了就揭曉；倒數結束還沒選就視為婉拒（不替人答應）
+      if (context.marriageAnswer && now - seen.firstAt >= wait(AUTO_HOST_TIMING.submittedRevealMs)) {
+        resolveFacilitatorSceneChoice(gs, scene.id, 'reveal', () => closeFacilitatorScene(gs));
+        return `揭曉婚姻選擇：${scene.title}`;
+      }
+      if (!context.marriageAnswer && now >= deadline) {
+        emitToRoom(gs.gameId, 'notification', { message: `⏰ ${scene.participantNames[0]} 沒有在時間內回答，這次先不結婚（關係經營值保留）。` });
+        resolveFacilitatorSceneChoice(gs, scene.id, 'decline', () => closeFacilitatorScene(gs));
+        return `婚姻逾時婉拒：${scene.title}`;
+      }
+      return null;
+    }
     if (scene.kind === 'community') {
       // 全員投完票就揭曉；否則倒數結束依多數決
       const allVoted = (scene.voterCount ?? 0) > 0 && (scene.votedCount ?? 0) >= (scene.voterCount ?? 0);
@@ -117,12 +130,10 @@ export function runAutoHost(gs: GameState, now = Date.now()): string | null {
       return null;
     }
     if (AUTO_REVEAL_KINDS.has(scene.kind) && readEnough) {
-      const choice = scene.kind === 'global_event' ? 'apply' : scene.kind === 'marriage' ? 'accept' : 'reveal';
+      const choice = scene.kind === 'global_event' ? 'apply' : 'reveal';
       let failed = false;
       resolveFacilitatorSceneChoice(gs, scene.id, choice, () => { failed = true; });
-      // 婚姻條件改變而無法成立時，改為婉拒，避免卡住
-      if (failed && scene.kind === 'marriage') resolveFacilitatorSceneChoice(gs, scene.id, 'decline', ignore);
-      else if (failed) closeFacilitatorScene(gs);
+      if (failed) closeFacilitatorScene(gs);
       emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
       return `揭曉舞台：${scene.title}`;
     }

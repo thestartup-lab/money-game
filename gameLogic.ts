@@ -32,7 +32,7 @@ import { applyHPDecay, applyNTAutoGrowth } from './statsSystem';
 import {
   SALARY_GROWTH_BY_STAGE, SALARY_GROWTH_SKILL_THRESHOLD, SALARY_GROWTH_SKILL_BONUS,
   LIVING_COST_GROWTH_PER_ROUND, LIVING_COST_GROWTH_STOP_AGE, LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS,
-  LAYOFF_MONTHS_BY_STAGE, SPOUSE_INCOME_RATIO_MIN, SPOUSE_INCOME_RATIO_MAX, SPOUSE_INCOME_MIN, SPOUSE_INCOME_MAX, SPOUSE_RETIRED_RATIO, SPOUSE_NET_INCOME_RATIO, SPOUSE_LIVING_COST_RATIO, MARRIED_RENT_INCREASE, WEDDING_COST_MONTHS, WEDDING_COST_MIN,
+  LAYOFF_MONTHS_BY_STAGE, SPOUSE_INCOME_RATIO_MIN, SPOUSE_INCOME_RATIO_MAX, SPOUSE_INCOME_MIN, SPOUSE_INCOME_MAX, SPOUSE_RETIRED_RATIO, LIVING_COST_REALISM, LIVING_COST_TARGET_SAVINGS, SPOUSE_NET_INCOME_RATIO, SPOUSE_LIVING_COST_RATIO, MARRIED_RENT_INCREASE, WEDDING_COST_MONTHS, WEDDING_COST_MIN,
   CAPITAL_GAINS_TAX_RATE, NATURAL_DEATH_MIN_AGE, NATURAL_DEATH_BASE_PROBABILITY, NATURAL_DEATH_HP_FACTOR,
 } from './gameConfig';
 import { sellHome } from './householdLoans';
@@ -619,7 +619,33 @@ export interface SellAssetResult {
  * - netCashChange 可為負（資產市值低於未還負債時倒貼）
  * - 信用值不受影響
  */
-export function sellAsset(player: Player, assetId: string): SellAssetResult {
+/** 可以部分賣出的資產：股票、定期定額、債券基金（沒有連結貸款的金融資產） */
+export function isPartiallySellable(asset: { id: string; type: string; linkedLiabilityId?: string }): boolean {
+  if (asset.linkedLiabilityId) return false;
+  return asset.id === 'stock-dca' || asset.id === 'bond-fund' || asset.type === 'Stock';
+}
+
+/**
+ * 玩家主動出售資產。fraction（0–1）只用在股票、定期定額、債券基金：賣出一部分，
+ * 成本、市值、每月現金流等比例減少；資本利得稅只算賣出那一部分的獲利。
+ */
+export function sellAsset(player: Player, assetId: string, fraction = 1): SellAssetResult {
+  const partial = Number.isFinite(fraction) && fraction > 0 && fraction < 0.999;
+  if (partial) {
+    const asset = player.assets.find((a) => a.id === assetId);
+    if (!asset) return { success: false, message: `找不到資產 ID：${assetId}` };
+    if (!isPartiallySellable(asset)) return { success: false, message: '這項資產只能整筆出售。' };
+    const proceeds = Math.round(asset.currentValue * fraction);
+    const costPart = Math.round((asset.cost ?? asset.currentValue) * fraction);
+    const capitalGainsTax = Math.round(Math.max(0, proceeds - costPart) * CAPITAL_GAINS_TAX_RATE);
+    asset.currentValue -= proceeds;
+    asset.cost = Math.max(0, (asset.cost ?? 0) - costPart);
+    asset.monthlyCashflow = Math.round(asset.monthlyCashflow * (1 - fraction));
+    const netCashChange = proceeds - capitalGainsTax;
+    player.cash += netCashChange;
+    return { success: true, assetId, proceeds, debtSettled: 0, netCashChange, capitalGainsTax,
+      message: `賣出${asset.name} ${Math.round(fraction * 100)}%：拿回 $${netCashChange.toLocaleString()}${capitalGainsTax ? `（資本利得稅 $${capitalGainsTax.toLocaleString()}）` : ''}，剩餘市值 $${asset.currentValue.toLocaleString()}。` };
+  }
   if (assetId.startsWith('p2p-')) return { success: false, message: '玩家借貸債權不能直接出售，須由借款人還款結清。' };
   if (assetId.startsWith('home-')) {
     const home = sellHome(player);
@@ -1587,3 +1613,37 @@ export function computeConsultantIncome(player: Player): number {
   if (player.stats.health < CONSULTANT_MIN_HP) return 0;
   return player.stats.careerSkill * CONSULTANT_SK_RATE + player.stats.network * CONSULTANT_NT_RATE;
 }
+
+// ============================================================
+// 開局生活支出校正（見 gameConfig 的 LIVING_COST_TARGET_SAVINGS）
+// ============================================================
+
+/** 開局的預期月薪：固定薪取起薪、隨機薪取中間值、人脈型用 NT 2、專長型用 SK 0 */
+function expectedStartingSalary(profession: Profession): number {
+  switch (profession.salaryType) {
+    case 'random': return Math.round(((profession.minSalary ?? 0) + (profession.maxSalary ?? profession.startingSalary)) / 2);
+    case 'nt_driven': return (profession.salaryBase ?? 0) + 2 * (profession.salaryPerNT ?? 400);
+    default: return profession.startingSalary;
+  }
+}
+
+/** 逐職業把生活支出補到存錢率約 30%，最多補到原本的 2 倍；只在啟動時執行一次 */
+export function calibrateStartingLivingCosts(): Array<{ name: string; before: number; after: number; savingsRate: number }> {
+  const report: Array<{ name: string; before: number; after: number; savingsRate: number }> = [];
+  for (const profession of PROFESSIONS) {
+    if (profession.id === PLACEHOLDER_PROFESSION.id) continue;
+    const before = profession.startingOtherExpenses;
+    const probe = createPlayer('calibration', 'calibration', profession.id);
+    probe.salary = expectedStartingSalary(profession);
+    const income = probe.totalIncome;
+    const expenses = probe.totalExpenses;
+    const target = income * (1 - LIVING_COST_TARGET_SAVINGS);
+    const extra = Math.min(before * (LIVING_COST_REALISM - 1), Math.max(0, target - expenses));
+    const after = Math.round((before + extra) / 100) * 100;
+    profession.startingOtherExpenses = after;
+    report.push({ name: profession.name, before, after, savingsRate: income > 0 ? Math.round((income - expenses - (after - before)) / income * 100) / 100 : 0 });
+  }
+  return report;
+}
+
+export const LIVING_COST_CALIBRATION = calibrateStartingLivingCosts();

@@ -91,7 +91,7 @@ export default function FacilitatorSceneOverlay({ scene }: Props) {
         ) : null}
 
         <p className="mt-5 text-xl font-black text-emerald-300">
-          {isResult ? '請一起觀察：這個結果改變了誰？' : scene.kind === 'career' ? (scene.careerConfirmed ? '本人已確認，等待主持人揭曉。' : '等待本人在手機確認；時間到不會自動轉職。') : scene.kind === 'retirement' ? (scene.careerConfirmed ? '本人已選擇，等待主持人揭曉。' : '請本人在手機選擇退休、顧問、創業或延後。') : scene.kind === 'community' ? '結果套用到全場每個人：先討論，再各自在手機投票，多數決揭曉。' : '請抬頭看大螢幕共同討論，由主持人決定何時揭曉。'}
+          {isResult ? '請一起觀察：這個結果改變了誰？' : scene.kind === 'career' ? (scene.careerConfirmed ? '本人已確認，等待主持人揭曉。' : '等待本人在手機確認；時間到不會自動轉職。') : scene.kind === 'retirement' ? (scene.careerConfirmed ? '本人已選擇，等待主持人揭曉。' : '請本人在手機選擇退休、顧問、創業或延後。') : scene.kind === 'community' ? '結果套用到全場每個人：先討論，再各自在手機投票，多數決揭曉。' : scene.kind === 'marriage' ? (scene.careerConfirmed ? '本人已決定，等待揭曉。' : '要不要結婚，由本人在手機決定。') : '請抬頭看大螢幕共同討論，由主持人決定何時揭曉。'}
         </p>
       </section>
     </main>
