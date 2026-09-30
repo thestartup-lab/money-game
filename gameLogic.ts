@@ -32,7 +32,7 @@ import { applyHPDecay, applyNTAutoGrowth } from './statsSystem';
 import {
   SALARY_GROWTH_BY_STAGE, SALARY_GROWTH_SKILL_THRESHOLD, SALARY_GROWTH_SKILL_BONUS,
   LIVING_COST_GROWTH_PER_ROUND, LIVING_COST_GROWTH_STOP_AGE, LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS,
-  LAYOFF_MONTHS_BY_STAGE, SPOUSE_INCOME_RATIO_MIN, SPOUSE_INCOME_RATIO_MAX, SPOUSE_INCOME_MIN, SPOUSE_INCOME_MAX, SPOUSE_RETIRED_RATIO, BASIC_PENSION_MONTHLY, RETIREMENT_LIVING_COST_FACTOR, LIVING_COST_REALISM, LIVING_COST_TARGET_SAVINGS, SPOUSE_NET_INCOME_RATIO, SPOUSE_LIVING_COST_RATIO, MARRIED_RENT_INCREASE, WEDDING_COST_MONTHS, WEDDING_COST_MIN,
+  LAYOFF_MONTHS_BY_STAGE, SPOUSE_INCOME_RATIO_MIN, SPOUSE_INCOME_RATIO_MAX, SPOUSE_INCOME_MIN, SPOUSE_INCOME_MAX, SPOUSE_RETIRED_RATIO, FAMILY_TIE_CAP, BASIC_PENSION_MONTHLY, RETIREMENT_LIVING_COST_FACTOR, LIVING_COST_REALISM, LIVING_COST_TARGET_SAVINGS, SPOUSE_NET_INCOME_RATIO, SPOUSE_LIVING_COST_RATIO, MARRIED_RENT_INCREASE, WEDDING_COST_MONTHS, WEDDING_COST_MIN,
   CAPITAL_GAINS_TAX_RATE, NATURAL_DEATH_MIN_AGE, NATURAL_DEATH_BASE_PROBABILITY, NATURAL_DEATH_HP_FACTOR,
 } from './gameConfig';
 import { sellHome } from './householdLoans';
@@ -1177,7 +1177,8 @@ export function calculateLifeScore(player: Player, deathAge: number, monthsPerRo
   const hp_raw              = player.stats.health;
   const ageScore_raw        = Math.min(100, ((deathAge - GAME_START_AGE) / (GAME_END_AGE - GAME_START_AGE)) * 100);
   // MAX_CHILDREN = 3：已婚 25 + 三個孩子 75 = 100
-  const family_raw          = Math.min(100, (player.isMarried ? 25 : 0) + player.numberOfChildren * 25);
+  // 家庭 = 婚姻 25 + 每個孩子（親生或領養）25 + 家庭連結（助養、照顧長輩、指導後輩，最多 50）
+  const family_raw          = Math.min(100, (player.isMarried ? 25 : 0) + player.numberOfChildren * 25 + Math.min(FAMILY_TIE_CAP, player.familyTiePoints ?? 0));
   const nt_raw              = Math.min(100, player.stats.network * 10);
 
   // ── 3 大幸福指數（0–100）──

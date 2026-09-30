@@ -6,6 +6,8 @@ import { AssetType } from '../gameDataModels';
 import { activateRelationship, buyArrangedMarriage, getCurrentAge } from '../gameLogic';
 import { RELATIONSHIP_MARRIAGE_THRESHOLD, HOST_ACTIVATION_DRS_BONUS, getLoanLimit, HP_ACTIVITY_THRESHOLDS, LIFE_EVENT_WINDOWS, MATCHMAKING_COST, MATCHMAKING_DRS_MIN, MATCHMAKING_DRS_MAX, MATCHMAKING_DRS_PEAK_MAX } from '../gameConfig';
 import { liquidValue } from '../liquidity';
+import { adoptChild, adoptionBlock, arrangedBlock, divorceBlock, fertilityBlock, fileDivorce, sponsorBlock, sponsorChild, tryForBaby } from '../family';
+import { applyMarriageScene } from '../facilitatorScenes';
 import { adviceBlockReason, adviceCard, giveAdvice, mentorBlockReason, mentorPlayer } from '../lateLife';
 import { GamePhase } from '../gameDataModels';
 import {
@@ -32,6 +34,53 @@ export function registerSocialHandlers(socket: Socket, onSafe: OnSafe): void {
     logPlayerEvent(target, gs, 'mentor', `接受 ${mentor.name} 的指導（專長 +10）`, tCB, tFB, tNW, { mentorName: mentor.name, role: 'mentee' });
     emitToRoom(gs.gameId, 'mentorshipGiven', { mentorId: mentor.id, mentorName: mentor.name, targetId: target.id, targetName: target.name, message });
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
+  // ----------------------------------------------------------
+  // 家庭行動：主動求子、領養、助養兒童、付費婚配、主動離婚（行動時間內）
+  // ----------------------------------------------------------
+  const familyAction = (
+    event: string,
+    block: (gs: import('../gameDataModels').GameState, player: import('../gameDataModels').Player) => string | null,
+    run: (gs: import('../gameDataModels').GameState, player: import('../gameDataModels').Player) => { message: string; eventType: import('../gameDataModels').PlayerEventType | null; announce: string } | null,
+  ) => onSafe(event, () => {
+    const gs = getRoomState(socket);
+    if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    const player = gs.players.get(playerIdentity(socket));
+    if (!player) { emitClient(socket, 'error', { message: '玩家不存在。' }); return; }
+    const blocked = block(gs, player);
+    if (blocked) { emitClient(socket, 'error', { message: blocked }); return; }
+    const cashBefore = player.cash; const flowBefore = player.monthlyCashflow; const worthBefore = calcNetWorth(player);
+    const result = run(gs, player);
+    if (!result) return;
+    // eventType 為 null 表示已由共用流程記錄（例如付費婚配走婚姻紀錄）
+    if (result.eventType) logPlayerEvent(player, gs, result.eventType, result.message, cashBefore, flowBefore, worthBefore, { source: event });
+    emitClient(socket, 'familyActionResult', { event, message: result.message });
+    emitToRoom(gs.gameId, 'notification', { message: result.announce });
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
+
+  familyAction('tryForBaby', fertilityBlock, (gs, player) => {
+    const r = tryForBaby(gs, player);
+    return { message: r.message, eventType: r.success ? 'child' : 'relationship', announce: r.success ? `👶 ${player.name} 主動求子成功，家裡多了一個孩子！` : `🍼 ${player.name} 這次求子沒有成功。` };
+  });
+  familyAction('adoptChild', adoptionBlock, (gs, player) => {
+    const message = adoptChild(gs, player);
+    return { message, eventType: 'child', announce: `🏡 ${player.name} 領養了一個孩子，家裡多了一位成員。` };
+  });
+  familyAction('sponsorChild', (_gs, player) => sponsorBlock(player), (_gs, player) => {
+    const message = sponsorChild(player);
+    return { message, eventType: 'relationship', announce: `🤲 ${player.name} 開始助養一位孩子。` };
+  });
+  familyAction('buyMarriage', arrangedBlock, (gs, player) => {
+    // 付費婚配：沿用婚姻舞台的付費路線（扣婚配費、建立配偶、公告與紀錄）
+    const description = applyMarriageScene(gs, player, { marriageRoute: 'arranged', playerId: player.id });
+    if (!description) { emitClient(socket, 'error', { message: '目前條件已改變，婚配沒有成立。' }); return null; }
+    return { message: description, eventType: null, announce: `💍 ${description}` };
+  });
+  familyAction('fileDivorce', (_gs, player) => divorceBlock(player), (_gs, player) => {
+    const message = fileDivorce(player);
+    return { message, eventType: 'relationship', announce: `💔 ${player.name} 結束了婚姻。` };
   });
 
   // ----------------------------------------------------------

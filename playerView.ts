@@ -71,6 +71,21 @@ export function buildSecondLifeProgress(p: Player): object | null {
 }
 
 /** 手機「行動」面板每個動作點選時要標注的效果與價值（全部由伺服器算，避免前端數字失真）。 */
+/** 家庭行動的費用、機率與「現在不能做的原因」（手機直接顯示） */
+function buildFamilyInfo(p: Player, gs: GameState) {
+  const cfg = require('./gameConfig') as typeof import('./gameConfig');
+  const fam = require('./family') as typeof import('./family');
+  const { getArrangedMarriageCost } = require('./gameLogic') as typeof import('./gameLogic');
+  return {
+    familyTies: p.familyTiePoints ?? 0, familyTieCap: cfg.FAMILY_TIE_CAP,
+    fertility: { cost: cfg.FERTILITY_COST, chance: fam.fertilityChance(gs, p), blocked: fam.fertilityBlock(gs, p) },
+    adoption: { cost: cfg.ADOPTION_COST, childAge: cfg.ADOPTED_CHILD_AGE, blocked: fam.adoptionBlock(gs, p) },
+    sponsor: { monthly: cfg.SPONSOR_CHILD_MONTHLY, years: cfg.SPONSOR_CHILD_MONTHS / 12, points: cfg.FAMILY_TIE_SPONSOR_POINTS, count: p.sponsoredChildren ?? 0, max: cfg.SPONSOR_CHILD_MAX, blocked: fam.sponsorBlock(p) },
+    arranged: { cost: getArrangedMarriageCost(fam.personalAge(gs, p)), blocked: fam.arrangedBlock(gs, p) },
+    divorce: { legalFee: cfg.DIVORCE_LEGAL_FEE, cashShare: cfg.DIVORCE_CASH_SHARE, blocked: fam.divorceBlock(p) },
+  };
+}
+
 export function buildActionInfo(p: Player, gs?: GameState): object {
   const cfg = require('./gameConfig') as typeof import('./gameConfig');
   const { CRISIS_EVENTS } = require('./gameCards') as typeof import('./gameCards');
@@ -98,6 +113,7 @@ export function buildActionInfo(p: Player, gs?: GameState): object {
       peakStart: marriageWindow.peakStart, peakEnd: marriageWindow.peakEnd, threshold: RELATIONSHIP_MARRIAGE_THRESHOLD, currentDrs: p.relationshipPoints, active: p.relationshipActive, minHp: HP_ACTIVITY_THRESHOLDS.socialEvent },
     matchmaking: { cost: cfg.MATCHMAKING_COST, drsMin: cfg.MATCHMAKING_DRS_MIN, drsMax: inPeak ? cfg.MATCHMAKING_DRS_PEAK_MAX : cfg.MATCHMAKING_DRS_MAX,
       usedThisRound: gs ? p.lastMatchmakingRound === gs.turnNumber : false },
+    family: gs ? buildFamilyInfo(p, gs) : null,
     insurance,
     premiumMultiplier: premiumMult,
     bond: { monthlyYield: currentBondRate(gs) / 12, annualized: Math.round(currentBondRate(gs) * 1000) / 10, floating: true, amounts: cfg.BOND_FUND_AMOUNTS,

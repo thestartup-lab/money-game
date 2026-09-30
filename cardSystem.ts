@@ -350,6 +350,11 @@ export function applyCrisisCard(player: Player, card: CrisisCard): CrisisResult 
     player.cash -= Math.min(effectiveCost, Math.max(0, player.cash));
     player.turnsToSkip += baseTurns;
     addLifeExperience(player, LIFE_EXP.CRISIS_SURVIVED);
+    // 照顧父母（家庭責任類事件）算家庭連結：不結婚、不生小孩的人也能從照顧家人得到家庭分數
+    if (card.requiredInsurance === 'none') {
+      const { FAMILY_TIE_ELDER_CARE_POINTS, FAMILY_TIE_CAP } = require('./gameConfig') as typeof import('./gameConfig');
+      player.familyTiePoints = Math.min(FAMILY_TIE_CAP, (player.familyTiePoints ?? 0) + FAMILY_TIE_ELDER_CARE_POINTS);
+    }
     if (card.recurringExpense) {
       const support = card.familySupportHalvesCost && player.stats.network >= PARENT_CARE_FAMILY_SUPPORT_NT;
       player.recurringExpenses.push({

@@ -1650,6 +1650,28 @@ export const SPOUSE_RETIRED_RATIO = 0.4;
 export const SPOUSE_UNEMPLOYMENT_MONTHS = 6;
 /** 離婚：現金分割比例、HP 影響 */
 export const DIVORCE_CASH_SHARE = 0.25;
+/**
+ * 家庭行動（2026-10-01 起）：想要家庭的人可以主動做點什麼，不只靠踩格子的機率。
+ * 主動求子：已婚、24–55 歲，花費提高受孕機率，每輪一次。
+ * 領養：已婚或單身、60 歲以前，孩子 3 歲來到家裡，支出與家庭分數和親生一樣。
+ * 助養兒童：每月固定捐款 10 年，換家庭連結分數；照顧長輩、指導後輩也算。
+ * 家庭連結分數最多 50 分（不結婚、不生小孩也能拿到一半的家庭分數）。
+ * 付費婚配：本人在行動時間自己申請；主動離婚：律師費加財產分割。
+ */
+export const FERTILITY_COST = 60_000;
+export const FERTILITY_PROBABILITY_PEAK = 0.7;
+export const FERTILITY_PROBABILITY_BASE = 0.35;
+export const ADOPTION_COST = 150_000;
+export const ADOPTION_MAX_AGE = 60;
+export const ADOPTED_CHILD_AGE = 3;
+export const SPONSOR_CHILD_MONTHLY = 3_000;
+export const SPONSOR_CHILD_MONTHS = 120;
+export const SPONSOR_CHILD_MAX = 2;
+export const FAMILY_TIE_SPONSOR_POINTS = 10;
+export const FAMILY_TIE_ELDER_CARE_POINTS = 10;
+export const FAMILY_TIE_MENTOR_POINTS = 5;
+export const FAMILY_TIE_CAP = 50;
+export const DIVORCE_LEGAL_FEE = 50_000;
 export const DIVORCE_HP_COST = 10;
 
 /** 自住房：租屋 vs 買房 */

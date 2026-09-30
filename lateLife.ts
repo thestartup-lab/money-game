@@ -45,6 +45,9 @@ export function mentorPlayer(gs: GameState, mentor: Player, target: Player): str
   mentor.lastMentorRound = gs.turnNumber;
   mentor.mentorCount = (mentor.mentorCount ?? 0) + 1;
   mentor.legacyBonusPoints += MENTOR_LEGACY_POINTS;
+  // 指導後輩也算家庭連結（像長輩照顧晚輩）
+  const { FAMILY_TIE_MENTOR_POINTS, FAMILY_TIE_CAP } = require('./gameConfig') as typeof import('./gameConfig');
+  mentor.familyTiePoints = Math.min(FAMILY_TIE_CAP, (mentor.familyTiePoints ?? 0) + FAMILY_TIE_MENTOR_POINTS);
   addLifeExperience(mentor, MENTOR_LIFE_EXP);
   target.stats.careerSkill = Math.min(100, target.stats.careerSkill + MENTOR_SKILL_GAIN);
   addLifeExperience(target, MENTOR_RECIPIENT_LIFE_EXP);

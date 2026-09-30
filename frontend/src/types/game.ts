@@ -637,6 +637,14 @@ export interface ActionInfo {
   travelOnPayroll: boolean;
   social: { cost: number; drsMin: number; drsMax: number; inPeak: boolean; peakStart: number; peakEnd: number; threshold: number; currentDrs: number; active: boolean; minHp: number };
   matchmaking?: { cost: number; drsMin: number; drsMax: number; usedThisRound: boolean };
+  family?: {
+    familyTies: number; familyTieCap: number;
+    fertility: { cost: number; chance: number; blocked: string | null };
+    adoption: { cost: number; childAge: number; blocked: string | null };
+    sponsor: { monthly: number; years: number; points: number; count: number; max: number; blocked: string | null };
+    arranged: { cost: number; blocked: string | null };
+    divorce: { legalFee: number; cashShare: number; blocked: string | null };
+  } | null;
   insurance: { medical: ActionInsuranceInfo; life: ActionInsuranceInfo; property: ActionInsuranceInfo };
   premiumMultiplier: number;
   dca: { monthlyReturnRate: number; monthlyDividendRate: number; annualized: number; amounts: number[] };

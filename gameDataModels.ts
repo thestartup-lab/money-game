@@ -526,6 +526,13 @@ export class Player {
   marriageBonus: number;
   /** 人生規劃買的健康維護還涵蓋幾輪（每輪發薪時扣 1；> 0 時該輪 HP 不衰退） */
   healthMaintenanceRounds = 0;
+  /** 家庭連結分數：助養兒童、照顧長輩、指導後輩（最多 FAMILY_TIE_CAP，計入家庭分數） */
+  familyTiePoints = 0;
+  /** 助養兒童的份數 */
+  sponsoredChildren = 0;
+  /** 家庭行動（求子、領養）最後一次的輪數（各每輪一次） */
+  lastFertilityRound = -1;
+  lastAdoptionRound = -1;
   /** 關係經營值達門檻，等下一個空檔開求婚舞台（本人決定） */
   marriageProposalPending = false;
   /** 主動相親：最後一次的輪數（每輪一次） */

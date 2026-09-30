@@ -1115,7 +1115,8 @@ export function emitClient(socket: Socket, event: string, ...args: unknown[]) {
 export const financialActions = new Set(['sellAsset', 'buyInsurance', 'cancelInsurance',
   'takeEmergencyLoan', 'investStockDCA', 'investBond', 'buyHome', 'takeLeverageLoan', 'repayLoan', 'buyFranchise',
   'partnershipOffer', 'partnershipResponse', 'loanOffer', 'loanResponse', 'loanRequest', 'loanRequestResponse',
-  'goTravel', 'attendSocialEvent', 'mentorPlayer', 'seekMarriage']);
+  'goTravel', 'attendSocialEvent', 'mentorPlayer', 'seekMarriage',
+  'tryForBaby', 'adoptChild', 'sponsorChild', 'buyMarriage', 'fileDivorce']);
 /** 可以做主動行動的時段：全體行動時間，或沒有任何決策、舞台、發薪的回合空檔（時段的總開關在連線中介層） */
 export function isActionWindowOpen(gs: GameState): boolean {
   if (gs.facilitatorScene) return false;
