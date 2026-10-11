@@ -1,5 +1,6 @@
 /** 房間、主持人登入、大螢幕、玩家加入與重連（由 socketServer 註冊到每條連線） */
 import type { Socket } from 'socket.io';
+import { verifyLineIdToken, type LineIdentity } from '../lineAuth';
 import { randomBytes } from 'crypto';
 import { Server } from 'socket.io';
 import { GameState, GamePhase } from '../gameDataModels';
@@ -15,7 +16,42 @@ import {
   repairCurrentTurn,
 } from '../socketServer';
 
+const lineLoginRate = new Map<string, { count: number; resetAt: number }>();
+
 export function registerRoomHandlers(socket: Socket, onSafe: OnSafe): void {
+  onSafe('lineAuthenticate', async (payload: { idToken: string }) => {
+    if (socket.data.lineLoginPending) return;
+    if (socket.data.playerId || socketRoomMap.has(playerIdentity(socket))) {
+      socket.emit('lineLoginFailed', { message: '請另開登入頁；不能在遊戲中切換 LINE 帳號。' }); return;
+    }
+    for (const [key, bucket] of lineLoginRate) if (bucket.resetAt <= Date.now()) lineLoginRate.delete(key);
+    if (lineLoginRate.size >= 10000 || !consumeRateLimit(lineLoginRate, socket.handshake.address, 120, 60_000)) {
+      socket.emit('lineLoginFailed', { message: '登入過於頻繁，請稍後再試。' }); return;
+    }
+    socket.data.lineLoginPending = true;
+    delete socket.data.lineIdentity;
+    try {
+      const identity = await verifyLineIdToken(payload.idToken);
+      if (!socket.connected || socket.data.playerId || socketRoomMap.has(playerIdentity(socket))) return;
+      socket.data.lineIdentity = identity;
+      socket.emit('lineAuthenticated', { displayName: identity.displayName, picture: identity.picture });
+    } catch {
+      // Do not log the token, LINE response, or raw profile.
+      socket.emit('lineLoginFailed', { message: 'LINE 身分驗證失敗或已過期，請重新登入後再試。' });
+    } finally { socket.data.lineLoginPending = false; }
+  });
+
+  onSafe('setLineLoginRequired', (payload: { enabled: boolean }) => {
+    const gs = getRoomState(socket);
+    if (!gs || !isRoomAdmin(socket, gs)) {
+      socket.emit('error', { message: '只有主持人可以設定登入方式。' }); return;
+    }
+    if (![GamePhase.WaitingForPlayers, GamePhase.Pre20].includes(gs.gamePhase)) {
+      socket.emit('error', { message: '登入方式只能在開局前調整。' }); return;
+    }
+    gs.lineLoginRequired = payload.enabled;
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
 
   // ----------------------------------------------------------
   // 主持人：建立房間 (createRoom)
@@ -51,6 +87,7 @@ export function registerRoomHandlers(socket: Socket, onSafe: OnSafe): void {
     }
     const roomCode = customCode || generateRoomCode();
     const gs = new GameState(roomCode);
+    gs.lineLoginRequired = process.env.NODE_ENV !== 'test';
     gs.adminSocketId = playerIdentity(socket);
     const adminCode = randomBytes(6).toString('hex').toUpperCase();
     roomAdminCredentials.set(roomCode, createRoomAdminCredential(adminCode));
@@ -254,6 +291,26 @@ export function registerRoomHandlers(socket: Socket, onSafe: OnSafe): void {
       }
       cancelEmptyRoomCleanup(roomCode);
 
+      if (socket.data.lineLoginPending) {
+        socket.emit('error', { message: 'LINE 身分驗證中，請稍候。' }); return;
+      }
+      const identity = socket.data.lineIdentity as LineIdentity | undefined;
+      if (identity && identity.expiresAt <= Date.now()) {
+        delete socket.data.lineIdentity;
+        socket.emit('lineLoginFailed', { message: 'LINE 登入已過期，請重新登入。' }); return;
+      }
+      if (gs.lineLoginRequired && !identity) {
+        socket.emit('error', { message: '本房間需先使用 LINE 登入；沒有 LINE 請由主持人開放臨時加入。' }); return;
+      }
+      if (identity) {
+        const existing = [...playerSessions.entries()].find(([, session]) => session.roomId === roomCode && session.lineAccountKey === identity.accountKey);
+        const existingPlayer = existing && gs.players.get(existing[0]);
+        if (existing && existingPlayer) {
+          restorePlayer({ playerName: existingPlayer.name, roomCode, reconnectToken: existing[1].token });
+          return;
+        }
+      }
+
       if (gs.gamePhase === GamePhase.GameOver) {
         emitClient(socket, 'error', { message: '此房間的遊戲已結束，無法加入。' });
         return;
@@ -284,7 +341,7 @@ export function registerRoomHandlers(socket: Socket, onSafe: OnSafe): void {
       socket.data.playerId = player.id;
       socket.join(player.id);
       const token = randomBytes(32).toString('hex');
-      playerSessions.set(player.id, { roomId: roomCode, token, socketId: socket.id });
+      playerSessions.set(player.id, { roomId: roomCode, token, socketId: socket.id, lineAccountKey: identity?.accountKey });
       gs.addPlayer(player);
       emitClient(socket, 'playerSession', { playerId: player.id, reconnectToken: token, roomCode, playerName: player.name });
 
@@ -407,7 +464,7 @@ export function registerRoomHandlers(socket: Socket, onSafe: OnSafe): void {
   // ----------------------------------------------------------
   // 玩家重連恢復 (playerRejoin)
   // ----------------------------------------------------------
-  onSafe('playerRejoin', (payload: { playerName: string; roomCode: string; reconnectToken: string }) => {
+  function restorePlayer(payload: { playerName: string; roomCode: string; reconnectToken: string }): void {
     const gs = rooms.get(payload.roomCode);
     const entry = [...playerSessions.entries()].find(([, session]) =>
       session.roomId === payload.roomCode && session.token === payload.reconnectToken);
@@ -444,5 +501,6 @@ export function registerRoomHandlers(socket: Socket, onSafe: OnSafe): void {
       if (!alreadyDone) for (const [event, args] of privateReplay.get(player.id) ?? []) socket.emit(event, ...args);
       if (gs.decisionPhase.submitted || alreadyDone) emitClient(socket, 'decisionSubmitted', { phaseId: gs.decisionPhase.id });
     }
-  });
+  }
+  onSafe('playerRejoin', restorePlayer);
 }

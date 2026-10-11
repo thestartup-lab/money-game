@@ -110,7 +110,7 @@ export interface RoomSnapshot {
   roomId: string;
   gameState: GameState;
   credential: { salt: Buffer; hash: Buffer } | null;
-  sessions: [string, { roomId: string; token: string; socketId: string; setupStep?: string }][];
+  sessions: [string, { roomId: string; token: string; socketId: string; setupStep?: string; lineAccountKey?: string }][];
 }
 
 function roomsDir(dir = resolveStateDir()): string {

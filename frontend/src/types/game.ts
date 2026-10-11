@@ -134,6 +134,7 @@ export interface SecondLifeProgress {
 }
 
 export interface Player {
+  loginMethod?: 'line' | 'guest';
   careerOptions?: CareerOption[];
   /** SK 已達 100 但暫時不能申請的原因 */
   careerBlockReason?: string | null;
@@ -263,6 +264,7 @@ export interface BucketGoalDetail {
 }
 
 export interface GameState {
+  lineLoginRequired?: boolean;
   gameId: string;
   roomId: string;
   players: Player[];

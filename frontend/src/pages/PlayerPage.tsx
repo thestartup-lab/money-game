@@ -22,6 +22,7 @@ import CollapsePanel from '../components/game/CollapsePanel';
 import DecisionCountdown from '../components/game/DecisionCountdown';
 import '../components/game/MobileClarity.css';
 import LateLifePanel from '../components/game/LateLifePanel';
+import { getLineToken, resetLineLogin } from '../lineLogin';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
@@ -110,6 +111,9 @@ export default function PlayerPage() {
 
   // Join form state — pre-fill room code from URL ?room=XXX
   const [playerName, setPlayerName] = useState('');
+  const [lineProfile, setLineProfile] = useState<{ displayName: string; picture?: string } | null>(null);
+  const [lineBusy, setLineBusy] = useState(false);
+  const [guestJoin, setGuestJoin] = useState(false);
   const [roomCode, setRoomCode] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return (params.get('room') ?? '').toUpperCase();
@@ -144,21 +148,44 @@ export default function PlayerPage() {
     });
     socketRef.current = s;
 
+    const resumeLineLogin = async () => {
+      try {
+        const token = await getLineToken(false);
+        if (token && s.connected && !sessionRef.current) s.emit('lineAuthenticate', { idToken: token });
+      } catch { /* The explicit LINE button offers retry without blocking legacy reconnect. */ }
+    };
+    s.on('lineAuthenticated', (profile: { displayName: string; picture?: string }) => {
+      setLineProfile(profile);
+      setLineBusy(false);
+      setGuestJoin(false);
+      setPlayerName(name => name || profile.displayName.slice(0, 12));
+      setError('');
+    });
+    s.on('lineLoginFailed', (payload: { message: string }) => {
+      setLineProfile(null);
+      setLineBusy(false);
+      setError(payload.message);
+      void resetLineLogin().catch(() => undefined);
+    });
+
     s.on('connect', () => {
       setConnected(true);
+      setLineProfile(null);
+      setLineBusy(false);
       setDisconnectNotice(null);
       try {
         const saved = sessionRef.current ?? JSON.parse(localStorage.getItem('baisuiGame') ?? 'null');
-        if (!saved?.playerName || !saved?.roomCode || !saved?.reconnectToken) return;
+        if (!saved?.playerName || !saved?.roomCode || !saved?.reconnectToken) { void resumeLineLogin(); return; }
         // 掃了另一個房間的 QR 時，不要拿舊房間的身分自動續玩
         const urlRoom = (new URLSearchParams(window.location.search).get('room') ?? '').toUpperCase();
         if (!sessionRef.current && urlRoom && urlRoom !== String(saved.roomCode).toUpperCase()) {
           try { localStorage.removeItem('baisuiGame'); } catch { /* storage unavailable */ }
+          void resumeLineLogin();
           return;
         }
         hadSessionRef.current = true;
         s.emit('playerRejoin', saved);
-      } catch { /* In-memory session still permits transient network reconnection. */ }
+      } catch { void resumeLineLogin(); }
     });
     s.on('playerSession', (session: { playerId: string; playerName: string; roomCode: string; reconnectToken: string }) => {
       playerIdRef.current = session.playerId;
@@ -225,6 +252,7 @@ export default function PlayerPage() {
       setGameState(null);
       setView('join');
       // 只有原本真的在遊戲中才顯示錯誤；瀏覽器殘留的舊 token 失效不需要嚇新玩家
+      void resumeLineLogin();
       if (wasInGame) setError(p?.message ?? '伺服器資料已過期，請重新加入房間。');
     });
 
@@ -756,8 +784,24 @@ export default function PlayerPage() {
 
           {!connected && <p className="text-center text-yellow-400 text-sm">連線中…</p>}
 
+          <section className="rounded-xl border border-emerald-700 p-4 space-y-3" aria-label="LINE 帳號登入">
+            {lineProfile ? <div className="flex items-center gap-3">
+              {lineProfile.picture ? <img src={lineProfile.picture} alt="" referrerPolicy="no-referrer" className="h-12 w-12 rounded-full" /> : null}
+              <p className="text-lg font-bold text-emerald-200">已驗證 LINE：{lineProfile.displayName}</p>
+            </div> : <button type="button" className="min-h-14 w-full rounded-xl bg-green-700 p-3 text-lg font-bold text-white" disabled={!connected || lineBusy} onClick={async () => {
+              setLineBusy(true); setError('');
+              try {
+                const token = await getLineToken(true, roomCode.toUpperCase());
+                if (token) emit('lineAuthenticate', { idToken: token });
+                else setLineBusy(false);
+              } catch { setLineBusy(false); setError('無法完成 LINE 登入，請確認網路後重試。'); }
+            }}>{lineBusy ? '正在驗證 LINE…' : '使用 LINE 登入'}</button>}
+            <p className="text-sm text-slate-300">透過鑫力官方帳號登入。只使用帳號識別、名稱與頭像來綁定本場角色，不讀取聊天訊息。LINE 名稱不等於實名驗證，請確認下方學員姓名。</p>
+            {!lineProfile ? <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={guestJoin} onChange={e => setGuestJoin(e.target.checked)} />主持人已開放，我要臨時加入（無 LINE）</label> : null}
+          </section>
+
           <div>
-            <label className="senior-form-label" htmlFor="player-name">你的名字</label>
+            <label className="senior-form-label" htmlFor="player-name">學員姓名／活動稱呼</label>
             <input
               id="player-name"
               className="w-full bg-gray-800 border border-gray-600 rounded-xl px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 text-lg"
@@ -802,14 +846,14 @@ export default function PlayerPage() {
           {error && <p className="text-red-300 text-sm text-center font-bold" role="alert">{error}</p>}
           <button
             className="btn-primary w-full text-lg py-3"
-            disabled={!connected || !playerName.trim() || roomCode.length < 4}
+            disabled={!connected || lineBusy || (!lineProfile && !guestJoin) || !playerName.trim() || roomCode.length < 4}
             onClick={() => {
               setError('');
               emit('playerJoin', { playerName: playerName.trim(), roomCode: roomCode.toUpperCase() });
               // 儲存到 localStorage，供斷線後重連使用
             }}
           >
-            加入遊戲
+            加入／恢復遊戲
           </button>
         </div>
       </div>

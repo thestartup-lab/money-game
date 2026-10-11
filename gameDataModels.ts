@@ -934,6 +934,8 @@ export class Player {
  * 全局遊戲狀態，由伺服器管理一個完整房間的所有狀態。
  */
 export class GameState {
+  /** Old rooms keep guest access; newly created production rooms explicitly enable LINE. */
+  lineLoginRequired = false;
   pendingWorldEvent: { id: string; event: AdminGlobalEvent; source: 'manual' | 'automatic'; deferred: boolean } | null = null;
   worldEventHistory: { eventId: string; title: string; payday: number; round: number; source: string; major: boolean }[] = [];
   turnInProgress = false;

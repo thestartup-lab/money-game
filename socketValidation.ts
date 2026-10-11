@@ -32,6 +32,15 @@ function safeTree(value: unknown, depth = 0): boolean {
 }
 
 export function validateSocketPayload(event: string, payload: unknown): boolean {
+  if (event === 'lineAuthenticate') {
+    return !!payload && typeof payload === 'object' && !Array.isArray(payload)
+      && Object.keys(payload).length === 1
+      && typeof (payload as { idToken?: unknown }).idToken === 'string'
+      && ((payload as { idToken: string }).idToken.length >= 20)
+      && ((payload as { idToken: string }).idToken.length <= 8000);
+  }
+  if (event === 'setLineLoginRequired') return !!payload && typeof payload === 'object'
+    && typeof (payload as { enabled?: unknown }).enabled === 'boolean';
   // socket.io 會把 emit(event, undefined) 編成 null；沒有必填欄位的事件視同無 payload
   if (payload === undefined || payload === null) return !required[event];
   if (typeof payload !== 'object' || Array.isArray(payload) || !safeTree(payload)) return false;

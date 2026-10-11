@@ -15,7 +15,7 @@ import { getFQUpgradeCost } from './statsSystem';
 import { CRISIS_EVENTS } from './gameCards';
 import { evaluateSecondLifeEligibility } from './cardSystem';
 import {
-  hasRoomAdmin, isPaydayDue, paydayRemainingMs, paydaySettlementMonths,
+  hasRoomAdmin, isPaydayDue, paydayRemainingMs, paydaySettlementMonths, playerSessions,
 } from './socketServer';
 
 /**
@@ -281,6 +281,7 @@ export function serializePlayer(p: Player, gs: GameState): object {
   return {
     id: p.id,
     name: p.name,
+    loginMethod: playerSessions.get(p.id)?.lineAccountKey ? 'line' : 'guest',
     profession: p.profession,
     cashflowBreakdown,
     salaryItems: buildSalaryItems(p),
@@ -387,6 +388,7 @@ export function serializeGameState(gs: GameState): object {
     currentPlayerTurnId: gs.currentPlayerTurnId,
     gamePhase: gs.gamePhase,
     turnNumber: gs.turnNumber,
+    lineLoginRequired: gs.lineLoginRequired,
     marketEvents: gs.marketEvents,
     createdAt: gs.createdAt,
     hasAdmin: hasRoomAdmin(gs),

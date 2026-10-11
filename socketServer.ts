@@ -1094,7 +1094,7 @@ setInterval(() => {
 // ============================================================
 
 // A character keeps its identity when the transport reconnects. Tokens never enter public game state.
-export const playerSessions = new Map<string, { roomId: string; token: string; socketId: string; setupStep?: string }>();
+export const playerSessions = new Map<string, { roomId: string; token: string; socketId: string; setupStep?: string; lineAccountKey?: string }>();
 export const pendingSubmissions = new Map<string, { phaseId: string; event: string; submit: (value: unknown) => void }>();
 export const privateReplay = new Map<string, Map<string, unknown[]>>();
 export const replayEvents = new Set(['paydayPlanningRequired', 'fastTrackDealCard', 'charityCardPending',

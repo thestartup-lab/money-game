@@ -6,6 +6,7 @@ import DecisionCountdown from '../components/game/DecisionCountdown';
 import ClassicReviewLibrary from '../components/analysis/ClassicReviewLibrary';
 import FacilitatorControlPanel from '../components/game/FacilitatorControlPanel';
 import BoardReadingPanel from '../components/game/BoardReadingPanel';
+import LoginPolicyPanel from '../components/game/LoginPolicyPanel';
 import WorldEventControlPanel, { type AdaptiveDirectorStatus } from '../components/game/WorldEventControlPanel';
 import {
   readAdminCode,
@@ -472,6 +473,7 @@ export default function AdminPage() {
                     <span className={`text-xs font-mono ${cfColor}`}>${(p.monthlyCashflow/1000).toFixed(1)}k</span>
                   </div>
                   <div className="flex items-center gap-1.5 flex-wrap pl-5">
+                    <span className="text-xs text-slate-300">{p.loginMethod === 'line' ? 'LINE 已綁定' : '臨時身分・請現場核對'}</span>
                     {/* 設定階段才顯示就緒狀態 */}
                     {isStartable && (
                       p.isDisconnected ? (
@@ -551,6 +553,7 @@ export default function AdminPage() {
                 ⚡ 強制開始（為 {notReadyPlayers.length} 位玩家自動補齊）
               </button>
             )}
+            <LoginPolicyPanel gameState={gameState} emit={emit} />
             {decisionPhase?.kind === 'reading' ? <BoardReadingPanel phase={decisionPhase} emit={emit} /> : null}
             {decisionPhase && decisionPhase.kind !== 'reading' && (
               <div className="admin-decision-panel rounded-2xl p-4 space-y-3">
