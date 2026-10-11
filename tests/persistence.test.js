@@ -63,7 +63,7 @@ test('伺服器重啟後還原房間：主持人用原控制碼登入、玩家�
   await new Promise((r) => setTimeout(r, 800)); // 等防抖存檔寫入
   assert.ok(readdirSync(join(stateDir, 'rooms')).includes('SAVE01.json'), '靜止時會寫存檔');
   const health1 = await (await fetch(`${URL}/health`)).json();
-  assert.equal(health1.persistence, 'volume');
+  assert.equal(health1.persistence, 'local-disk', '本機資料夾不冒充雲端永久磁碟');
 
   // ── 模擬部署：SIGTERM 關機 → 重新開機 ──
   sockets.forEach((s) => s.disconnect());

@@ -812,7 +812,7 @@ export interface CarOption {
   runningCost: number;
   /** 每輪生命體驗加分（開好車的享受） */
   lifeExpPerRound: number;
-  /** 買車當下的體驗加分 */
+  /** 購車後持有至下一次回合結算才發放的一次性體驗加分 */
   lifeExpOnPurchase: number;
   purchasable: boolean;
 }
@@ -1229,10 +1229,11 @@ export const LEGACY_FULL_SCORE_AMOUNT = 1_500_000;
 
 /**
  * 人生評分改看「比例」，跟金額大小與每輪結算月數無關：
- * - 淨資產／遺產：能支付幾個月生活費；滿分 = 25 輪的結算月數（每輪 24 個月時是 600 個月）
+ * - 淨資產／遺產：滿分 = 6.25 輪的結算月數（預設 48 個月時是 300 個月）
  * - 被動收入：有效被動收入 ÷ 月支出；2 倍滿分
  */
-export const SCORE_RUNWAY_FULL_ROUNDS = 25;
+// 預設 48 個月／輪：25 年生活費滿分，而非原本的 100 年。
+export const SCORE_RUNWAY_FULL_ROUNDS = 6.25;
 export const SCORE_PASSIVE_COVERAGE_FULL = 2;
 /** 成就門檻：智慧投資 = 滿分生活費的一半；被動收入王 = 1.5 倍支出 */
 export const ACHIEVEMENT_RUNWAY_SHARE = 0.5;
@@ -1693,7 +1694,7 @@ export const DIVORCE_CASH_SHARE = 0.25;
  * 主動求子：已婚、24–55 歲，花費提高受孕機率，每輪一次。
  * 領養：已婚或單身、60 歲以前，孩子 3 歲來到家裡，支出與家庭分數和親生一樣。
  * 助養兒童：每月固定捐款 10 年，換家庭連結分數；照顧長輩、指導後輩也算。
- * 家庭連結分數最多 50 分（不結婚、不生小孩也能拿到一半的家庭分數）。
+ * 家庭連結最多 50 點，評分換算為 100 分；不婚不育也能透過照顧與社群達滿分。
  * 付費婚配：本人在行動時間自己申請；主動離婚：律師費加財產分割。
  */
 export const FERTILITY_COST = 60_000;

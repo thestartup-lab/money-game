@@ -9,7 +9,7 @@ import { FQ_MULTIPLIERS } from './gameConstants';
  */
 export function buildRetirementOutlook(p: Player, gs: GameState) {
   const age = Math.max(p.startAge ?? 20, getCurrentAge(gs));
-  if (!p.isAlive || p.retirementStatus !== 'working' || p.isInFastTrack || age < RETIREMENT_OUTLOOK_AGE) return null;
+  if (!p.isAlive || p.retirementStatus !== 'working' || age < RETIREMENT_OUTLOOK_AGE) return null;
   const pension = computePension(p);
   const fq = FQ_MULTIPLIERS[p.stats.financialIQ] ?? 1;
   const passive = Math.round(Math.max(0, p.totalPassiveIncome) * fq);

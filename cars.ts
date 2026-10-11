@@ -60,8 +60,8 @@ export function buyCar(player: Player, optionId: string, payCash: boolean): { su
   if (!payCash) player.liabilities.push({ id: carLoanId(player.id), name: `車貸（${option.name}）`, totalDebt: offer.loan, monthlyPayment: offer.loanMonthly });
   player.assets.push({ id: carAssetId(player.id), name: option.name, type: AssetType.Other, cost: offer.price, currentValue: offer.price, monthlyCashflow: 0,
     ...(payCash ? {} : { linkedLiabilityId: carLoanId(player.id) }) });
-  player.car = { optionId: option.id, name: option.name, runningCost: option.runningCost, lifeExpPerRound: option.lifeExpPerRound, workVehicle: false };
-  player.lifeExperience += option.lifeExpOnPurchase;
+  // 獎勵綁在持有中的車上，結算前賣掉即放棄，避免原價買賣刷體驗。
+  player.car = { optionId: option.id, name: option.name, runningCost: option.runningCost, lifeExpPerRound: option.lifeExpPerRound, workVehicle: false, pendingPurchaseExperience: option.lifeExpOnPurchase };
   return { success: true, message: `買了${option.name}（$${offer.price.toLocaleString()}）${payCash ? '，現金付清' : `：頭期款 $${offer.downPayment.toLocaleString()}，車貸每月 $${offer.loanMonthly.toLocaleString()}`}；每月養車費 $${offer.runningCost.toLocaleString()}，不用再付交通費。` };
 }
 
@@ -86,9 +86,12 @@ export function sellCar(player: Player): { success: boolean; message: string; pr
 
 /** 每輪發薪時：車子依經過年數折舊，好車帶來的體驗照輪數加 */
 export function ageCar(player: Player, years: number): void {
-  if (!player.car) return;
+  if (!player.car || !Number.isFinite(years) || years <= 0) return;
   const asset = player.assets.find((a) => a.id === carAssetId(player.id));
   if (asset) asset.currentValue = Math.round(asset.currentValue * Math.pow(1 - CAR_DEPRECIATION_PER_YEAR, years));
+  // 舊存檔未帶 pending 欄位，表示舊版已於購車時給過獎勵，不補發。
+  player.lifeExperience += player.car.pendingPurchaseExperience ?? 0;
+  player.car.pendingPurchaseExperience = 0;
   if (player.car.lifeExpPerRound > 0) player.lifeExperience += player.car.lifeExpPerRound;
 }
 

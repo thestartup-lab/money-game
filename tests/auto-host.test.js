@@ -1,4 +1,4 @@
-// 全自動主持：主持人開局後完全不操作、玩家只擲骰（任何決策都不送出），整場也要能自己跑完。
+// 自動主持仍須由主持人確認收支結算；其他決策由系統推進。
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
@@ -15,7 +15,7 @@ function wait(s, ev, pred = () => true, ms = 8000) {
 }
 function send(s, ev, p, r, pred, ms) { const w = wait(s, r, pred, ms); s.emit(ev, p); return w; }
 
-test('全自動主持：主持人不按任何按鈕、玩家不送任何決策，整場仍能跑到終局、照常發薪與揭曉共同抉擇', { timeout: 240_000 }, async (t) => {
+test('自動主持保留結算確認，收支對帳正確並能跑到終局', { timeout: 240_000 }, async (t) => {
   const boot = "let seed=3;Math.random=()=>{seed=(seed*1103515245+12345)%2147483648;return seed/2147483648;};require('./dist/socketServer');";
   const server = spawn(process.execPath, ['-e', boot], {
     env: { ...process.env, PORT: String(PORT), NODE_ENV: 'test', AUTO_HOST_TIME_SCALE: '0.004', AUTO_HOST_TICK_MS: '40' }, stdio: ['ignore', 'pipe', 'pipe'],
@@ -32,7 +32,24 @@ test('全自動主持：主持人不按任何按鈕、玩家不送任何決策�
   const conn = async () => { const s = io(URL, { transports: ['websocket'], reconnection: false }); sockets.push(s); await wait(s, 'connect'); return s; };
   const admin = await conn();
   let latest = null;
-  admin.on('gameStateUpdate', (g) => { latest = g; });
+  const summaries = new Set();
+  let heldSummary = false;
+  admin.on('gameStateUpdate', (g) => { latest = g;
+    const phase = g.decisionPhase;
+    if (phase?.settlement && !summaries.has(phase.id)) {
+      summaries.add(phase.id);
+      for (const p of phase.settlement.payouts) {
+        assert.equal(Object.values(p.ledger).reduce((a, b) => a + b, 0), p.total);
+        assert.equal(p.cashBefore + p.total, p.cashAfter);
+        assert.equal(p.years.reduce((n, y) => n + y.cash, 0), p.total);
+      }
+      setTimeout(() => {
+        assert.equal(latest.decisionPhase?.id, phase.id, '自動主持不能跳過結算');
+        heldSummary = true;
+        admin.emit('continueDecisionPhase', { phaseId: phase.id });
+      }, 350);
+    }
+  });
   const room = await send(admin, 'createRoom', { roomId: 'AUTO99' }, 'roomCreated');
   const players = [await conn(), await conn(), await conn()];
   const ids = [];
@@ -41,7 +58,7 @@ test('全自動主持：主持人不按任何按鈕、玩家不送任何決策�
   const on = await send(admin, 'setAutoHost', { enabled: true }, 'gameStateUpdate', (g) => g.autoHost === true);
   assert.equal(on.autoHost, true);
 
-  // 從這裡開始主持人不再送任何事件；玩家只在輪到自己時擲骰
+  // 主持人只確認結算；玩家只在輪到自己時擲骰
   const deadline = Date.now() + 210_000;
   let lastTurn = -1; let lastProgress = Date.now();
   while (latest.gamePhase !== 'GameOver' && Date.now() < deadline) {
@@ -54,7 +71,8 @@ test('全自動主持：主持人不按任何按鈕、玩家不送任何決策�
     players[i].emit('playerRoll', { diceCount: 2 });
     await new Promise((r) => setTimeout(r, 80));
   }
-  assert.equal(latest.gamePhase, 'GameOver', '沒有主持人也能跑到終局');
+  assert.equal(latest.gamePhase, 'GameOver', '主持人確認結算後能跑到終局');
+  assert.ok(heldSummary && summaries.size > 0);
   // 這裡的玩家完全不理財、不顧健康，可能提早全數過世；重點是流程：每 3 輪至少發薪一次
   assert.ok(latest.globalPaydayNumber >= Math.floor(latest.turnNumber / 3), `發薪次數要跟輪數相符（${latest.turnNumber} 輪、發薪 ${latest.globalPaydayNumber} 次）`);
   assert.ok(latest.globalPaydayNumber >= 3, `至少發薪 3 次（實際 ${latest.globalPaydayNumber}）`);

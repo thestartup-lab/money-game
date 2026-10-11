@@ -121,6 +121,13 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
 
       {/* 可捲動內容 */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+        <button type="button" className="w-full min-h-16 rounded-xl border border-sky-500 bg-sky-950 p-3 text-lg font-bold text-white"
+          onClick={() => onSubmit({ investInFQUpgrade: false, investInHealthMaintenance: false, investInHealthBoost: false,
+            investInSkillTraining: false, investInNetwork: false, stockDCAAmount: 0, buyInsuranceTypes: [],
+            lifestyle: data.currentLifestyle ?? 'normal', healthHabit: data.currentHealthHabit ?? 'normal' }, { type: 'none' })}>
+          維持目前生活設定，本次不新增購買
+        </button>
+        <p className="text-sm text-gray-300">已有保險依原規則續保、收支自動結算；此按鈕不會重複購買上次的投資或健康方案。</p>
 
         {/* ─── 股市內幕（FQ ≥ 7 才會收到）─── */}
         {data.marketTip && (() => {
@@ -290,7 +297,8 @@ export default function PaydayPlanForm({ data, playerCash, reminderEndsAt, onSub
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-lg">🏦</span>
                 <div>
-                  <div className="text-sm text-white font-semibold">債券基金（高股息，不限額）</div>
+                  <div className="text-sm text-white font-semibold">債券基金（遊戲簡化模型，不限額）</div>
+                  <p className="text-sm text-amber-200">遊戲中按面額贖回、配息浮動，不代表現實基金保本。</p>
                   <div className="text-xs text-teal-300">{info.bond.principal > 0 ? `目前本金 $${info.bond.principal.toLocaleString()}；` : ''}目前年殖利率 {info.bond.annualized}%（每次人生規劃可能調整，已持有的配息跟著變），本金不受股市影響</div>
                 </div>
               </div>

@@ -21,7 +21,7 @@ async function fixture(t, port, passed, passive, autoReading = true, outer = fal
     const logic=require('./dist/gameLogic');
     const create=logic.createPlayer;
     logic.createPlayer=(...args)=>{
-      const p=create(...args);p.pre20Done=true;p.cash=200000;
+      const p=create(...args);p.pre20Done=true;p.cash=${deal ? 10_000_000 : 200000};
       p.hasPassedSecondLife=${passed};p.stats.health=40;p.stats.careerSkill=0;
       p.isInFastTrack=${outer};p.paydayCount=${seasoned ? 6 : 0};
       p.growthStats={academic:1,health:0,social:0,resource:0};
@@ -50,7 +50,14 @@ async function fixture(t, port, passed, passive, autoReading = true, outer = fal
   });
   async function connect() { const s = io('http://127.0.0.1:' + port, { transports: ['websocket'], reconnection: false }); sockets.push(s); await wait(s, 'connect'); return s; }
   const admin = await connect();
-  if (autoReading) admin.on('gameStateUpdate', g => { if (g.decisionPhase?.kind === 'reading') admin.emit('continueDecisionPhase', { phaseId: g.decisionPhase.id }); });
+  const confirmedReadings = new Set();
+  if (autoReading) admin.on('gameStateUpdate', g => {
+    const phase = g.decisionPhase;
+    if (phase?.kind === 'reading' && !confirmedReadings.has(phase.id)) {
+      confirmedReadings.add(phase.id);
+      admin.emit('continueDecisionPhase', { phaseId: phase.id });
+    }
+  });
   const room = await send(admin, 'createRoom', { roomId: 'F' + port }, 'roomCreated');
   if (!actionPhase) await send(admin, 'setActionPhaseEnabled', { enabled: false }, 'gameStateUpdate', g => g.actionPhaseEnabled === false);
   // 測試用每三輪備援發薪，避免等待真實計時
@@ -89,15 +96,28 @@ test('落格閱讀保留超過舊時限、主持人逐張確認、重連恢復�
   assert.equal(next.isPaused, false);
 });
 
-test('閱讀完成才發出私人交易卡並開始完整決策倒數', { timeout: 10000 }, async t => {
-  const { admin, a } = await fixture(t, 3232, false, 0, false, false, true);
+test('閱讀完成才發交易卡；接受交易確實扣頭期款並增加資產', { timeout: 10000 }, async t => {
+  const { admin, a, sa } = await fixture(t, 3232, false, 0, false, false, true);
   let cards = 0;
-  a.on('dealCardsDrawn', () => cards++);
+  let offered;
+  a.on('dealCardsDrawn', data => { cards++; offered = data.cards; });
   const reading = await send(a, 'playerRoll', { diceCount: 1 }, 'gameStateUpdate', g => g.decisionPhase?.kind === 'reading');
   assert.equal(cards, 0);
   const decision = await send(admin, 'continueDecisionPhase', { phaseId: reading.decisionPhase.id }, 'gameStateUpdate', g => g.decisionPhase?.kind === 'deal');
   assert.equal(cards, 1);
   assert.ok(decision.decisionPhase.reminderEndsAt - Date.now() > 55000);
+  const before = decision.players.find(p => p.id === sa.playerId);
+  const chosen = offered.find(c => c.downPayment <= before.cash);
+  assert.ok(chosen, '測試玩家可用現金完成交易');
+  const applied = wait(a, 'cardApplied', e => e.effect?.type === 'dealAccepted');
+  const updated = wait(a, 'gameStateUpdate', g => g.players.find(p => p.id === sa.playerId).assets.length > before.assets.length);
+  a.emit('submitCardDecision', { phaseId: decision.decisionPhase.id, accepted: true, selectedCardId: chosen.id });
+  const event = await applied;
+  const after = (await updated).players.find(p => p.id === sa.playerId);
+  assert.equal(event.effect.card.id, chosen.id);
+  assert.equal(after.cash, before.cash - chosen.downPayment);
+  assert.equal(after.assets.length, before.assets.length + 1);
+  assert.ok(after.assets.some(asset => !before.assets.some(old => old.id === asset.id) && asset.name === event.effect.card.asset.name));
 });
 
 test('外圈也先閱讀落格再顯示結果，不提前跳至下一位', { timeout: 10000 }, async t => {
@@ -238,6 +258,16 @@ test('計時人生規劃：主持人立即開規劃要等一輪完成、排在�
   const end = await send(b, 'submitPaydayPlan', { phaseId: phase.decisionPhase.id, stockDCAAmount: 0, buyInsuranceTypes: [] }, 'gameStateUpdate', g => g.globalPaydayNumber === 1 && !g.globalPaydayInProgress);
   assert.equal(end.players.find(p => p.id === sa.playerId).paydayCount, 48, '規劃本身不入帳');
   assert.equal(end.paydayTimer.roundsSince, 0);
+});
+
+test('外圈玩家也會排入退休舞台並由本人決定', { timeout: 15000 }, async t => {
+  const { admin, a, b, sa, sb } = await fixture(t, 3349, true, 0, true, true, false, false, false, false, false, 1);
+  await send(a, 'playerRoll', { diceCount: 1 }, 'gameStateUpdate', g => g.currentPlayerTurnId === sb.playerId && !g.decisionPhase && !g.turnInProgress);
+  const state = await send(b, 'playerRoll', { diceCount: 1 }, 'gameStateUpdate', g => g.facilitatorScene?.kind === 'retirement');
+  assert.equal(state.facilitatorScene.careerPlayerId, sa.playerId);
+  await send(a, 'chooseRetirement', { sceneId: state.facilitatorScene.id, choice: 'retire' }, 'gameStateUpdate', g => g.facilitatorScene?.careerConfirmed);
+  const result = await send(admin, 'resolveFacilitatorScene', { sceneId: state.facilitatorScene.id, choiceId: 'reveal' }, 'gameStateUpdate', g => g.facilitatorScene?.stage === 'result');
+  assert.equal(result.players.find(p => p.id === sa.playerId).retirementStatus, 'retired');
 });
 
 test('65 歲人生轉折：到達輪數後逐位開舞台，本人選退休後薪資變退休金、高齡支出啟用', { timeout: 25000 }, async t => {

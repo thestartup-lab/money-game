@@ -1,5 +1,5 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync, existsSync } from 'fs';
-import { join } from 'path';
+import { join, relative, isAbsolute } from 'path';
 import { GameState, Player } from './gameDataModels';
 import { Deck } from './gameCards';
 import { PLACEHOLDER_PROFESSION } from './gameLogic';
@@ -23,7 +23,15 @@ export function resolveStateDir(): string {
 }
 
 export function isPersistentVolume(): boolean {
-  return Boolean(process.env.STATE_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH) || !process.env.RAILWAY_ENVIRONMENT;
+  // STATE_DIR 只是路徑，不是掛載證明。也不能讓 volume 外的覆寫路徑誤報安全。
+  const mount = process.env.RAILWAY_VOLUME_MOUNT_PATH;
+  if (!mount) return false;
+  const within = relative(mount, resolveStateDir());
+  return within === '' || (!isAbsolute(within) && within !== '..' && !within.startsWith('../'));
+}
+
+export function persistenceStorageKind(): 'volume' | 'container-disk' | 'local-disk' {
+  return isPersistentVolume() ? 'volume' : process.env.RAILWAY_ENVIRONMENT ? 'container-disk' : 'local-disk';
 }
 
 type Tagged =

@@ -1,77 +1,36 @@
-// 每輪（4 年）結束的自動發薪：大螢幕逐年跑出每位玩家的入帳，讓「這 4 年」有被活過的感覺
 import { useEffect, useState } from 'react';
 
 export interface RoundPaydayPayout {
-  playerId: string;
-  playerName: string;
-  fromAge: number;
-  toAge: number;
+  playerId: string; playerName: string; fromAge: number; toAge: number;
   years: { age: number; cash: number }[];
-  total: number;
-  cashAfter: number;
-  taxPaid?: number;
+  total: number; cashBefore: number; cashAfter: number; taxSaved: number;
+  ledger: Record<string, number>;
 }
-
-interface Props {
-  payouts: RoundPaydayPayout[];
-  colorOf: (playerId: string) => string;
-  onDone: () => void;
-}
-
-const YEAR_MS = 700;
-const HOLD_MS = 5000;
-
-const money = (n: number) => {
-  const abs = Math.abs(n);
-  const text = abs >= 1_000_000 ? `${(abs / 1_000_000).toFixed(abs >= 10_000_000 ? 0 : 1)}M` : abs >= 1_000 ? `${Math.round(abs / 1_000)}k` : String(Math.round(abs));
-  return `${n >= 0 ? '+' : '−'}$${text}`;
-};
-
-export default function RoundPaydayBanner({ payouts, colorOf, onDone }: Props) {
-  const yearCount = Math.max(1, ...payouts.map((p) => p.years.length));
+const money = (n: number) => `${n < 0 ? '−' : ''}$${Math.round(Math.abs(n)).toLocaleString()}`;
+export default function RoundPaydayBanner({ payouts }: { payouts: RoundPaydayPayout[] }) {
+  const yearCount = Math.max(1, ...payouts.map(p => p.years.length));
   const [shown, setShown] = useState(0);
-
   useEffect(() => {
-    if (shown < yearCount) {
-      const timer = setTimeout(() => setShown((n) => n + 1), YEAR_MS);
-      return () => clearTimeout(timer);
-    }
-    const timer = setTimeout(onDone, HOLD_MS);
+    if (shown >= yearCount) return;
+    const timer = setTimeout(() => setShown(n => n + 1), 700);
     return () => clearTimeout(timer);
-  }, [shown, yearCount, onDone]);
-
-  const first = payouts[0];
-  return (
-    <div className="pointer-events-auto absolute bottom-4 left-1/2 z-40 w-[min(96%,1100px)] -translate-x-1/2 cursor-pointer rounded-2xl border border-emerald-600 bg-gray-950/95 p-4 shadow-2xl" onClick={onDone} role="status">
-      <div className="mb-2 flex items-baseline justify-between gap-3">
-        <p className="text-xl font-black text-emerald-300">💵 發薪：{first ? `${first.fromAge}–${first.toAge} 歲` : ''}這 {yearCount} 年的收支入帳</p>
-        <p className="text-xs text-gray-400">點一下關閉</p>
-      </div>
-      <div className="space-y-1.5">
-        {payouts.map((payout) => {
-          const running = payout.years.slice(0, shown).reduce((sum, y) => sum + y.cash, 0);
-          return (
-            <div key={payout.playerId} className="grid grid-cols-[7rem_1fr_8rem] items-center gap-3">
-              <span className="truncate text-lg font-bold" style={{ color: colorOf(payout.playerId) }}>{payout.playerName}</span>
-              <div className="flex gap-1.5">
-                {payout.years.map((year, index) => (
-                  <span
-                    key={year.age}
-                    className={`flex-1 rounded-lg px-2 py-1 text-center text-sm transition-opacity duration-300 ${index < shown ? 'opacity-100' : 'opacity-0'} ${year.cash >= 0 ? 'bg-emerald-950 text-emerald-200' : 'bg-red-950 text-red-200'}`}
-                  >
-                    <span className="block text-[11px] text-gray-400">{year.age} 歲</span>
-                    {money(year.cash)}
-                  </span>
-                ))}
-              </div>
-              <span className="text-right">
-                <span className={`block text-xl font-black ${running >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{money(running)}</span>
-                {payout.taxPaid ? <span className="block text-[11px] text-gray-400">已扣稅 ${Math.round(payout.taxPaid / 1000)}k</span> : null}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+  }, [shown, yearCount]);
+  return <div className="max-h-[55vh] overflow-y-auto text-left">
+    <div className="grid gap-4 lg:grid-cols-2">
+      {payouts.map(p => <article key={p.playerId} className="rounded-xl border border-slate-500 bg-slate-900 p-4 text-lg">
+        <h3 className="text-2xl font-black text-yellow-200">{p.playerName} · {p.fromAge}–{p.toAge} 歲</h3>
+        <div className="my-3 flex flex-wrap gap-2" aria-label="逐年收支動畫">
+          {p.years.map((y, i) => <span key={i} className={`rounded bg-slate-800 p-2 transition-opacity ${i < shown ? 'opacity-100' : 'opacity-0'}`}>{y.age} 歲：{money(y.cash)}</span>)}
+        </div>
+        <dl className="space-y-1">
+          <div className="flex justify-between gap-3"><dt>期初現金</dt><dd>{money(p.cashBefore)}</dd></div>
+          {Object.entries(p.ledger).map(([label, amount]) => <div key={label} className="flex justify-between gap-3"><dt>{label}</dt><dd className={`shrink-0 tabular-nums ${amount < 0 ? 'text-red-200' : 'text-emerald-200'}`}>{amount > 0 ? '+' : ''}{money(amount)}</dd></div>)}
+          <div className="flex justify-between gap-3 border-t border-slate-500 pt-2 font-bold"><dt>本輪現金淨變化</dt><dd>{p.total > 0 ? '+' : ''}{money(p.total)}</dd></div>
+          <div className="flex justify-between gap-3 text-xl font-black text-yellow-200"><dt>期末現金</dt><dd>{money(p.cashAfter)}</dd></div>
+        </dl>
+        {p.taxSaved > 0 ? <p className="mt-2">稅務規劃省下 {money(p.taxSaved)}（已反映於稅額，不重複加總）</p> : null}
+      </article>)}
     </div>
-  );
+    <p className="mt-3 text-base text-slate-300">被動收入為扣除投資內含成本後的淨額；資產出售與借款增加現金，不等於獲利。資產未實現漲跌不列入現金收支。</p>
+  </div>;
 }

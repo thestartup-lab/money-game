@@ -36,6 +36,8 @@ test('整場回歸：玩到終局不卡住、計時發薪至少 5 次、有人�
   const names = ['甲', '乙', '丙'];
   const ids = [];
   let latest = null;
+  let acceptedDeals = 0;
+  admin.on('cardApplied', e => { if (e.effect?.type === 'dealAccepted') acceptedDeals++; });
   const me = (g, i) => g.players.find((p) => p.id === ids[i]);
 
   // 電腦主持人：所有決策、舞台都自動放行；電腦玩家：固定、合理的理財策略
@@ -66,7 +68,7 @@ test('整場回歸：玩到終局不卡住、計時發薪至少 5 次、有人�
     }
     if (phase && !['reading', 'payday', 'actions'].includes(phase.kind)) {
       const i = ids.indexOf(phase.playerId);
-      if (phase.kind === 'deal' && i >= 0) players[i].emit('submitCardDecision', { phaseId: phase.id, accept: true, useLeverage: true });
+      if (phase.kind === 'deal' && i >= 0) players[i].emit('submitCardDecision', { phaseId: phase.id, accepted: true, useLeverage: true });
       else if (phase.kind === 'charity' && i >= 0) players[i].emit('submitCardDecision', { phaseId: phase.id, donate: true });
       else if (phase.kind === 'relationship' && i >= 0) players[i].emit('submitCardDecision', { phaseId: phase.id, accept: true });
       else setTimeout(() => admin.emit('continueDecisionPhase', { phaseId: phase.id }), 150);
@@ -120,6 +122,7 @@ test('整場回歸：玩到終局不卡住、計時發薪至少 5 次、有人�
   for (const p of latest.players) if (p.isInFastTrack) reachedOuterTrack.add(p.name);
 
   assert.equal(latest.gamePhase, 'GameOver', '整場要能玩到終局');
+  assert.ok(acceptedDeals > 0, '整場必須真的完成至少一筆交易，不能把略過當購買');
   assert.ok(latest.globalPaydayNumber >= 5, `整場至少發薪 5 次（實際 ${latest.globalPaydayNumber}）`);
   assert.ok(reachedOuterTrack.size >= 1, '至少一位靠被動收入進入外圈');
   assert.ok(latest.players.every((p) => p.salaryGrowthMultiplier > 1), '每個人都有年資加薪');

@@ -112,16 +112,16 @@ test('慈善以薪資或被動收入較高者計算；人生評分計入現金�
   investor.salary = 0;
   assert.ok(getCharityDonationAmount(investor, CHARITY_CARD) > 0);
 
-  // 評分看比例：淨資產能支付的生活費月數（每輪 24 個月時 600 個月滿分）、被動收入 ÷ 支出（2 倍滿分）
+  // 評分看比例：每輪 24 個月時 150 個月滿分；被動收入 ÷ 支出（2 倍滿分）
   const rich = createPlayer('r', '有錢人', 'teacher');
   rich.assets = []; rich.liabilities = [];
   rich.isMarried = true; rich.numberOfChildren = 3;
   rich.cash = rich.totalExpenses * 600;
   const score = calculateLifeScore(rich, 100, 24);
   assert.equal(score.netWorth, 100);
-  assert.equal(score.runwayTarget, 600);
+  assert.equal(score.runwayTarget, 150);
   assert.equal(score.family, 100);
-  rich.cash = rich.totalExpenses * 300;
+  rich.cash = rich.totalExpenses * 75;
   assert.equal(calculateLifeScore(rich, 100, 24).netWorth, 50, '一半生活費月數 = 50 分');
   assert.equal(calculateLifeScore(rich, 100, 12).netWorth, 100, '每輪 12 個月時滿分門檻減半');
   rich.assets = [{ id: 'x', name: '收租', type: 'RealEstate', cost: 1, currentValue: 0, monthlyCashflow: rich.totalExpenses * 2 }];

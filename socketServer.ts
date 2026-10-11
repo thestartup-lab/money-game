@@ -6,7 +6,7 @@ import { repayRoomLoan, validatePlayerLoan } from './playerLoans';
 import { GameState, Player, PaydayPlanPayload, GamePhase, PlayerEvent, PlayerEventType, DecisionPhaseState, FacilitatorSceneState, AssetType } from './gameDataModels';
 import { previewCareerChange } from './careerStage';
 import { BASIC_INVESTMENTS, buyBasicInvestment } from './basicInvestments';
-import { writeSnapshot, readSnapshots, deleteSnapshot, resolveStateDir, isPersistentVolume, SNAPSHOT_VERSION } from './roomPersistence';
+import { writeSnapshot, readSnapshots, deleteSnapshot, resolveStateDir, persistenceStorageKind, SNAPSHOT_VERSION } from './roomPersistence';
 import { getHomeOffers, buyHome } from './householdLoans';
 import { investBondFund, BOND_FUND_ID } from './bondFund';
 import { syncPlayerAges, getLayoffMonths, createSpouse, checkNaturalDeath, naturalDeathProbability, travelLeaveCost } from './gameLogic';
@@ -193,7 +193,9 @@ export const httpServer = http.createServer((request, response) => {
       revision: process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GIT_COMMIT_SHA ?? 'local',
       rooms: rooms.size,
       uptimeSeconds: Math.floor(process.uptime()),
-      persistence: PERSIST_ENABLED ? (isPersistentVolume() ? 'volume' : 'container-disk') : 'off',
+      persistence: PERSIST_ENABLED ? persistenceStorageKind() : 'off',
+      persistenceWarning: PERSIST_ENABLED && persistenceStorageKind() === 'container-disk'
+        ? '存檔未位於永久磁碟；重新部署或更換容器可能遺失房間進度。' : null,
       restoredRooms: restoredRoomCount,
     }));
     return;
@@ -589,7 +591,7 @@ process.once('SIGINT', () => flushAllRoomsAndExit('SIGINT'));
 /**
  * 向當前玩家發送落地通知，並同時廣播給全房（供大螢幕顯示）。
  */
-export type BoardNotice = { playerId: string; playerName: string; title: string; description: string };
+export type BoardNotice = { playerId: string; playerName: string; title: string; description: string; settlement?: import('./gameDataModels').DecisionPhaseState['settlement'] };
 export const boardNotices = new WeakMap<GameState, BoardNotice[]>();
 
 export function enqueueBoardNotice(gs: GameState, notice: BoardNotice): void {
@@ -602,9 +604,9 @@ export async function readBoardNotices(gs: GameState): Promise<void> {
   while (!gs.facilitatorScene && !gs.decisionPhase && gs.gamePhase !== GamePhase.GameOver) {
     const notice = boardNotices.get(gs)?.shift();
     if (!notice) return;
-    const context = beginHostDecisionPhase(gs, { id: notice.playerId, name: notice.playerName }, 'reading', notice.title, notice.description);
+    const context = beginHostDecisionPhase(gs, { id: notice.playerId, name: notice.playerName }, 'reading', notice.title, notice.description, { settlement: notice.settlement });
     // 主持人可設定落格說明自動放行；主持人先按「繼續」時 waiter 已被移除，計時器不會重複放行
-    if (gs.readingAutoContinueMs > 0) {
+    if (!notice.settlement && gs.readingAutoContinueMs > 0) {
       setTimeout(() => {
         const waiter = decisionReleaseWaiters.get(gs.gameId);
         if (waiter?.phaseId === context.phaseId) waiter.release();

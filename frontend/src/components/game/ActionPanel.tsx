@@ -574,7 +574,8 @@ export default function ActionPanel({
       {!isGameOver && onInvestBond && info && (
         <div className="card">
           <div className="flex justify-between items-center mb-2">
-            <p className="text-xs text-gray-400">債券基金（高股息）</p>
+            <p className="text-xs text-gray-400">債券基金（遊戲簡化模型）</p>
+            <p className="text-sm text-amber-200">遊戲中本金按面額贖回、配息隨利率變動；不代表現實基金保本。</p>
             {info.bond.principal > 0 && <span className="text-xs text-emerald-400">本金 ${fmt(info.bond.principal)}，每月 +${fmt(Math.round(info.bond.principal * info.bond.monthlyYield))}</span>}
           </div>
           {bondPreview !== null ? (() => {

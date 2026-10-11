@@ -67,7 +67,7 @@ export const BUCKET_LIST_GOALS: BucketListGoal[] = [
     id: 'mentor',
     emoji: '🧑‍🏫',
     title: '良師益友',
-    description: `在行動時間指導還在內圈的玩家 ${MENTOR_GOAL_COUNT} 次。`,
+    description: `在行動時間指導其他玩家 ${MENTOR_GOAL_COUNT} 次，內外圈皆可。`,
     legacyReward: 20,
     lifeExpReward: 25,
     isAchieved: (p) => (p.mentorCount ?? 0) >= MENTOR_GOAL_COUNT,
@@ -76,13 +76,13 @@ export const BUCKET_LIST_GOALS: BucketListGoal[] = [
   {
     id: 'family_man',
     emoji: '👨‍👩‍👧',
-    title: '溫暖家庭',
-    description: '結婚並擁有至少 2 個孩子。',
+    title: '溫暖連結',
+    description: '結婚並擁有至少 2 個孩子，或累積 40 點照顧、助養與指導的家庭連結。',
     legacyReward: 15,
     lifeExpReward: 30,
     cashReward: 15_000,
-    isAchieved: (p) => p.isMarried && p.numberOfChildren >= 2,
-    progress: (p) => `${p.isMarried ? '已婚' : '未婚'}、子女 ${p.numberOfChildren}／2`,
+    isAchieved: (p) => (p.isMarried && p.numberOfChildren >= 2) || (p.familyTiePoints ?? 0) >= 40,
+    progress: (p) => `${p.isMarried ? '已婚' : '未婚'}、子女 ${p.numberOfChildren}／2；家庭連結 ${p.familyTiePoints ?? 0}／40`,
   },
   {
     id: 'healthy_elder',
@@ -142,10 +142,22 @@ export function getBucketGoal(id: string): BucketListGoal | undefined {
 export function assignBucketList(player: Player, gs?: GameState, count = 3): void {
   // 已經達成的目標不該再抽到，否則下一次擲骰就白拿獎勵
   const unmet = gs ? BUCKET_LIST_GOALS.filter((g) => !g.isAchieved(player, gs)) : [...BUCKET_LIST_GOALS];
-  const pool = unmet.length >= count ? unmet : [...BUCKET_LIST_GOALS];
+  const pool = [...unmet];
   const picked: BucketListGoal[] = [];
   const n = Math.min(count, pool.length);
-  for (let i = 0; i < n; i++) {
+  for (const group of [
+    ['world_traveler', 'healthy_elder', 'long_life'],
+    ['mentor', 'family_man', 'philanthropist'],
+    ['real_estate_baron', 'high_fq'],
+  ]) {
+    if (picked.length >= n) break;
+    const candidates = pool.filter(goal => group.includes(goal.id));
+    if (!candidates.length) continue;
+    const goal = candidates[Math.floor(Math.random() * candidates.length)];
+    picked.push(goal);
+    pool.splice(pool.indexOf(goal), 1);
+  }
+  while (picked.length < n) {
     const idx = Math.floor(Math.random() * pool.length);
     picked.push(pool.splice(idx, 1)[0]);
   }

@@ -180,7 +180,7 @@ export function movePlayer(player: Player, steps: number): MoveResult {
  * @param maintenanceDone 本次發薪日是否已執行健康維護（true = 阻止 HP 衰退）
  * @returns 更新後的玩家
  */
-export function triggerPayday(player: Player, gameState: GameState, maintenanceDone = false, growthCycle = true): Player {
+export function triggerPayday(player: Player, gameState: GameState, maintenanceDone = false, growthCycle = true, capture?: (player: Player) => void): Player {
   // 計算當前人生階段，套用薪資倍率
   const currentAge = getCurrentAge(gameState);
   const stage = getLifeStage(currentAge);
@@ -235,6 +235,7 @@ export function triggerPayday(player: Player, gameState: GameState, maintenanceD
     player.spouse.retired = true;
   }
 
+  capture?.(player);
   player.cash += player.monthlyCashflow;
   player.paydayCount += 1;
 
@@ -1104,6 +1105,8 @@ export function applyFastTrackPaydayBonus(player: Player, share = 1): number {
 // ============================================================
 
 export interface LifeScoreBreakdown {
+  scoringVersion?: string;
+  historyRounds?: number;
   // 7 維度原始分（0–100，供雷達圖使用）
   netWorth:            number;
   passiveIncome:       number;
@@ -1143,6 +1146,17 @@ export interface LifeScoreBreakdown {
  * @param player   結算玩家
  * @param deathAge 玩家死亡或遊戲結束時的年齡
  */
+export function connectionScore(player: Player): number {
+  return Math.min(100, (player.isMarried ? 25 : 0) + player.numberOfChildren * 25
+    + Math.min(FAMILY_TIE_CAP, player.familyTiePoints ?? 0) * 2);
+}
+
+export function recordWellbeingRound(player: Player, round: number): void {
+  const history = player.wellbeingHistory ??= [];
+  if (history.some(sample => sample.round === round)) return;
+  history.push({ round, health: Math.max(0, Math.min(100, player.stats.health)), connection: connectionScore(player) });
+}
+
 export function calculateLifeScore(player: Player, deathAge: number, monthsPerRound: number = MONTHS_PER_ROUND): LifeScoreBreakdown {
   const totalDebt = player.liabilities.reduce((s, l) => s + l.totalDebt, 0);
   const totalAssetValue = player.assets.reduce((s, a) => s + a.currentValue, 0);
@@ -1164,12 +1178,8 @@ export function calculateLifeScore(player: Player, deathAge: number, monthsPerRo
     netEstate = totalAssetValue + player.cash - totalDebt;
   }
 
-  let legacyRaw: number;
-  if (player.numberOfChildren === 0) {
-    legacyRaw = 50;
-  } else {
-    legacyRaw = Math.min(100, Math.max(0, (netEstate / monthlyExpenses / runwayTarget) * 100));
-  }
+  // 遺產可以留給親友或社群，不以是否有子女決定財務傳承分。
+  let legacyRaw = Math.min(100, Math.max(0, (netEstate / monthlyExpenses / runwayTarget) * 100));
   // 慈善累積加成：每 $100K +5 點傳承（最多 +30）
   const charityBonus = Math.min(30, Math.floor((player.charityTotal ?? 0) / 100_000) * 5);
   // 個別事件累積的傳承點（夢想清單、里程碑、特殊事件）
@@ -1181,11 +1191,14 @@ export function calculateLifeScore(player: Player, deathAge: number, monthsPerRo
   const netWorth_raw        = Math.min(100, Math.max(0, (runwayMonths / runwayTarget) * 100));
   const passiveIncome_raw   = Math.min(100, Math.max(0, (passiveCoverage / SCORE_PASSIVE_COVERAGE_FULL) * 100));
   const lifeExperience_raw  = Math.min(100, player.lifeExperience / 2);
-  const hp_raw              = player.stats.health;
+  const history = player.wellbeingHistory ?? [];
+  const sustained = (key: 'health' | 'connection', final: number) => history.length
+    ? history.reduce((sum, sample) => sum + sample[key], 0) / history.length * 0.7 + final * 0.3
+    : final;
+  const hp_raw              = sustained('health', Math.max(0, Math.min(100, player.stats.health)));
   const ageScore_raw        = Math.min(100, ((deathAge - GAME_START_AGE) / (GAME_END_AGE - GAME_START_AGE)) * 100);
-  // MAX_CHILDREN = 3：已婚 25 + 三個孩子 75 = 100
-  // 家庭 = 婚姻 25 + 每個孩子（親生或領養）25 + 家庭連結（助養、照顧長輩、指導後輩，最多 50）
-  const family_raw          = Math.min(100, (player.isMarried ? 25 : 0) + player.numberOfChildren * 25 + Math.min(FAMILY_TIE_CAP, player.familyTiePoints ?? 0));
+  // 婚育與照顧／社群路線同樣可滿分；以歷程為主，避免終局一次性補分。
+  const family_raw          = sustained('connection', connectionScore(player));
   const nt_raw              = Math.min(100, player.stats.network * 10);
 
   // ── 3 大幸福指數（0–100）──
@@ -1237,6 +1250,8 @@ export function calculateLifeScore(player: Player, deathAge: number, monthsPerRo
     achievements.push('夢想成真');
 
   return {
+    scoringVersion: 'balanced-2026-10',
+    historyRounds: history.length,
     netWorth:            Math.round(netWorth_raw),
     passiveIncome:       Math.round(passiveIncome_raw),
     lifeExperience:      Math.round(lifeExperience_raw),

@@ -324,6 +324,7 @@ export interface GameState {
   globalPaydayNumber?: number;
   basicInvestmentOffers?: Array<{ id: string; name: string; cost: number; monthlyCashflow: number; description: string }>;
   decisionPhase?: {
+    settlement?: { round: number; payouts: import('../components/game/RoundPaydayBanner').RoundPaydayPayout[] };
     id: string;
     kind: 'reading' | 'payday' | 'deal' | 'charity' | 'crisis' | 'relationship' | 'marriage' | 'startup' | 'auction' | 'actions';
     description?: string;
@@ -366,6 +367,8 @@ export interface FacilitatorScene {
 }
 
 export interface LifeScoreBreakdown {
+  scoringVersion?: string;
+  historyRounds?: number;
   // 7 維度原始分（0–100，供雷達圖）
   netWorth:            number;
   passiveIncome:       number;

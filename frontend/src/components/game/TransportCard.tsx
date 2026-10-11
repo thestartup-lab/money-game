@@ -17,6 +17,7 @@ export default function TransportCard({ player, canUseActions, emit }: Props) {
         <p className="text-sm font-bold text-sky-200">🚗 交通</p>
         <span className="text-[11px] text-gray-400">每月 {money(t.monthly)}</span>
       </div>
+      <p className="text-xs text-gray-400">購車體驗獎勵於持有至下一次回合結算時發放；結算前賣出不加分。</p>
       {t.car ? (
         <div className="rounded-lg bg-gray-900 p-2 text-xs text-gray-300">
           <p className="font-bold text-white">{t.car.name}{t.car.workVehicle ? '（工作用）' : ''}</p>

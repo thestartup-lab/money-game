@@ -344,14 +344,14 @@ export function retirementSceneDescription(player: Player): string {
   return lines.join('\n');
 }
 
-/** 到達轉折輪時：所有存活玩家進入高齡支出階段；還在內圈工作的玩家排入轉折隊列。 */
+/** 到達轉折輪時：內外圈在職玩家都要面對退休轉折。 */
 export function queueRetirementCandidates(gs: GameState): void {
   if (gs.turnNumber < RETIREMENT_ROUND) return;
   for (const id of gs.playerOrder) {
     const player = gs.players.get(id);
     if (!player?.isAlive) continue;
     player.isSenior = true;
-    if (player.isInFastTrack || player.retirementStatus !== 'working') continue;
+    if (player.retirementStatus !== 'working') continue;
     if (player.retirementDeferrals > 0 && player.retirementDeferralRound === gs.turnNumber) continue;
     if (!gs.retirementQueue.includes(id)) gs.retirementQueue.push(id);
   }
@@ -362,7 +362,7 @@ export function tryOpenRetirementScene(gs: GameState): boolean {
   while (gs.retirementQueue.length > 0) {
     const id = gs.retirementQueue.shift()!;
     const player = gs.players.get(id);
-    if (!player?.isAlive || player.isInFastTrack || player.retirementStatus !== 'working') continue;
+    if (!player?.isAlive || player.retirementStatus !== 'working') continue;
     beginFacilitatorScene(gs, {
       kind: 'retirement', kicker: '65 歲人生轉折', title: `${player.name} 的退休選擇`,
       description: retirementSceneDescription(player), participantNames: [player.name],

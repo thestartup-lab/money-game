@@ -197,6 +197,7 @@ export interface MarketEvent {
  * submitted 只公開「是否已送出」，不公開實際選項，避免大螢幕洩漏策略。
  */
 export interface DecisionPhaseState {
+  settlement?: { round: number; payouts: import('./paydayFlow').RoundPayout[] };
   id: string;
   kind: 'reading' | 'payday' | 'deal' | 'charity' | 'crisis' | 'relationship' | 'marriage' | 'startup' | 'auction' | 'actions';
   description?: string;
@@ -516,6 +517,8 @@ export class Player {
    * 值越高最終 Life Score 越高，體現「豐富人生」的遊戲主題。
    */
   lifeExperience: number;
+  /** 每輪一次的歷程快照；不回填舊存檔，避免捏造歷史。 */
+  wellbeingHistory: { round: number; health: number; connection: number }[] = [];
   /** 是否曾選擇「繼續進修」（20 歲職業選擇時），會帶來學生貸款但開放高階職業 */
   hasContinuedEducation: boolean;
   /** 玩家職涯起始年齡（22 = 基礎職業，25 = 進修後高階職業） */
@@ -527,7 +530,7 @@ export class Player {
   /** 人生規劃買的健康維護還涵蓋幾輪（每輪發薪時扣 1；> 0 時該輪 HP 不衰退） */
   healthMaintenanceRounds = 0;
   /** 名下的車（null = 沒有車，每月付交通費） */
-  car: { optionId: string; name: string; runningCost: number; lifeExpPerRound: number; workVehicle: boolean } | null = null;
+  car: { optionId: string; name: string; runningCost: number; lifeExpPerRound: number; workVehicle: boolean; pendingPurchaseExperience?: number } | null = null;
   /** 家庭連結分數：助養兒童、照顧長輩、指導後輩（最多 FAMILY_TIE_CAP，計入家庭分數） */
   familyTiePoints = 0;
   /** 助養兒童的份數 */

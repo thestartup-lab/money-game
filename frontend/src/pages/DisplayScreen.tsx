@@ -17,7 +17,7 @@ import DecisionCountdown from '../components/game/DecisionCountdown';
 import TurnIntroOverlay, { type TurnIntroData } from '../components/game/TurnIntroOverlay';
 import FacilitatorSceneOverlay from '../components/game/FacilitatorSceneOverlay';
 import BoardReadingPanel from '../components/game/BoardReadingPanel';
-import RoundPaydayBanner, { type RoundPaydayPayout } from '../components/game/RoundPaydayBanner';
+import type { RoundPaydayPayout } from '../components/game/RoundPaydayBanner';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
@@ -53,8 +53,6 @@ export default function DisplayScreen() {
   // 復盤：主持人控制的步驟、獎項揭曉進度、投影中的玩家
   const [reviewStep, setReviewStep] = useState(0);
   // 每輪自動發薪：逐年顯示入帳
-  const [roundPayday, setRoundPayday] = useState<{ key: number; payouts: RoundPaydayPayout[] } | null>(null);
-  const clearRoundPayday = useCallback(() => setRoundPayday(null), []);
   const [screenAnalysis, setScreenAnalysis] = useState<PlayerAnalysis | null>(null);
   const reviewPlayerIdRef = useRef<string | undefined>(undefined);
   const appliedReviewKeyRef = useRef('');
@@ -258,7 +256,6 @@ export default function DisplayScreen() {
     s.on('advisorAdvice', (p: { advisorName: string; targetName: string; emoji: string; text: string }) => addTicker(`👴 家族顧問 ${p.advisorName} 對 ${p.targetName} 說：${p.emoji} ${p.text}`));
     s.on('roundPayday', (p: { payouts: RoundPaydayPayout[] }) => {
       if (!p.payouts?.length) return;
-      setRoundPayday({ key: Date.now(), payouts: p.payouts });
       addTicker(`💵 ${p.payouts[0].fromAge}–${p.payouts[0].toAge} 歲發薪：每個人這 ${p.payouts[0].years.length} 年的收支已入帳`);
     });
     s.on('basicInvestmentResult', (p: { playerName: string; message: string }) => {
@@ -846,6 +843,13 @@ export default function DisplayScreen() {
             />}
 
             {/* 擲骰動畫 overlay */}
+            {currentTurnPlayer?.isInFastTrack && !gameState.facilitatorScene && !gameState.decisionPhase && (
+              <aside className="absolute top-3 left-3 z-10 max-w-md rounded-xl bg-slate-950/95 border border-amber-500 p-4 text-white">
+                <h3 className="text-xl font-bold text-amber-200">{currentTurnPlayer.name} 的第二人生</h3>
+                <p className="text-sm text-gray-300">體驗、關係與傳承、經營：財務自由後仍有選擇。</p>
+                {(currentTurnPlayer.bucketGoals ?? []).map(goal => <p key={goal.id} className="mt-2 text-lg">{goal.claimed ? '✓' : goal.emoji} {goal.title}</p>)}
+              </aside>
+            )}
             <DiceRollOverlay
               data={diceAnim}
               size="large"
@@ -938,16 +942,6 @@ export default function DisplayScreen() {
                   <p className="mt-5 text-sm text-gray-400">{gameState.decisionPhase.kind === 'actions' ? '全員完成就自動開始擲骰；主持人也可提前結束' : '內容全場公開，一起討論；本人在手機選擇，送出後揭曉'}</p>
                 </div>
               </div>
-            )}
-
-            {/* 每輪自動發薪：逐年入帳 */}
-            {roundPayday && (
-              <RoundPaydayBanner
-                key={roundPayday.key}
-                payouts={roundPayday.payouts}
-                colorOf={(playerId) => playerColor(playerColorIndex(gameState.playerOrder, playerId, Math.max(0, gameState.players.findIndex((p) => p.id === playerId))))}
-                onDone={clearRoundPayday}
-              />
             )}
 
             {/* 人生規劃決策小卡 overlay */}

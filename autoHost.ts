@@ -56,6 +56,7 @@ export function runAutoHost(gs: GameState, now = Date.now()): string | null {
 
   if (phase) {
     if (phase.kind === 'reading') {
+      if (phase.settlement) return null;
       const readingMs = gs.readingAutoContinueMs > 0 ? gs.readingAutoContinueMs : AUTO_HOST_TIMING.readingMs;
       return now - phase.startedAt >= wait(readingMs + 500) && release(gs, phase.id) ? `落格說明結束：${phase.title}` : null;
     }

@@ -1,10 +1,12 @@
 /** 全體發薪：計時、全員同時規劃、依序結算 */
 import { Socket } from 'socket.io';
+import { monthlyLedger } from './settlementLedger';
 import { GameState, Player, PaydayPlanPayload, GamePhase } from './gameDataModels';
 import { BASIC_INVESTMENTS, buyBasicInvestment } from './basicInvestments';
 import { currentBondRate, shiftBondRate } from './bondFund';
 import { resolveNegativeCash } from './bankruptcy';
 import { ageCar } from './cars';
+import { recordWellbeingRound } from './gameLogic';
 import { LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS } from './gameConfig';
 import { syncPlayerAges, triggerPayday, checkAndApplyAnnualTax, getCurrentAge, applyFastTrackAppreciation, applyFastTrackPaydayBonus, pauseGameClock, resumeGameClock } from './gameLogic';
 import { PLAN_COVER_ROUNDS, FAST_TRACK_ROUND_SHARE, MONTHS_PER_GLOBAL_PAYDAY, PAYDAY_MAX_ROUNDS, MONTHS_PER_ROUND, CONSULTANT_HP_COST_PER_CYCLE, GROWTH_CYCLES_PER_GLOBAL_PAYDAY, YEARS_PER_COMPLETED_ROUND, STOCK_DCA_MONTHLY_RETURN_RATE, STOCK_DCA_MONTHLY_DIVIDEND_RATE } from './gameConfig';
@@ -12,7 +14,7 @@ import { expireWorldEffects } from './worldEvents';
 import { applyPaydayPlan, checkBedriddenStatus, applyHPChange } from './statsSystem';
 import { serializeGameState, buildActionInfo, buildAffordableOptions } from './playerView';
 import {
-  advanceTurn, announceCareerUnlock, beginHostDecisionPhase, calcNetWorth, checkBucketGoals, checkLifeMilestones,
+  advanceTurn, announceCareerUnlock, beginHostDecisionPhase, calcNetWorth, checkBucketGoals, checkLifeMilestones, enqueueBoardNotice,
   emitCellEvent, emitClient, emitToRoom, evaluateAndMaybeTriggerAdaptiveEvent, executeSocialAction, executeTravelAction,
   getPlayerSocket, getQuarterTravelDestinations, logPlayerEvent, maybeCompleteActionPhase, pendingSubmissions, privateReplay,
   queueSecondLifeCandidates, tryOpenSecondLife, tryOpenWorldEvent, waitForHostRelease,
@@ -54,6 +56,7 @@ export function settleQuarterMonths(
   fastTrackShare = 1,
   /** 傳入時改為累計稅額，不逐年廣播（每輪發薪一次說明，避免大螢幕洗版） */
   taxTotals?: { paid: number; saved: number },
+  ledger?: Record<string, number>,
 ): number[] {
   const yearlyCash: number[] = [];
   let yearStartCash = player.cash;
@@ -74,7 +77,9 @@ export function settleQuarterMonths(
       dcaAsset.monthlyCashflow = dcaDividend;
     }
 
-    triggerPayday(player, gs, maintenanceCovered, month <= growthCycles);
+    triggerPayday(player, gs, maintenanceCovered, month <= growthCycles, ledger ? p => {
+      for (const [label, amount] of Object.entries(monthlyLedger(p))) ledger[label] = (ledger[label] ?? 0) + amount;
+    } : undefined);
     if (month <= growthCycles && player.retirementStatus === 'consultant' && player.salary > 0) applyHPChange(player, -CONSULTANT_HP_COST_PER_CYCLE);
     if (month % monthsPerRound === 0 || month === settlementMonths) {
       const yearIndex = Math.ceil(month / monthsPerRound);
@@ -103,10 +108,6 @@ export function settleQuarterMonths(
     }
 
     if (!player.profession.hasFlexibleSchedule) player.actionTokensThisPayday = 1;
-    if (month % 12 === 0 || month === settlementMonths) {
-      yearlyCash.push(player.cash - yearStartCash);
-      yearStartCash = player.cash;
-    }
 
     const { triggered, taxResult } = checkAndApplyAnnualTax(player);
     if (triggered && taxResult && taxTotals) {
@@ -127,6 +128,10 @@ export function settleQuarterMonths(
         bracketBreakdown: taxResult.bracketBreakdown,
         cashAfterTax: player.cash,
       });
+    }
+    if (month % 12 === 0 || month === settlementMonths) {
+      yearlyCash.push(player.cash - yearStartCash);
+      yearStartCash = player.cash;
     }
   }
 
@@ -172,6 +177,8 @@ export function payCompletedRounds(gs: GameState): void {
 }
 
 export interface RoundPayout {
+  cashBefore: number;
+  ledger: Record<string, number>;
   playerId: string;
   playerName: string;
   fromAge: number;
@@ -206,12 +213,16 @@ export function settleRound(gs: GameState): RoundPayout[] {
     const cashBefore = player.cash;
     const covered = (player.healthMaintenanceRounds ?? 0) > 0;
     const taxTotals = { paid: 0, saved: 0 };
-    const yearly = settleQuarterMonths(getPlayerSocket(player.id), gs, player, covered, months, 1, FAST_TRACK_ROUND_SHARE * yearsLived / YEARS_PER_COMPLETED_ROUND, taxTotals);
+    const ledger: Record<string, number> = {};
+    const yearly = settleQuarterMonths(getPlayerSocket(player.id), gs, player, covered, months, 1, FAST_TRACK_ROUND_SHARE * yearsLived / YEARS_PER_COMPLETED_ROUND, taxTotals, ledger);
+    ledger['年度所得稅'] = -taxTotals.paid;
     if (covered) player.healthMaintenanceRounds -= 1;
     // 車子折舊、好車帶來的體驗
     ageCar(player, yearsLived);
     const ageStep = yearly.length > 0 ? yearsLived / yearly.length : 1;
     payouts.push({
+      cashBefore,
+      ledger,
       playerId: player.id,
       playerName: player.name,
       fromAge,
@@ -232,9 +243,18 @@ export function settleRound(gs: GameState): RoundPayout[] {
       emitToRoom(gs.gameId, 'notification', { message: `${resolution.bankrupt ? '💥' : '💸'} ${player.name}：${text}` });
       if (resolution.bankrupt) emitToRoom(gs.gameId, 'playerBankrupt', { playerId: player.id, playerName: player.name, steps: resolution.steps });
     }
+    recordWellbeingRound(player, gs.turnNumber);
     queueSecondLifeCandidates(gs, player);
+    const payout = payouts[payouts.length - 1];
+    payout.cashAfter = player.cash;
+    payout.total = player.cash - cashBefore;
+    payout.monthlyCashflow = player.monthlyCashflow;
+    ledger['獎勵／資產出售／應急借款等調整'] = payout.total - Object.values(ledger).reduce((a, b) => a + b, 0);
+    const lastYear = payout.years[payout.years.length - 1];
+    if (lastYear) lastYear.cash += payout.total - payout.years.reduce((n, y) => n + y.cash, 0);
   }
   if (payouts.length > 0) {
+    enqueueBoardNotice(gs, { playerId: payouts[0].playerId, playerName: '全體玩家', title: '本輪收支結算', description: '所有金額已入帳；請主持人帶領看完摘要後繼續。', settlement: { round: gs.turnNumber, payouts } });
     emitToRoom(gs.gameId, 'roundPayday', { round: gs.turnNumber, months: monthsPerRound, payouts });
   }
   return payouts;

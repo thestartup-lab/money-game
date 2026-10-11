@@ -71,7 +71,9 @@ npm run dev
 | `STATE_DIR` | 存檔資料夾；沒設時用 Railway volume（`RAILWAY_VOLUME_MOUNT_PATH`），再沒有就用 `./data` |
 | `PERSIST_ROOMS` | `1` 在本機也存檔；`0` 關閉。正式環境（Railway）預設開啟，本機與測試預設關閉 |
 
-> Railway 容器的本機硬碟在**重新部署時會被清空**。要跨部署保留存檔，請在 Railway 後端服務加一個 Volume（掛載路徑例如 `/data`），系統會自動使用。`/health` 的 `persistence` 欄位會顯示 `volume`（已跨部署保留）或 `container-disk`（只撐得過程式重啟）。
+> Railway 容器的本機硬碟在**重新部署時會被清空**。要跨部署保留存檔，需在 Railway 後端服務掛載 Volume（例如 `/data`），系統會自動使用；單獨設定 `STATE_DIR` 不會建立永久磁碟。`/health` 的 `persistence` 會顯示 `volume`（路徑在平台指定的掛載目錄內）、`container-disk`（容器本機磁碟，並附 `persistenceWarning`）或 `local-disk`（本機開發磁碟）。狀態不代表已通過跨部署還原驗證。
+
+永久磁碟上線前：先結束活動，再掛載磁碟，確認 `STATE_DIR` 沒有覆寫到掛載目錄以外；用測試房間完成一回合、等待靜止點存檔後重新部署，確認原主持人控制碼、玩家身分及現金／輪數均可還原。掛載新磁碟不會自動搬移舊容器的存檔；有需保留的房間時須另行安排安全搬移。房間快照含控制碼雜湊與重連憑證，勿公開上傳。
 
 ### 前端（`frontend/` 目錄）
 

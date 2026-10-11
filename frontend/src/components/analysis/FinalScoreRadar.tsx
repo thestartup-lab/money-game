@@ -64,6 +64,9 @@ export default function FinalScoreRadar({ score, playerName, compareScore, compa
         <span className="text-2xl font-bold text-emerald-400">{Math.round(score.total)} 分</span>
       </div>
       <ReactECharts option={option} style={{ height: 260 }} />
+      {score.scoringVersion === 'balanced-2026-10' ? (
+        <p className="text-sm text-gray-300">健康與關係連結：{score.historyRounds ? `已記錄 ${score.historyRounds} 輪，歷程占 70%、終點占 30%` : '尚無歷程，依已知狀態評分'}。婚育與照顧／社群路線都能滿分，傳承不以有無子女區分。</p>
+      ) : <p className="text-sm text-gray-400">此紀錄沿用當時的評分規則，未套用新版歷程計分。</p>}
       {/* 細項分數 */}
       <div className="grid grid-cols-4 gap-1 mt-2">
         {DIMENSIONS.map((d) => (

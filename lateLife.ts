@@ -1,6 +1,6 @@
 /**
  * 後半場目標（2026-09-29 起）：脫離內圈之後、離世之後，也還有事可做。
- * - 指導後輩：外圈玩家每輪可以在行動時間指導一位還在內圈的玩家（對方專長 +10），自己得到傳承與體驗。
+ * - 指導交流：外圈玩家每輪可以在行動時間指導另一位玩家（內外圈皆可）。
  * - 家族顧問：離世的玩家可以在全場共同抉擇投票，也可以每輪給一位還在世的玩家一句建議。
  */
 import type { GameState, Player } from './gameDataModels';
@@ -37,7 +37,7 @@ export function mentorBlockReason(gs: GameState, mentor: Player | undefined, tar
   if (mentor.lastMentorRound === gs.turnNumber) return '這一輪已經指導過了，下一輪再來。';
   if (!target || target.id === mentor.id) return '請選擇另一位玩家。';
   if (!target.isAlive) return '對方已離世。';
-  if (target.isInFastTrack) return '對方已經在外圈，請指導還在內圈的玩家。';
+  // 全員進入外圈後仍能互相交流，避免良師益友目標永久無法完成。
   return null;
 }
 

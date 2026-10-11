@@ -44,5 +44,35 @@ test('買車：貸款付頭期款、每月車貸加養車費、不用付交通�
   cars.buyCar(p, 'sports', true);
   assert.equal(p.expenses.carLoanPayment, 0, '現金買沒有車貸');
   cars.ageCar(p, 4);
-  assert.equal(p.lifeExperience, lifeExp + 10 + 8, '跑車買時 +10、每輪 +8');
+  assert.equal(p.lifeExperience, lifeExp + 10 + 8, '跑車持有至結算 +10、每輪 +8');
+});
+
+test('同輪反覆現金或貸款買賣不刷體驗；未經過年數也不發獎', () => {
+  for (const payCash of [true, false]) {
+    const p = createPlayer('audit', '玩家', 'teacher'); p.cash = 10_000_000;
+    const before = p.lifeExperience;
+    for (let i = 0; i < 10; i++) {
+      assert.equal(cars.buyCar(p, 'sports', payCash).success, true);
+      cars.ageCar(p, 0);
+      assert.equal(cars.sellCar(p).success, true);
+    }
+    assert.equal(p.cash, 10_000_000);
+    assert.equal(p.lifeExperience, before);
+  }
+});
+
+test('購車待發獎勵可存檔還原、結算只發一次；舊車不補發', () => {
+  const { encode, decode } = require('../dist/roomPersistence');
+  const p = createPlayer('p', '玩家', 'teacher'); p.cash = 10_000_000;
+  const before = p.lifeExperience;
+  cars.buyCar(p, 'sports', true);
+  assert.equal(p.lifeExperience, before);
+  const restored = decode(JSON.parse(JSON.stringify(encode(p))));
+  cars.ageCar(restored, 4);
+  assert.equal(restored.lifeExperience, before + 18);
+  cars.ageCar(restored, 4);
+  assert.equal(restored.lifeExperience, before + 26, '第二次只有每輪獎勵');
+  delete p.car.pendingPurchaseExperience;
+  cars.ageCar(p, 4);
+  assert.equal(p.lifeExperience, before + 8, '舊版車輛不重複補發購車獎勵');
 });

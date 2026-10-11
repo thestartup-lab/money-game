@@ -16,14 +16,14 @@ export default function LateLifePanel({ gameState, me, canUseActions, emit }: Pr
 }
 
 function SecondLifeGoals({ gameState, me, canUseActions, emit }: Props) {
-  const juniors = gameState.players.filter((p) => p.isAlive && !p.isInFastTrack && p.id !== me.id);
+  const juniors = gameState.players.filter((p) => p.isAlive && p.id !== me.id);
   const mentoredThisRound = me.lastMentorRound === gameState.turnNumber;
   const goals = me.bucketGoals ?? [];
   return (
     <div className="mx-4 my-2 space-y-3 rounded-2xl border border-purple-700 bg-purple-950/40 p-4">
       <div>
         <p className="text-base font-black text-purple-200">🎯 第二人生的目標</p>
-        <p className="text-xs text-gray-400">錢已經不是問題了。接下來看你怎麼過：完成夢想、照顧健康、把經驗傳下去。</p>
+        <p className="text-xs text-gray-400">財務自由不是終點：完成夢想、照顧健康、把經驗傳下去；也要繼續面對風險與退休選擇。</p>
       </div>
       {goals.length > 0 && (
         <div className="space-y-1.5">
@@ -42,9 +42,9 @@ function SecondLifeGoals({ gameState, me, canUseActions, emit }: Props) {
       )}
       <div className="rounded-xl border border-indigo-700 bg-indigo-950/50 p-3">
         <p className="text-sm font-bold text-indigo-100">🧑‍🏫 指導後輩（每輪一次）</p>
-        <p className="text-xs text-gray-400">選一位還在內圈的玩家：對方專長 +10、體驗 +3；你傳承 +5、體驗 +5。在全體行動時間進行。</p>
+        <p className="text-xs text-gray-400">選一位其他玩家（內外圈皆可）：對方專長 +10、體驗 +3；你傳承 +5、體驗 +5。在全體行動時間進行。</p>
         {juniors.length === 0 ? (
-          <p className="mt-2 text-xs text-gray-500">大家都已經進入外圈了。</p>
+          <p className="mt-2 text-xs text-gray-500">目前沒有其他在世玩家可交流。</p>
         ) : mentoredThisRound ? (
           <p className="mt-2 text-xs text-emerald-300">這一輪已經指導過了，下一輪再來。</p>
         ) : (

@@ -38,7 +38,7 @@ test('領養：單身也可以、孩子 3 歲算子女支出、60 歲以後不�
   assert.match(fam.adoptionBlock(old.gs, old.p), /60/);
 });
 
-test('家庭分數：不結婚、不生小孩，靠助養、照顧長輩、指導後輩最多拿到 50', () => {
+test('家庭分數：不結婚、不生小孩，靠助養、照顧長輩、指導後輩也能滿分', () => {
   const { gs, p } = setup(40);
   const base = calculateLifeScore(p, 40).family;
   assert.equal(base, 0);
@@ -47,9 +47,9 @@ test('家庭分數：不結婚、不生小孩，靠助養、照顧長輩、指�
   assert.equal(p.familyTiePoints, 20);
   assert.equal(p.recurringExpenses.filter((r) => r.label === '助養兒童').length, 2);
   p.familyTiePoints = 80;
-  assert.equal(calculateLifeScore(p, 40).family, cfg.FAMILY_TIE_CAP, '家庭連結最多 50');
+  assert.equal(calculateLifeScore(p, 40).family, 100, '家庭連結 50 點對應滿分');
   p.isMarried = true;
-  assert.equal(calculateLifeScore(p, 40).family, 75);
+  assert.equal(calculateLifeScore(p, 40).family, 100);
   void gs;
 });
 

@@ -17,7 +17,7 @@ export function beginHostDecisionPhase(
   kind: DecisionPhaseState['kind'],
   title: string,
   description?: string,
-  options?: { rescue?: boolean; publicLines?: string[] },
+  options?: { rescue?: boolean; publicLines?: string[]; settlement?: DecisionPhaseState['settlement'] },
 ): HostDecisionContext {
   const wasAlreadyPaused = gs.pausedAt !== null;
   if (!wasAlreadyPaused) pauseGameClock(gs);
@@ -47,6 +47,7 @@ export function beginHostDecisionPhase(
     reminderEndsAt: Date.now() + (options?.rescue ? 120 : reminderSeconds[kind]) * 1000,
     rescue: options?.rescue ? true : undefined,
     publicLines: options?.publicLines,
+    settlement: options?.settlement,
   };
 
   emitToRoom(gs.gameId, 'decisionPhaseStarted', gs.decisionPhase);
