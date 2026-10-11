@@ -22,7 +22,8 @@ import CollapsePanel from '../components/game/CollapsePanel';
 import DecisionCountdown from '../components/game/DecisionCountdown';
 import '../components/game/MobileClarity.css';
 import LateLifePanel from '../components/game/LateLifePanel';
-import { getLineToken, resetLineLogin } from '../lineLogin';
+import { getLineToken, resetLineLogin, lineLoginErrorMessage } from '../lineLogin';
+import { lineRoomUrl, roomCodeFromSearch } from '../lineEntry';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
@@ -115,13 +116,11 @@ export default function PlayerPage() {
   const [lineBusy, setLineBusy] = useState(false);
   const [guestJoin, setGuestJoin] = useState(false);
   const [roomCode, setRoomCode] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    return (params.get('room') ?? '').toUpperCase();
+    return roomCodeFromSearch(window.location.search);
   });
   // 只有從 URL 帶入房間碼時才預設為「已鎖定」；手動輸入時一直維持輸入框
   const [roomLocked, setRoomLocked] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    return (params.get('room') ?? '').length > 0;
+    return Boolean(roomCodeFromSearch(window.location.search));
   });
   const [error, setError] = useState('');
 
@@ -147,12 +146,22 @@ export default function PlayerPage() {
       timeout: 20000,
     });
     socketRef.current = s;
+    let disposed = false;
 
     const resumeLineLogin = async () => {
+      setLineBusy(true);
       try {
         const token = await getLineToken(false);
-        if (token && s.connected && !sessionRef.current) s.emit('lineAuthenticate', { idToken: token });
-      } catch { /* The explicit LINE button offers retry without blocking legacy reconnect. */ }
+        if (disposed || !s.connected || sessionRef.current) return;
+        const returnedRoom = roomCodeFromSearch(window.location.search);
+        if (returnedRoom) { setRoomCode(returnedRoom); setRoomLocked(true); }
+        if (token) s.emit('lineAuthenticate', { idToken: token });
+        else setLineBusy(false);
+      } catch (error) {
+        if (disposed || !s.connected || sessionRef.current) return;
+        setLineBusy(false);
+        setError(lineLoginErrorMessage(error));
+      }
     };
     s.on('lineAuthenticated', (profile: { displayName: string; picture?: string }) => {
       setLineProfile(profile);
@@ -177,7 +186,7 @@ export default function PlayerPage() {
         const saved = sessionRef.current ?? JSON.parse(localStorage.getItem('baisuiGame') ?? 'null');
         if (!saved?.playerName || !saved?.roomCode || !saved?.reconnectToken) { void resumeLineLogin(); return; }
         // 掃了另一個房間的 QR 時，不要拿舊房間的身分自動續玩
-        const urlRoom = (new URLSearchParams(window.location.search).get('room') ?? '').toUpperCase();
+        const urlRoom = roomCodeFromSearch(window.location.search);
         if (!sessionRef.current && urlRoom && urlRoom !== String(saved.roomCode).toUpperCase()) {
           try { localStorage.removeItem('baisuiGame'); } catch { /* storage unavailable */ }
           void resumeLineLogin();
@@ -720,8 +729,17 @@ export default function PlayerPage() {
     });
 
 
-    return () => { s.disconnect(); };
+    return () => { disposed = true; s.disconnect(); };
   }, []);
+
+  useEffect(() => {
+    if (!lineBusy) return;
+    const timer = window.setTimeout(() => {
+      setLineBusy(false);
+      setError('LINE 登入驗證逾時。請確認網路，或點「從 LINE 重新開啟此房間」再試一次。');
+    }, 20000);
+    return () => window.clearTimeout(timer);
+  }, [lineBusy]);
 
   const emit = (event: string, ...args: unknown[]) => socketRef.current?.emit(event, ...args);
 
@@ -794,8 +812,9 @@ export default function PlayerPage() {
                 const token = await getLineToken(true, roomCode.toUpperCase());
                 if (token) emit('lineAuthenticate', { idToken: token });
                 else setLineBusy(false);
-              } catch { setLineBusy(false); setError('無法完成 LINE 登入，請確認網路後重試。'); }
+              } catch (error) { setLineBusy(false); setError(lineLoginErrorMessage(error)); }
             }}>{lineBusy ? '正在驗證 LINE…' : '使用 LINE 登入'}</button>}
+            {!lineProfile && <a href={lineRoomUrl(roomCode)} className="block py-2 text-center text-base font-bold text-emerald-200 underline">從 LINE 重新開啟此房間</a>}
             <p className="text-sm text-slate-300">透過鑫力官方帳號登入。只使用帳號識別、名稱與頭像來綁定本場角色，不讀取聊天訊息。LINE 名稱不等於實名驗證，請確認下方學員姓名。</p>
             {!lineProfile ? <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={guestJoin} onChange={e => setGuestJoin(e.target.checked)} />主持人已開放，我要臨時加入（無 LINE）</label> : null}
           </section>

@@ -3,6 +3,7 @@ import { PLAYER_COLORS, playerColor, playerColorIndex } from '../components/game
 import { io, Socket } from 'socket.io-client';
 import ReactECharts from '../components/analysis/GameChart';
 import { QRCodeSVG } from 'qrcode.react';
+import { lineRoomUrl } from '../lineEntry';
 import type { GameState, RoomAnalysis, LifeScoreBreakdown, PlayerAnalysis, ReviewView, ReviewViewState } from '../types/game';
 import ReviewGuide from '../components/review/ReviewGuide';
 import LifeCurvesView from '../components/review/LifeCurvesView';
@@ -556,7 +557,7 @@ export default function DisplayScreen() {
     );
   }
 
-  const playerUrl = `${window.location.protocol}//${window.location.host}/?room=${gameState.roomId}`;
+  const playerUrl = lineRoomUrl(gameState.roomId);
 
   // 把玩家轉為 GameBoard 格式（含 HP / 現金流 / 年齡等富資訊，給棋盤中央面板顯示）
   const boardPlayers: BoardPlayer[] = gameState.players.map((p, i) => ({

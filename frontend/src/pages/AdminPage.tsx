@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import type { GameState, Player, RoomAnalysis } from '../types/game';
 import { QRCodeSVG } from 'qrcode.react';
+import { lineRoomUrl } from '../lineEntry';
 import DecisionCountdown from '../components/game/DecisionCountdown';
 import ClassicReviewLibrary from '../components/analysis/ClassicReviewLibrary';
 import FacilitatorControlPanel from '../components/game/FacilitatorControlPanel';
@@ -342,7 +343,7 @@ export default function AdminPage() {
 
   // 展示頁 URL（讓展示頁自動帶房間代碼）
   const displayUrl = `${window.location.protocol}//${window.location.host}/?display&room=${roomId}`;
-  const playerUrl = `${window.location.protocol}//${window.location.host}/?room=${roomId}`;
+  const playerUrl = lineRoomUrl(roomId);
   const hostUrl = `${window.location.protocol}//${window.location.host}/?host&room=${roomId}&code=${readAdminCode(roomId)}`;
 
   const phaseLabel: Record<string, string> = {
