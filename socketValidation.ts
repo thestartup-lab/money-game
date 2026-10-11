@@ -34,11 +34,15 @@ function safeTree(value: unknown, depth = 0): boolean {
 export function validateSocketPayload(event: string, payload: unknown): boolean {
   if (event === 'lineAuthenticate') {
     return !!payload && typeof payload === 'object' && !Array.isArray(payload)
-      && Object.keys(payload).length === 1
+      && Object.keys(payload).every(k => ['idToken', 'roomCode', 'brandId'].includes(k))
+      && (!('roomCode' in payload) || (typeof payload.roomCode === 'string' && /^[A-Z0-9]{4,6}$/.test(payload.roomCode)))
+      && (!('brandId' in payload) || (typeof payload.brandId === 'string' && /^[a-z][a-z0-9-]{1,39}$/.test(payload.brandId)))
       && typeof (payload as { idToken?: unknown }).idToken === 'string'
       && ((payload as { idToken: string }).idToken.length >= 20)
       && ((payload as { idToken: string }).idToken.length <= 8000);
   }
+  if (event === 'createRoom' && payload && typeof payload === 'object' && 'brandAccessCode' in payload
+    && (typeof payload.brandAccessCode !== 'string' || payload.brandAccessCode.length > 256)) return false;
   if (event === 'setLineLoginRequired') return !!payload && typeof payload === 'object'
     && typeof (payload as { enabled?: unknown }).enabled === 'boolean';
   // socket.io 會把 emit(event, undefined) 編成 null；沒有必填欄位的事件視同無 payload

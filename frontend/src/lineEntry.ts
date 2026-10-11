@@ -1,4 +1,5 @@
 import config from './lineConfig.json';
+import type { LineBrand } from './lineBrand';
 
 export const LINE_ENTRY_URL = `https://liff.line.me/${config.liffId}`;
 
@@ -7,11 +8,18 @@ export function normalizeRoomCode(value: string | null): string {
   return /^[A-Z0-9]{4,6}$/.test(code) ? code : '';
 }
 
-export function lineRoomUrl(roomCode: string): string {
-  const url = new URL(LINE_ENTRY_URL);
+export function lineRoomUrl(roomCode: string, brand?: LineBrand): string {
+  const url = new URL(brand ? `https://liff.line.me/${brand.liffId}` : LINE_ENTRY_URL);
   const room = normalizeRoomCode(roomCode);
   if (room) url.searchParams.set('room', room);
+  if (brand && brand.id !== 'xinli') url.searchParams.set('brand', brand.id);
   return url.href;
+}
+
+export function brandIdFromSearch(search: string): string {
+  const params = new URLSearchParams(search);
+  const id = params.get('brand') ?? new URLSearchParams((params.get('liff.state') ?? '').replace(/^\/?\?/, '')).get('brand');
+  return id && /^[a-z][a-z0-9-]{1,39}$/.test(id) ? id : 'xinli';
 }
 
 // LIFF first arrives with liff.state, then initializes and redirects to ?room=….

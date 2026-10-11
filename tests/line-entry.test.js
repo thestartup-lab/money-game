@@ -16,6 +16,7 @@ function loadFrontend(name, dependencies = {}, location = { origin: 'https://gam
     module, exports: module.exports, URL, URLSearchParams, window: { location },
     require: id => {
       if (id in dependencies) return dependencies[id];
+      if (id === './lineBrand') return loadFrontend('lineBrand');
       if (id === './lineConfig.json') return require('../frontend/src/lineConfig.json');
       throw Error('Unexpected dependency ' + id);
     },
@@ -23,6 +24,19 @@ function loadFrontend(name, dependencies = {}, location = { origin: 'https://gam
   return module.exports;
 }
 const entry = loadFrontend('lineEntry');
+const partner = { id: 'partner', name: '測試品牌', officialAccountId: '@test', channelId: '2999999999', liffId: '2999999999-test' };
+
+test('合作品牌 QR 與登入返回保留品牌、房號，SDK 不混用不同品牌', async () => {
+  assert.equal(entry.lineRoomUrl('abc123', partner), 'https://liff.line.me/2999999999-test?room=ABC123&brand=partner');
+  assert.equal(entry.brandIdFromSearch('?liff.state=%3Froom%3DABC123%26brand%3Dpartner'), 'partner');
+  assert.equal(entry.brandIdFromSearch('?brand=https://evil.test'), 'xinli');
+  let initializedId; let redirect;
+  const api = auth('', { init: async value => { initializedId = value.liffId; }, login: value => { redirect = value.redirectUri; } });
+  await api.getLineToken(true, 'ABC123', partner);
+  assert.equal(initializedId, partner.liffId);
+  assert.equal(redirect, 'https://game.cjlead.com.tw/?room=ABC123&brand=partner&lineLoginReturn=1');
+  await assert.rejects(api.getLineToken(false), /不同品牌/);
+});
 
 test('房間 LINE URL 固定官方入口，保留代碼、不帶主持人控制碼', () => {
   assert.equal(entry.lineRoomUrl('abc123'), 'https://liff.line.me/2011449805-9TCCT06U?room=ABC123');

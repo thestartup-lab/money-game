@@ -1,6 +1,7 @@
 /** 房間、主持人登入、大螢幕、玩家加入與重連（由 socketServer 註冊到每條連線） */
 import type { Socket } from 'socket.io';
 import { verifyLineIdToken, type LineIdentity } from '../lineAuth';
+import { authorizeLineBrand, getLineBrand, listLineBrands, roomLineBrand } from '../lineBrands';
 import { randomBytes } from 'crypto';
 import { Server } from 'socket.io';
 import { GameState, GamePhase } from '../gameDataModels';
@@ -19,7 +20,21 @@ import {
 const lineLoginRate = new Map<string, { count: number; resetAt: number }>();
 
 export function registerRoomHandlers(socket: Socket, onSafe: OnSafe): void {
-  onSafe('lineAuthenticate', async (payload: { idToken: string }) => {
+  // Public metadata only. The room snapshot, never a client-provided channel, chooses verification.
+  const resolveBrand = (roomCode?: string, brandId?: string) => {
+    if (roomCode) {
+      const room = rooms.get(roomCode.toUpperCase());
+      return room ? roomLineBrand(room) : undefined;
+    }
+    return getLineBrand(brandId);
+  };
+  onSafe('listLineBrands', () => { socket.emit('lineBrandList', listLineBrands()); });
+  onSafe('getLineBrand', (payload: { roomCode?: string; brandId?: string }, reply?: (result: unknown) => void) => {
+    if (typeof reply !== 'function') return;
+    const brand = resolveBrand(payload?.roomCode, payload?.brandId);
+    reply(brand ? { brand } : { error: '找不到此房間或可用的 LINE 品牌，請向主持人確認最新 QR Code。' });
+  });
+  onSafe('lineAuthenticate', async (payload: { idToken: string; roomCode?: string; brandId?: string }) => {
     if (socket.data.lineLoginPending) return;
     if (socket.data.playerId || socketRoomMap.has(playerIdentity(socket))) {
       socket.emit('lineLoginFailed', { message: '請另開登入頁；不能在遊戲中切換 LINE 帳號。' }); return;
@@ -31,9 +46,11 @@ export function registerRoomHandlers(socket: Socket, onSafe: OnSafe): void {
     socket.data.lineLoginPending = true;
     delete socket.data.lineIdentity;
     try {
-      const identity = await verifyLineIdToken(payload.idToken);
+      const brand = resolveBrand(payload.roomCode, payload.brandId);
+      if (!brand) throw Error('unknown_brand');
+      const identity = await verifyLineIdToken(payload.idToken, fetch, brand);
       if (!socket.connected || socket.data.playerId || socketRoomMap.has(playerIdentity(socket))) return;
-      socket.data.lineIdentity = identity;
+      socket.data.lineIdentity = { ...identity, brandId: brand.id, channelId: brand.channelId };
       socket.emit('lineAuthenticated', { displayName: identity.displayName, picture: identity.picture });
     } catch {
       // Do not log the token, LINE response, or raw profile.
@@ -64,7 +81,7 @@ export function registerRoomHandlers(socket: Socket, onSafe: OnSafe): void {
    * 建立新的獨立遊戲房間，回傳給主持人的 joinCode 供玩家加入使用。
    * 同一主持人可建立多個房間（多開場次）。
    */
-  onSafe('createRoom', (payload?: { roomId?: string }) => {
+  onSafe('createRoom', (payload?: { roomId?: string; lineBrandId?: string; brandAccessCode?: string }) => {
     const rateKey = socket.handshake.address || playerIdentity(socket);
     if (!consumeRateLimit(roomCreationRate, rateKey, 5, 10 * 60 * 1000)) {
       emitClient(socket, 'error', { message: '建立房間次數過多，請稍後再試。' });
@@ -73,6 +90,10 @@ export function registerRoomHandlers(socket: Socket, onSafe: OnSafe): void {
     if (rooms.size >= MAX_ACTIVE_ROOMS) {
       emitClient(socket, 'error', { message: '目前房間已達上限，請稍後再試。' });
       return;
+    }
+    const brand = authorizeLineBrand(payload?.lineBrandId, payload?.brandAccessCode);
+    if (!brand) {
+      emitClient(socket, 'error', { message: '此 LINE 品牌尚未啟用，或開場授權碼不正確。請向平台管理者確認。' }); return;
     }
     const customCode = payload?.roomId?.trim().toUpperCase();
     if (customCode) {
@@ -87,6 +108,7 @@ export function registerRoomHandlers(socket: Socket, onSafe: OnSafe): void {
     }
     const roomCode = customCode || generateRoomCode();
     const gs = new GameState(roomCode);
+    gs.lineBrand = brand;
     gs.lineLoginRequired = process.env.NODE_ENV !== 'test';
     gs.adminSocketId = playerIdentity(socket);
     const adminCode = randomBytes(6).toString('hex').toUpperCase();
@@ -265,6 +287,7 @@ export function registerRoomHandlers(socket: Socket, onSafe: OnSafe): void {
       playerCount: gs.players.size,
       gamePhase: gs.gamePhase,
       hasAdmin: hasRoomAdmin(gs),
+      lineBrand: roomLineBrand(gs),
     }));
     emitClient(socket, 'roomList', list);
   });
@@ -295,6 +318,11 @@ export function registerRoomHandlers(socket: Socket, onSafe: OnSafe): void {
         socket.emit('error', { message: 'LINE 身分驗證中，請稍候。' }); return;
       }
       const identity = socket.data.lineIdentity as LineIdentity | undefined;
+      const expectedBrand = roomLineBrand(gs);
+      if (identity && (identity.brandId !== expectedBrand.id || identity.channelId !== expectedBrand.channelId)) {
+        delete socket.data.lineIdentity;
+        socket.emit('lineLoginFailed', { message: '此 LINE 身分不屬於本場次品牌，請使用本場最新 QR Code 重新登入。' }); return;
+      }
       if (identity && identity.expiresAt <= Date.now()) {
         delete socket.data.lineIdentity;
         socket.emit('lineLoginFailed', { message: 'LINE 登入已過期，請重新登入。' }); return;

@@ -3,6 +3,8 @@ import { io, Socket } from 'socket.io-client';
 import type { GameState, Player, RoomAnalysis } from '../types/game';
 import { QRCodeSVG } from 'qrcode.react';
 import { lineRoomUrl } from '../lineEntry';
+import { DEFAULT_LINE_BRAND, type LineBrand, type LineBrandOption } from '../lineBrand';
+import LineBrandSelector from '../components/game/LineBrandSelector';
 import DecisionCountdown from '../components/game/DecisionCountdown';
 import ClassicReviewLibrary from '../components/analysis/ClassicReviewLibrary';
 import FacilitatorControlPanel from '../components/game/FacilitatorControlPanel';
@@ -31,6 +33,7 @@ const INITIAL_REMEMBERED_ADMIN_ROOM = readRememberedAdminRoom();
 
 
 interface AdminRoom {
+  lineBrand?: LineBrand;
   roomId: string;
   phase: string;
   playerCount: number;
@@ -68,6 +71,9 @@ export default function AdminPage() {
   const [marriageGiftInput, setMarriageGiftInput] = useState('');
   const paydayRemaining = usePaydayCountdown(gameState?.paydayTimer, Boolean(gameState?.paydayTimer?.frozen));
   const [adminCodeInput, setAdminCodeInput] = useState('');
+  const [lineBrands, setLineBrands] = useState<LineBrandOption[]>([{ ...DEFAULT_LINE_BRAND, status: 'ready', requiresAccessCode: false }]);
+  const [lineBrandId, setLineBrandId] = useState('xinli');
+  const [brandAccessCode, setBrandAccessCode] = useState('');
 
   const [adaptiveDirector, setAdaptiveDirector] = useState<AdaptiveDirectorStatus | null>(null);
 
@@ -87,6 +93,7 @@ export default function AdminPage() {
     s.on('connect', () => {
       setConnected(true);
       s.emit('listRooms');
+      s.emit('listLineBrands');
       // 若有儲存的登入資訊，自動重新登入（斷線重連情境）
       if (autoReloginRoomIdRef.current && readAdminCode(autoReloginRoomIdRef.current)) {
         s.emit('adminLogin', {
@@ -96,6 +103,7 @@ export default function AdminPage() {
       }
     });
     s.on('disconnect', () => { setConnected(false); });
+    s.on('lineBrandList', (brands: LineBrandOption[]) => setLineBrands(brands));
 
     s.on('adminLoginSuccess', (p: { roomId: string; message: string; adminCode: string }) => {
       rememberAdminCode(p.roomId, p.adminCode);
@@ -122,6 +130,7 @@ export default function AdminPage() {
     });
 
     s.on('roomCreated', (p: { roomId: string; message: string; adminCode: string }) => {
+      setBrandAccessCode('');
       rememberAdminCode(p.roomId, p.adminCode);
       setRoomId(p.roomId);
       addLog(`房間已建立：${p.roomId}`);
@@ -268,12 +277,13 @@ export default function AdminPage() {
           <input id="admin-access-code" type="password" autoComplete="off" value={adminCodeInput} onChange={e => setAdminCodeInput(e.target.value.toUpperCase().trim())} placeholder="新房自動產生；原裝置會記住" />
 
           {/* 建立新房間（自訂或隨機代號） */}
+          <LineBrandSelector options={lineBrands} value={lineBrandId} accessCode={brandAccessCode} onChange={setLineBrandId} onAccessCodeChange={setBrandAccessCode} />
           <button
             className="btn-primary w-full"
             disabled={!connected}
             onClick={() => {
               setLoginError('');
-              emit('createRoom', { roomId: loginRoomId.toUpperCase() || undefined });
+              emit('createRoom', { roomId: loginRoomId.toUpperCase() || undefined, lineBrandId, brandAccessCode });
             }}
           >
             {!connected
@@ -343,7 +353,7 @@ export default function AdminPage() {
 
   // 展示頁 URL（讓展示頁自動帶房間代碼）
   const displayUrl = `${window.location.protocol}//${window.location.host}/?display&room=${roomId}`;
-  const playerUrl = lineRoomUrl(roomId);
+  const playerUrl = lineRoomUrl(roomId, gameState?.lineBrand);
   const hostUrl = `${window.location.protocol}//${window.location.host}/?host&room=${roomId}&code=${readAdminCode(roomId)}`;
 
   const phaseLabel: Record<string, string> = {
@@ -900,7 +910,7 @@ export default function AdminPage() {
                 {roomList.map((r) => {
                   const isCurrent = r.roomId === roomId;
                   const rDisplayUrl = `${window.location.protocol}//${window.location.host}/?display&room=${r.roomId}`;
-                  const rPlayerUrl  = `${window.location.protocol}//${window.location.host}/?room=${r.roomId}`;
+                  const rPlayerUrl = lineRoomUrl(r.roomId, r.lineBrand);
                   return (
                     <div
                       key={r.roomId}

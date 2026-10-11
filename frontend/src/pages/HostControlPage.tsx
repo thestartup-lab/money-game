@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { DEFAULT_LINE_BRAND, type LineBrandOption } from '../lineBrand';
+import LineBrandSelector from '../components/game/LineBrandSelector';
 import { io, type Socket } from 'socket.io-client';
 import DecisionCountdown from '../components/game/DecisionCountdown';
 import FacilitatorControlPanel from '../components/game/FacilitatorControlPanel';
@@ -64,6 +66,9 @@ export default function HostControlPage() {
   const [roomId, setRoomId] = useState('');
   const [roomInput, setRoomInput] = useState(INITIAL_ROOM_ID);
   const [adminCodeInput, setAdminCodeInput] = useState('');
+  const [lineBrands, setLineBrands] = useState<LineBrandOption[]>([{ ...DEFAULT_LINE_BRAND, status: 'ready', requiresAccessCode: false }]);
+  const [lineBrandId, setLineBrandId] = useState('xinli');
+  const [brandAccessCode, setBrandAccessCode] = useState('');
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [message, setMessage] = useState('');
@@ -86,6 +91,7 @@ export default function HostControlPage() {
     socket.on('connect', () => {
       setConnected(true);
       socket.emit('listRooms');
+      socket.emit('listLineBrands');
       const autoRoom = rememberedRoomRef.current || URL_ROOM;
       if (autoRoom && readAdminCode(autoRoom)) {
         socket.emit('adminLogin', {
@@ -95,8 +101,10 @@ export default function HostControlPage() {
       }
     });
     socket.on('disconnect', () => setConnected(false));
+    socket.on('lineBrandList', (brands: LineBrandOption[]) => setLineBrands(brands));
     socket.on('roomList', (nextRooms: RoomSummary[]) => setRooms(nextRooms ?? []));
     socket.on('roomCreated', (payload: { roomId: string; adminCode: string }) => {
+      setBrandAccessCode('');
       rememberAdminCode(payload.roomId, payload.adminCode);
       socket.emit('adminLogin', { roomId: payload.roomId, password: payload.adminCode });
     });
@@ -228,10 +236,11 @@ export default function HostControlPage() {
           >
             進入控場頁
           </button>
+          <LineBrandSelector options={lineBrands} value={lineBrandId} accessCode={brandAccessCode} onChange={setLineBrandId} onAccessCodeChange={setBrandAccessCode} />
           <button
             className="host-secondary-button"
             disabled={!connected}
-            onClick={() => emit('createRoom', { roomId: roomInput || undefined })}
+            onClick={() => emit('createRoom', { roomId: roomInput || undefined, lineBrandId, brandAccessCode })}
           >
             {roomInput ? `建立房間 ${roomInput}` : '建立新房間'}
           </button>

@@ -557,7 +557,7 @@ export default function DisplayScreen() {
     );
   }
 
-  const playerUrl = lineRoomUrl(gameState.roomId);
+  const playerUrl = lineRoomUrl(gameState.roomId, gameState.lineBrand);
 
   // 把玩家轉為 GameBoard 格式（含 HP / 現金流 / 年齡等富資訊，給棋盤中央面板顯示）
   const boardPlayers: BoardPlayer[] = gameState.players.map((p, i) => ({

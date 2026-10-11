@@ -23,7 +23,9 @@ import DecisionCountdown from '../components/game/DecisionCountdown';
 import '../components/game/MobileClarity.css';
 import LateLifePanel from '../components/game/LateLifePanel';
 import { getLineToken, resetLineLogin, lineLoginErrorMessage } from '../lineLogin';
-import { lineRoomUrl, roomCodeFromSearch } from '../lineEntry';
+import { lineRoomUrl, roomCodeFromSearch, brandIdFromSearch } from '../lineEntry';
+import { DEFAULT_LINE_BRAND, type LineBrand } from '../lineBrand';
+import { resolveLineBrand } from '../lib/lineBrandContext';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
@@ -114,6 +116,7 @@ export default function PlayerPage() {
   const [playerName, setPlayerName] = useState('');
   const [lineProfile, setLineProfile] = useState<{ displayName: string; picture?: string } | null>(null);
   const [lineBusy, setLineBusy] = useState(false);
+  const [lineBrand, setLineBrand] = useState<LineBrand>(DEFAULT_LINE_BRAND);
   const [guestJoin, setGuestJoin] = useState(false);
   const [roomCode, setRoomCode] = useState(() => {
     return roomCodeFromSearch(window.location.search);
@@ -151,11 +154,15 @@ export default function PlayerPage() {
     const resumeLineLogin = async () => {
       setLineBusy(true);
       try {
-        const token = await getLineToken(false);
+        const room = roomCodeFromSearch(window.location.search);
+        const brand = await resolveLineBrand(s, room, brandIdFromSearch(window.location.search));
+        if (disposed || !s.connected || sessionRef.current) return;
+        setLineBrand(brand);
+        const token = await getLineToken(false, room, brand);
         if (disposed || !s.connected || sessionRef.current) return;
         const returnedRoom = roomCodeFromSearch(window.location.search);
         if (returnedRoom) { setRoomCode(returnedRoom); setRoomLocked(true); }
-        if (token) s.emit('lineAuthenticate', { idToken: token });
+        if (token) s.emit('lineAuthenticate', { idToken: token, brandId: brand.id, ...(room ? { roomCode: room } : {}) });
         else setLineBusy(false);
       } catch (error) {
         if (disposed || !s.connected || sessionRef.current) return;
@@ -809,13 +816,18 @@ export default function PlayerPage() {
             </div> : <button type="button" className="min-h-14 w-full rounded-xl bg-green-700 p-3 text-lg font-bold text-white" disabled={!connected || lineBusy} onClick={async () => {
               setLineBusy(true); setError('');
               try {
-                const token = await getLineToken(true, roomCode.toUpperCase());
-                if (token) emit('lineAuthenticate', { idToken: token });
+                const s = socketRef.current;
+                if (!s?.connected) throw new Error('disconnected');
+                const room = roomCode.toUpperCase();
+                const brand = await resolveLineBrand(s, room, brandIdFromSearch(window.location.search));
+                setLineBrand(brand);
+                const token = await getLineToken(true, room, brand);
+                if (token && s.connected) s.emit('lineAuthenticate', { idToken: token, brandId: brand.id, ...(room ? { roomCode: room } : {}) });
                 else setLineBusy(false);
               } catch (error) { setLineBusy(false); setError(lineLoginErrorMessage(error)); }
             }}>{lineBusy ? '正在驗證 LINE…' : '使用 LINE 登入'}</button>}
-            {!lineProfile && <a href={lineRoomUrl(roomCode)} className="block py-2 text-center text-base font-bold text-emerald-200 underline">從 LINE 重新開啟此房間</a>}
-            <p className="text-sm text-slate-300">透過鑫力官方帳號登入。只使用帳號識別、名稱與頭像來綁定本場角色，不讀取聊天訊息。LINE 名稱不等於實名驗證，請確認下方學員姓名。</p>
+            {!lineProfile && <a href={lineRoomUrl(roomCode, lineBrand)} className="block py-2 text-center text-base font-bold text-emerald-200 underline">從 LINE 重新開啟此房間</a>}
+            <p className="text-sm text-slate-300">透過{lineBrand.name}官方帳號（{lineBrand.officialAccountId}）登入。只使用帳號識別、名稱與頭像來綁定本場角色，不讀取聊天訊息。登入不代表已加入官方帳號好友。LINE 名稱不等於實名驗證，請確認下方學員姓名。</p>
             {!lineProfile ? <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={guestJoin} onChange={e => setGuestJoin(e.target.checked)} />主持人已開放，我要臨時加入（無 LINE）</label> : null}
           </section>
 

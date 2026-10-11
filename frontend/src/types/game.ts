@@ -1,4 +1,5 @@
 // 與後端 gameDataModels.ts 對應的前端型別定義
+import type { LineBrand } from '../lineBrand';
 
 export type GamePhase = 'WaitingForPlayers' | 'Pre20' | 'RatRace' | 'FastTrack' | 'GameOver';
 export type SocialClass = 'Wealthy' | 'UpperMiddle' | 'Middle' | 'LowerClass';
@@ -265,6 +266,7 @@ export interface BucketGoalDetail {
 
 export interface GameState {
   lineLoginRequired?: boolean;
+  lineBrand?: LineBrand;
   gameId: string;
   roomId: string;
   players: Player[];

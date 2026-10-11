@@ -1,5 +1,6 @@
 /** 送給前端的狀態：玩家與房間的序列化、手機說明用的效果與組成資料 */
 import { GameState, Player, GamePhase } from './gameDataModels';
+import { roomLineBrand } from './lineBrands';
 import { BASIC_INVESTMENTS } from './basicInvestments';
 import { getHomeOffers } from './householdLoans';
 import { BOND_FUND_ID, currentBondRate } from './bondFund';
@@ -389,6 +390,7 @@ export function serializeGameState(gs: GameState): object {
     gamePhase: gs.gamePhase,
     turnNumber: gs.turnNumber,
     lineLoginRequired: gs.lineLoginRequired,
+    lineBrand: roomLineBrand(gs),
     marketEvents: gs.marketEvents,
     createdAt: gs.createdAt,
     hasAdmin: hasRoomAdmin(gs),
