@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { INNER_NODES, OUTER_NODES } from '../../boardLayout';
 import { usePaydayCountdown, formatCountdown, type PaydayTimerInfo } from './paydayCountdown';
 import './GameBoard.css';
 
@@ -48,22 +49,9 @@ import { PLAYER_COLORS } from './playerColors';
 // ============================================================
 // 格子中心座標（以 gameboard-wrapper 寬/高的 % 為單位）。
 // 逐格依 1672×941 的正式 PNG 校準；棋子與校準點共用同一份座標。
-const INNER_CELL_POSITIONS: [number, number][] = [
-  [40.3, 29.9], [47.4, 30.3], [54.2, 33.4], [58.9, 43.3],
-  [59.7, 58.6], [55.3, 73.0], [48.3, 85.1], [39.8, 88.7],
-  [30.6, 87.8], [22.1, 78.6], [15.9, 65.4], [14.7, 50.7],
-  [16.6, 36.2], [21.4, 23.8], [28.9, 14.1], [37.1, 11.8],
-  [46.4, 12.2], [55.6, 14.6], [62.6, 23.5], [66.7, 37.3],
-  [68.7, 52.0], [73.0, 65.4], [81.3, 68.7], [90.3, 45.4],
-];
+const INNER_CELL_POSITIONS: [number, number][] = INNER_NODES.map(n => [n[2],n[3]]);
 
-const OUTER_CELL_POSITIONS: [number, number][] = [
-  [10.5, 16.8], [16.3, 42.3], [22.2, 66.4], [32.1, 81.7],
-  [44.5, 85.8], [56.9, 86.0], [68.9, 82.0], [78.1, 72.4],
-  [85.2, 59.0], [86.0, 40.2], [78.4, 25.8], [67.2, 17.6],
-  [55.4, 16.5], [44.5, 19.4], [34.1, 37.8], [37.1, 54.4],
-  [46.0, 63.2],
-];
+const OUTER_CELL_POSITIONS: [number, number][] = OUTER_NODES.map(n => [n[2],n[3]]);
 
 function getPos(idx: number, isOuter: boolean): { left: string; top: string } {
   const table = isOuter ? OUTER_CELL_POSITIONS : INNER_CELL_POSITIONS;
@@ -105,8 +93,8 @@ export function GameBoard({
 
   const isOuter = boardView === 'outer';
   const bgImage = isOuter
-    ? "url('/board-outer-user-v5.png')"
-    : "url('/board-inner-user-v5.png')";
+    ? "url('/board-outer-user-v6.png')"
+    : "url('/board-inner-user-v6.png')";
   const posTable = isOuter ? OUTER_CELL_POSITIONS : INNER_CELL_POSITIONS;
 
   const visiblePlayers = players.filter((p) =>
@@ -122,7 +110,7 @@ export function GameBoard({
         className={`gameboard-wrapper board-surface ${isOuter ? 'is-outer' : 'is-inner'}`}
         style={{ backgroundImage: bgImage }}
       >
-
+        {!isOuter && <div className="board-route-note" aria-label="右側兩條支線匯入 11 生活服務站">07・10 → 11</div>}
         <QuarterDial
           completedRounds={completedRoundsInCycle}
           isGlobalPayday={isGlobalPayday}
@@ -136,7 +124,7 @@ export function GameBoard({
           className="board-view-toggle"
           onClick={() => setBoardViewManual(boardView === 'inner' ? 'outer' : 'inner')}
         >
-          {boardView === 'inner' ? 'FastTrack ▶' : '◀ 老鼠賽跑'}
+          {boardView === 'inner' ? '第二人生 ▶' : '◀ 第一人生'}
         </button>
 
         {/* ══ 校準模式切換 ══ */}
@@ -166,7 +154,7 @@ export function GameBoard({
             className="board-calibrate-dot"
             style={{ left: `${l}%`, top: `${t}%` }}
           >
-            <div className="board-calibrate-num">{idx}</div>
+            <div className="board-calibrate-num">{idx + 1}</div>
             <div className="board-calibrate-coord">{l},{t}</div>
           </div>
         ))}
@@ -319,6 +307,7 @@ function QuarterDial({
   const timerOn = paydayTimer?.enabled ?? false;
   const due = paydayTimer?.due ?? false;
   const roundsLeft = Math.max(0, 3 - Math.min(3, completedRounds));
+  if (!timerOn && !isGlobalPayday) return null;
 
   return (
     <div className={`quarter-dial ${isOuter ? 'is-outer' : 'is-inner'}${isGlobalPayday ? ' is-payday' : ''}`}>
@@ -364,17 +353,16 @@ interface MiniMapProps {
 function MiniMap({ isOuter, players, currentTurnPlayerId, onClick }: MiniMapProps) {
   const cellCount = isOuter ? 17 : 24;
   // 內圈標準發薪日格 index（每隔 6 格）
-  const paydayIndices = isOuter ? new Set([0, 4, 8, 12]) : new Set([0, 6, 12, 18]);
+  const paydayIndices = new Set<number>(); // No salary squares in the round-based board.
 
   // SVG viewBox 100x100，軌道圓心 50,50；半徑 40
-  const cx = 50, cy = 50, r = 40;
 
   // 把每格繪在等間距的圓周上（從 12 點鐘方向順時針）
   const cellAt = (idx: number): { x: number; y: number } => {
-    const angle = (2 * Math.PI * idx) / cellCount - Math.PI / 2;
+    const [x,y] = (isOuter ? OUTER_CELL_POSITIONS : INNER_CELL_POSITIONS)[idx];
     return {
-      x: cx + Math.cos(angle) * r,
-      y: cy + Math.sin(angle) * r,
+      x,
+      y,
     };
   };
 

@@ -1,247 +1,28 @@
-import { useState } from 'react';
+interface Props { onClose?: () => void; mode?: 'fullscreen' | 'sheet' }
 
-const STRATEGY_CARDS = [
-  {
-    icon: '💰',
-    title: '現金流 vs 薪水',
-    question: '你在追什麼？',
-    body: '薪水每個月歸零，現金流才會月月累積；但第二人生不只檢視金錢，也會看你如何經營健康、成長、關係與人生體驗。完整判定會留到賽後復盤。',
-    color: 'border-emerald-600',
-    highlight: 'text-emerald-400',
-  },
-  {
-    icon: '🔲',
-    title: '四象限的代價',
-    question: '你站在哪個象限？',
-    body: 'E（受雇）/ S（自雇）用時間換薪水，停工就停收。B（企業主）/ I（投資者）讓系統和資產為你工作。職業選擇決定你的行動自由度和成長上限。',
-    color: 'border-blue-600',
-    highlight: 'text-blue-400',
-  },
-  {
-    icon: '🧠',
-    title: '投資自己值得嗎？',
-    question: '先花錢，還是先存錢？',
-    body: '提升 FQ 讓投資回報更高；培訓 SK 解鎖轉職機會；拓展 NT 開啟人脈保護和抽牌優勢。這些都要先花錢，但決定你後期的天花板。',
-    color: 'border-yellow-600',
-    highlight: 'text-yellow-400',
-  },
-  {
-    icon: '🛡️',
-    title: '風險怎麼管？',
-    question: '危機來臨前，你準備好了嗎？',
-    body: '保險在危機發生後才買是來不及的。每次人生規劃都可以購入醫療、壽險、財產險。有保險的危機只需付部分費用，沒保險可能讓你一夕歸零。',
-    color: 'border-red-600',
-    highlight: 'text-red-400',
-  },
-  {
-    icon: '🌱',
-    title: '人生不只是財報',
-    question: '最後只剩數字，值得嗎？',
-    body: '最終幸福指數由「生命體驗、人生成就、人際關係」三大面向組成。旅遊、結婚、子女、維持健康，都會影響你的最終得分，不是只有存錢。',
-    color: 'border-pink-600',
-    highlight: 'text-pink-400',
-  },
+const sections = [
+  ['一起看大螢幕', '輪到你時擲骰，跟著棋子走。事件、選項與結果都會公開；手機用來確認自己的決定。下一位會等本次事件結束才開始。'],
+  ['選擇走哪條人生路', '第一人生有 24 個節點；04、14 是岔路，事業與生活路線長度相同。選路不是同時走兩邊，兩條支線會在生活服務站匯合。'],
+  ['走到格子才做決定', '出國旅遊、人際關係、家庭抉擇、進修等，都在對應格子選擇。沒有每輪固定行動選單。每次服務站只辦一項；路過時可停下，剩餘步數作廢。'],
+  ['可以取消，不急著按確認', '查看選项不扣款；按「取消，返回選項」可以重選。確認送出後，由主持人揭曉才生效。倒數是討論提醒，不會自動替你選。'],
+  ['回合、年齡與收支', '全體完成一輪，人生推進四年。依開始工作的年齡計算，不會年齡倒退。薪資、配息、費用與稅由系統結算成同一張摘要，請一起核對。'],
+  ['金錢以外的能力', 'HP 是健康；SK 是職涯技能；FQ 是財商；NT 是人脈。也要留意體驗、關係與家庭連結。每項選擇的費用與影響會在確認前說明。'],
+  ['轉職與退休', 'SK 達到 100 且符合健康等條件，可申請轉職，由主持人安排舞台。符合退休階段的人同時在手機選擇，全部確認後一次揭曉，不逐人等候。'],
+  ['家庭沒有標準答案', '可能遇到照護、親友資助、孩子的選擇、伴侶關係與個人界線。婚育不是唯一道路；不舒服的情境可換成一般關係情境，不需要分享私事。'],
+  ['第二人生不是只看錢', '需先走過 24 第二人生格，達到最低結算月數，並連續兩輪結算符合：有效被動收入覆蓋 100% 支出＋兩項人生指標，或覆蓋 90%＋三項指標。達標後由主持人揭曉，不必再走到那格。'],
+  ['結束後一起復盤', '我們會回顧每個決定帶來的結果，而不是用遊戲分數評斷一個人的人生。比較選擇、代價與當時的理由；攻略留到復盤再討論。'],
 ];
-
-const FREE_ACTIONS = [
-  { icon: '✈️', name: '旅遊', desc: '消耗現金和少量 HP，獲得生命體驗。部分目的地額外提升 FQ、NT 或 SK。' },
-  { icon: '🤝', name: '社交活動', desc: '花費時間與金錢，提升人脈（NT）。NT 越高，危機豁免與交易加成效果越強。' },
-  { icon: '📈', name: '股票定期定額', desc: '任何時候都可投入，指數基金每月自動複利增長，每輪發薪時結算。定期定額降低進場時機的風險。' },
-  { icon: '🏥', name: '購買保險', desc: '醫療險、壽險、財產險三種。每種保險保護不同的危機類型，每月扣除保費。' },
-  { icon: '🏦', name: '應急借款', desc: '信用分越高，借款上限越高、利率越低。借款後每月扣除本利，請謹慎使用。' },
-  { icon: '💼', name: '出售資產', desc: '隨時可賣出名下資產。市值低於成本時出售會虧損；繁榮市場時賣出可獲利。' },
-];
-
-const PAYDAY_DECISIONS = [
-  { icon: '🧠', name: '提升財商 FQ', cost: '每次固定費用', effect: 'FQ +1，提高資產回報倍率，解鎖高階投資選項' },
-  { icon: '💪', name: 'HP 強化', cost: '固定費用', effect: 'HP 大幅回升，抵抗老年 HP 衰退' },
-  { icon: '🩺', name: 'HP 維護', cost: '低費用', effect: '接下來 3 輪 HP 不衰退（不回復，只維持）' },
-  { icon: '🛠️', name: '職涯培訓 SK', cost: '固定費用', effect: 'SK 提升，累積達 100 可解鎖轉職' },
-  { icon: '🌐', name: '拓展人脈 NT', cost: '固定費用', effect: 'NT 提升，達到 3/5/8 解鎖特殊效果' },
-  { icon: '📈', name: '股票定投 DCA', cost: '自訂金額', effect: '投入指數基金，每月複利。下一輪發薪就開始增值' },
-  { icon: '🛡️', name: '購買保險', cost: '啟用費 + 月保費', effect: '保護未來危機，每月從薪資中扣除保費' },
-];
-
-const STAT_EFFECTS = [
-  {
-    icon: '🧠',
-    name: 'FQ 財商',
-    color: 'text-yellow-400',
-    bg: 'bg-yellow-950',
-    border: 'border-yellow-700',
-    levels: [
-      { range: '1–3', effect: '基礎投資能力，只能接受小交易' },
-      { range: '4–6', effect: '可參與大交易，資產回報加成 +10%' },
-      { range: '7–9', effect: '高槓桿投資解鎖，資產回報加成 +25%' },
-      { range: '10', effect: '最高財商，交易選擇最多，回報最大化' },
-    ],
-  },
-  {
-    icon: '💪',
-    name: 'HP 健康',
-    color: 'text-green-400',
-    bg: 'bg-green-950',
-    border: 'border-green-700',
-    levels: [
-      { range: '80–100', effect: '完全行動，可參與所有大型活動' },
-      { range: '40–79', effect: '正常行動，部分高耗體力活動受限' },
-      { range: '10–39', effect: '行動受限，無法旅遊、大型交易' },
-      { range: '0', effect: '臥床，跳過回合；持續低 HP 有機率死亡' },
-    ],
-  },
-  {
-    icon: '🛠️',
-    name: 'SK 技能',
-    color: 'text-blue-400',
-    bg: 'bg-blue-950',
-    border: 'border-blue-700',
-    levels: [
-      { range: '0–49', effect: '初級，維持現有職業' },
-      { range: '50–99', effect: '中級，薪資小幅提升' },
-      { range: '100', effect: '技能巔峰！解鎖「轉職」，可升級職業' },
-    ],
-  },
-  {
-    icon: '🌐',
-    name: 'NT 人脈',
-    color: 'text-purple-400',
-    bg: 'bg-purple-950',
-    border: 'border-purple-700',
-    levels: [
-      { range: '1–2', effect: '基礎人脈，無額外效果' },
-      { range: '3', effect: '危機豁免解鎖：一生中可跳過一次危機事件' },
-      { range: '5', effect: '抽牌加成：落在交易格可抽 2 張牌' },
-      { range: '8', effect: '人脈大師：達成成就，人際關係評分大幅提升' },
-    ],
-  },
-];
-
-type Tab = 'strategy' | 'actions' | 'stats';
-
-interface Props {
-  onClose?: () => void;
-  mode?: 'fullscreen' | 'sheet';
-}
 
 export default function IntroSheet({ onClose, mode = 'sheet' }: Props) {
-  const [tab, setTab] = useState<Tab>('strategy');
-
-  const isFullscreen = mode === 'fullscreen';
-
-  return (
-    <div className={`flex flex-col bg-gray-950 text-white ${isFullscreen ? 'h-full' : 'h-full'}`}>
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 flex-shrink-0">
-        <div>
-          <h2 className="text-lg font-bold text-emerald-400">百歲人生 — 策略指南</h2>
-          <p className="text-xs text-gray-500">帶著這些問題進場，讓每個決定更有意識</p>
-        </div>
-        {onClose && (
-          <button className="text-gray-400 hover:text-white text-2xl leading-none px-2" onClick={onClose}>
-            ×
-          </button>
-        )}
-      </div>
-
-      {/* Tabs */}
-      <div className="flex border-b border-gray-800 flex-shrink-0">
-        {([
-          { id: 'strategy', label: '策略思考' },
-          { id: 'actions', label: '可以做什麼' },
-          { id: 'stats', label: '數值效果' },
-        ] as { id: Tab; label: string }[]).map((t) => (
-          <button
-            key={t.id}
-            className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${
-              tab === t.id ? 'text-emerald-400 border-b-2 border-emerald-400' : 'text-gray-500 hover:text-gray-300'
-            }`}
-            onClick={() => setTab(t.id)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-3">
-
-        {/* ── Tab 1: 策略思考 ── */}
-        {tab === 'strategy' && (
-          <div className={isFullscreen ? 'grid grid-cols-2 xl:grid-cols-3 gap-3' : 'space-y-3'}>
-            {STRATEGY_CARDS.map((card) => (
-              <div key={card.title} className={`rounded-xl border ${card.color} bg-gray-900 p-4`}>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-2xl">{card.icon}</span>
-                  <span className={`text-sm font-bold ${card.highlight}`}>{card.title}</span>
-                </div>
-                <p className={`text-xs font-semibold mb-1 ${card.highlight}`}>「{card.question}」</p>
-                <p className="text-xs text-gray-300 leading-relaxed">{card.body}</p>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* ── Tab 2: 可以做什麼 ── */}
-        {tab === 'actions' && (
-          <div className="space-y-4">
-            <div>
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 px-1">隨時可做的行動</h3>
-              <div className={isFullscreen ? 'grid grid-cols-3 gap-2' : 'space-y-2'}>
-                {FREE_ACTIONS.map((a) => (
-                  <div key={a.name} className="flex gap-3 bg-gray-900 rounded-xl p-3">
-                    <span className="text-xl flex-shrink-0">{a.icon}</span>
-                    <div>
-                      <p className="text-sm font-semibold text-white">{a.name}</p>
-                      <p className="text-xs text-gray-400 leading-snug mt-0.5">{a.desc}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div>
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 px-1">每次人生規劃的決策選項</h3>
-              <div className={isFullscreen ? 'grid grid-cols-3 gap-2' : 'space-y-2'}>
-                {PAYDAY_DECISIONS.map((d) => (
-                  <div key={d.name} className="flex gap-3 bg-gray-900 rounded-xl p-3">
-                    <span className="text-xl flex-shrink-0">{d.icon}</span>
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-semibold text-white">{d.name}</p>
-                        <span className="text-xs text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded">{d.cost}</span>
-                      </div>
-                      <p className="text-xs text-emerald-300 leading-snug mt-0.5">{d.effect}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── Tab 3: 數值效果 ── */}
-        {tab === 'stats' && (
-          <div className={isFullscreen ? 'grid grid-cols-2 gap-3' : 'space-y-3'}>
-            {STAT_EFFECTS.map((stat) => (
-              <div key={stat.name} className={`rounded-xl border ${stat.border} ${stat.bg} p-4`}>
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-2xl">{stat.icon}</span>
-                  <span className={`text-base font-bold ${stat.color}`}>{stat.name}</span>
-                </div>
-                <div className="space-y-1.5">
-                  {stat.levels.map((lv) => (
-                    <div key={lv.range} className="flex gap-3 items-start">
-                      <span className={`text-xs font-mono font-bold ${stat.color} bg-black/30 px-1.5 py-0.5 rounded flex-shrink-0`}>
-                        {lv.range}
-                      </span>
-                      <span className="text-xs text-gray-300 leading-snug">{lv.effect}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+  return <section className="flex h-full flex-col bg-slate-950 text-white" aria-label="遊戲前導說明">
+    <header className="flex items-center justify-between border-b border-slate-600 p-5">
+      <h2 className="text-2xl font-black text-emerald-300">百歲人生・怎麼玩</h2>
+      {onClose && <button type="button" className="min-h-12 rounded-xl border px-4 text-lg" onClick={onClose}>關閉</button>}
+    </header>
+    <div className={`overflow-y-auto p-5 ${mode === 'fullscreen' ? 'grid grid-cols-2 gap-5' : 'space-y-5'}`}>
+      {sections.map(([title,body],i)=><article key={title} className="rounded-2xl border border-slate-600 bg-slate-900 p-5">
+        <h3 className="mb-3 text-xl font-bold text-amber-200">{i+1}. {title}</h3><p className="text-lg leading-relaxed">{body}</p>
+      </article>)}
     </div>
-  );
+  </section>;
 }

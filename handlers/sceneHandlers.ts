@@ -1,5 +1,6 @@
 /** 大螢幕舞台事件（由 socketServer 註冊到每條連線） */
 import type { Socket } from 'socket.io';
+import { RETIREMENT_STARTUP_AMOUNTS } from '../gameConfig';
 import { GameState, GamePhase, PlayerEvent, AssetType } from '../gameDataModels';
 import { previewCareerChange } from '../careerStage';
 import { applyGlobalEvent, getCurrentAge, rollDice, computePension, computeConsultantIncome, getArrangedMarriageCost } from '../gameLogic';
@@ -256,13 +257,28 @@ export function resolveFacilitatorSceneChoice(gs: GameState, sceneId: string | u
   }
 
   if (scene.kind === 'retirement') {
-    if (choiceId !== 'reveal' || !scene.careerConfirmed || !context.choice) {
+    const choices = context.retirementChoices as Record<string,{choice:string;startupAmount:number}> | undefined;
+    const participants = scene.retirementParticipants?.filter(p=>gs.players.get(p.playerId)?.isAlive) ?? [];
+    if (choiceId !== 'reveal' || !participants.length || !choices || participants.some(p=>!choices[p.playerId])) {
       fail('請先等待玩家本人在手機選擇。'); return;
     }
-    const player = gs.players.get(String(context.playerId));
-    if (!player?.isAlive) { revealFacilitatorResult(gs, '本次轉折未執行', '玩家已離開。'); return; }
+    for (const entry of participants) {
+      const p=gs.players.get(entry.playerId)!;
+      const c=choices[p.id];
+      if(p.retirementStatus!=='working' || (c.choice==='startup' && (p.cash<c.startupAmount || !(RETIREMENT_STARTUP_AMOUNTS as readonly number[]).includes(c.startupAmount)))) {
+        delete choices[p.id];
+        entry.confirmed = false;
+        scene.careerConfirmed = false;
+        scene.options = [];
+        emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+        fail(`${p.name} 的狀態已改變，請重新確認退休選擇。`); return;
+      }
+    }
+    const summaries:string[]=[];
+    for (const entry of participants) {
+    const player = gs.players.get(entry.playerId)!;
     const cash = player.cash, flow = player.monthlyCashflow, worth = calcNetWorth(player);
-    const choice = String(context.choice);
+    const choice = choices[player.id].choice;
     let title = '', detail = '';
     if (choice === 'retire') {
       player.retirementStatus = 'retired';
@@ -276,7 +292,7 @@ export function resolveFacilitatorSceneChoice(gs: GameState, sceneId: string | u
       title = `${player.name} 轉任顧問`;
       detail = `顧問月收入 $${computeConsultantIncome(player).toLocaleString()}（隨第二專長與人脈變動）加基本年金 $${BASIC_PENSION_MONTHLY.toLocaleString()}，生活支出降兩成；每輪扣 HP ${CONSULTANT_HP_COST_PER_CYCLE}，HP 低於 ${CONSULTANT_MIN_HP} 就接不到案，只剩基本年金。`;
     } else if (choice === 'startup') {
-      const amount = Number(context.startupAmount ?? 0);
+      const amount = choices[player.id].startupAmount;
       const roll = rollDice(1) + (player.stats.network >= 5 ? 1 : 0);
       player.retirementStatus = 'founder';
       player.salary = BASIC_PENSION_MONTHLY;
@@ -300,7 +316,9 @@ export function resolveFacilitatorSceneChoice(gs: GameState, sceneId: string | u
       detail = `保留薪資到下一輪，HP −${RETIREMENT_DEFER_HP_COST}（目前 ${player.stats.health}）。下一輪會再問一次。`;
     }
     logPlayerEvent(player, gs, 'career_change', `65 歲人生轉折：${title}`, cash, flow, worth, { retirementChoice: choice });
-    revealFacilitatorResult(gs, title, `${detail}\n請主持人帶領觀察後繼續。`);
+    summaries.push(`${title}\n${detail}\n現金 ${cash.toLocaleString()} → ${player.cash.toLocaleString()}；月現金流 ${flow.toLocaleString()} → ${player.monthlyCashflow.toLocaleString()}`);
+    }
+    revealFacilitatorResult(gs, '本輪退休選擇揭曉', summaries.join('\n\n'));
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
     return;
   }

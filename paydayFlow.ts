@@ -173,6 +173,31 @@ export function payCompletedRounds(gs: GameState): void {
     gs.lastPaidRound += 1;
     syncPlayerAges(gs);
     settleRound(gs);
+    if (gs.boardJourneyEnabled && gs.lastPaidRound - gs.roundsAtLastPayday >= PLAN_COVER_ROUNDS) {
+      gs.roundsAtLastPayday = gs.lastPaidRound;
+      gs.roundsSinceGlobalPayday = 0;
+      gs.globalPaydayNumber += 1;
+      const expired = expireWorldEffects(gs);
+      const rate = shiftBondRate(gs);
+      gs.bondRateHistory ??= [];
+      gs.bondRateHistory.push({ age: Math.round(getCurrentAge(gs)), rate: rate.to });
+      const lines = [
+        ...(expired.length ? [`限期影響結束：${expired.join('、')}。`] : []),
+        ...(rate.to !== rate.from ? [`債券年殖利率 ${(rate.from * 100).toFixed(1)}% → ${(rate.to * 100).toFixed(1)}%；持有者配息同步調整。`] : []),
+      ];
+      if (lines.length) enqueueBoardNotice(gs, { playerId: gs.currentPlayerTurnId, playerName: '全體玩家', title: '本輪環境更新', description: lines.join('\n') });
+      evaluateAndMaybeTriggerAdaptiveEvent(gs);
+    }
+    if (gs.boardJourneyEnabled) {
+      for (const player of gs.players.values()) {
+        if (!player.isAlive || player.isInFastTrack || player.secondLifeCheckedRound === gs.turnNumber) continue;
+        const qualified = require('./cardSystem').evaluateSecondLifeEligibility(player).eligible;
+        player.secondLifeStableRounds = qualified && player.hasPassedSecondLife
+          ? (player.secondLifeCheckedRound === gs.turnNumber - 1 ? (player.secondLifeStableRounds ?? 0) : 0) + 1 : 0;
+        player.secondLifeCheckedRound = gs.turnNumber;
+      }
+      queueSecondLifeCandidates(gs);
+    }
   }
 }
 
@@ -244,7 +269,7 @@ export function settleRound(gs: GameState): RoundPayout[] {
       if (resolution.bankrupt) emitToRoom(gs.gameId, 'playerBankrupt', { playerId: player.id, playerName: player.name, steps: resolution.steps });
     }
     recordWellbeingRound(player, gs.turnNumber);
-    queueSecondLifeCandidates(gs, player);
+    if (!gs.boardJourneyEnabled) queueSecondLifeCandidates(gs, player);
     const payout = payouts[payouts.length - 1];
     payout.cashAfter = player.cash;
     payout.total = player.cash - cashBefore;
@@ -306,6 +331,7 @@ export function paydayRemainingMs(gs: GameState): number {
  * 到期的發薪排在目前玩家行動結束時（advanceTurn）或全場空檔時執行。
  */
 export function isPaydayDue(gs: GameState): boolean {
+  if (gs.boardJourneyEnabled) return false;
   if (!gs.paydayTimerEnabled || gs.gamePhase === GamePhase.GameOver || gs.finalRoundStarted) return false;
   const rounds = gs.turnNumber - gs.roundsAtLastPayday;
   if (rounds < 1) return false;
@@ -324,6 +350,7 @@ export function schedulePaydayIfDue(gs: GameState): boolean {
 
 /** 計時到期後排在目前行動結束執行；全員同時規劃、依回合順序結算，結算月數 = 經過輪數 × 12。 */
 export async function runGlobalPayday(gs: GameState): Promise<void> {
+  if (gs.boardJourneyEnabled) { gs.globalPaydayPending = false; gs.globalPaydayInProgress = false; return; }
   const roomId = gs.gameId;
   const wasPaused = gs.pausedAt !== null;
   if (!wasPaused) pauseGameClock(gs);

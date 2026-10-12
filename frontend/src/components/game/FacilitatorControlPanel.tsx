@@ -80,7 +80,7 @@ export default function FacilitatorControlPanel({ gameState, emit }: Props) {
 
         {scene.stage === 'prompt' ? (
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            {(scene.kind === 'career' || scene.kind === 'retirement') && !scene.careerConfirmed ? <p className="text-base font-bold text-yellow-200">等待本人在手機{scene.kind === 'retirement' ? '選擇' : '確認'}，主持人不能代為決定。</p> : null}
+            {(scene.kind === 'career' || scene.kind === 'retirement') && !scene.careerConfirmed ? <p className="text-base font-bold text-yellow-200">等待本人在手機{scene.kind === 'retirement' ? '選擇' : '確認'}，主持人不能代為決定。{scene.retirementParticipants?.map(p=>`${p.name}：${p.confirmed?'已確認':'思考中'}`).join('；')}</p> : null}
             {scene.kind === 'marriage' && !scene.careerConfirmed ? <p className="text-base font-bold text-yellow-200 sm:col-span-2">等待本人在手機決定答不答應；主持人不能代為答應，只能按「婉拒」跳過（本人離線時才可代答）。</p> : null}
             {scene.kind === 'community' ? (
               <button
@@ -221,7 +221,7 @@ export default function FacilitatorControlPanel({ gameState, emit }: Props) {
             安排家庭事件
           </button>
         </div>
-        <p className="mt-3 text-xs leading-relaxed text-pink-200/80">家庭事件平常會由家庭格或外圈關係格自動登上大螢幕；必須先結婚，最多 3 名子女，且兩次添丁至少相隔 8 年。主持人也可在這裡安排舞台。</p>
+        <p className="mt-3 text-xs leading-relaxed text-pink-200/80">新版家庭格由本人選擇照護、資助、關係或家庭成長；此處為額外安排的添丁舞台，仍受婚姻、健康與年齡條件限制。</p>
       </details>
 
       <details className="rounded-xl border border-blue-800 bg-blue-950/40 p-3">

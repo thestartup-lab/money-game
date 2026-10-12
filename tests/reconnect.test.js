@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
+const { spawn: spawnNode } = require('node:child_process');
+// Preserve coverage for older persisted rooms without applying their rules to v6.
+const spawn = (command, args, options) => spawnNode(command, ['--require', require.resolve('./helpers/legacy-board.cjs'), ...args], options);
 const { io } = require('socket.io-client');
 
 function wait(s, event, predicate = () => true, timeout = 6000) {
@@ -19,7 +21,7 @@ function send(s, event, payload, response, predicate) {
 
 test('本機端到端：異常封包不崩潰、禁止中途加入、暫停操作、可信重連及決策續接', { timeout: 30000 }, async t => {
   const port = 3221, sockets = [];
-  const server = spawn(process.execPath, ['-e', 'Math.random=()=>0.4; require("./dist/socketServer")'], {
+  const server = spawn(process.execPath, ['-e', 'Math.random=()=>0.4; const c=require("./dist/gameCards"); c.BOARD[6].type=c.SquareType.SmallDeal; require("./dist/socketServer")'], {
     env: { ...process.env, PORT: String(port), NODE_ENV: 'test' }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   let errors = '';

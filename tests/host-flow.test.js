@@ -56,7 +56,7 @@ test('離線且未完成設定的玩家會擋開局；強制開始後主持人�
     assert.notEqual(p.profession.id, '__placeholder__');
     assert.ok(p.profession.startingSalary > 0);
   }
-  assert.equal(started.readingAutoContinueMs, 10000);
+  assert.equal(started.readingAutoContinueMs, 0);
   assert.equal(started.isManuallyPaused, false);
 
   // 遊戲中再送 startGame 會被拒絕，年齡不會被歸零
@@ -72,9 +72,9 @@ test('離線且未完成設定的玩家會擋開局；強制開始後主持人�
   const denied = await send(b, 'skipTurn', {}, 'error');
   assert.match(denied.message, /管理員/);
 
-  // 落格說明自動放行設定
-  const paced = await send(admin, 'setReadingAutoContinue', { seconds: 5 }, 'gameStateUpdate', (g) => g.readingAutoContinueMs === 5000);
-  assert.equal(paced.readingAutoContinueMs, 5000);
+  // 新版落格說明保持主持人手動放行，舊設定不能啟用自動倒數。
+  const paced = await send(admin, 'setReadingAutoContinue', { seconds: 5 }, 'gameStateUpdate', (g) => g.readingAutoContinueMs === 0);
+  assert.equal(paced.readingAutoContinueMs, 0);
 
 });
 

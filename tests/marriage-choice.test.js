@@ -1,7 +1,9 @@
 // 主動相親達門檻 → 下一個空檔自動開求婚舞台 → 主持人不能代答應 → 本人在手機決定
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
+const { spawn: spawnNode } = require('node:child_process');
+// Preserve coverage for older persisted rooms without applying their rules to v6.
+const spawn = (command, args, options) => spawnNode(command, ['--require', require.resolve('./helpers/legacy-board.cjs'), ...args], options);
 const { io } = require('socket.io-client');
 
 const PORT = 3315;

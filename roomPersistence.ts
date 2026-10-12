@@ -84,7 +84,7 @@ export function decode(value: unknown): unknown {
       case 'Set': return new Set(t.v.map(decode));
       case 'GameState': {
         const fields = decodeFields(t.v);
-        return Object.assign(new GameState(String(fields.gameId)), fields);
+        return Object.assign(new GameState(String(fields.gameId)), { boardJourneyEnabled: false }, fields);
       }
       case 'Player': {
         const fields = decodeFields(t.v);

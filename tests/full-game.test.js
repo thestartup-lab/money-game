@@ -2,7 +2,9 @@
 // 單一機制的測試抓不到機制之間的交互問題（例如計時發薪在決策期間凍結、整場沒發薪），這支專門抓那一類。
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
+const { spawn: spawnNode } = require('node:child_process');
+// Preserve coverage for older persisted rooms without applying their rules to v6.
+const spawn = (command, args, options) => spawnNode(command, ['--require', require.resolve('./helpers/legacy-board.cjs'), ...args], options);
 const { io } = require('socket.io-client');
 
 const PORT = 3297;

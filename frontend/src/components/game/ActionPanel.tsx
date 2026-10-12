@@ -153,7 +153,7 @@ export default function ActionPanel({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-xs text-white font-semibold">選擇目的地</p>
-                <button className="text-xs text-gray-400 underline" onClick={() => setShowTravelPanel(false)}>收起</button>
+                <button type="button" className="min-h-12 rounded-lg border border-gray-500 px-3 text-base text-white" onClick={() => { setTravelPreview(null); setShowTravelPanel(false); }}>取消旅遊</button>
               </div>
               {player.isInFastTrack && (
                 <p className="text-xs text-yellow-400">✨ 外圈玩家可前往全球頂級目的地</p>
@@ -189,7 +189,7 @@ export default function ActionPanel({
                 return <EffectPreview title={`✈️ ${d.name}：效果與價值`} rows={rows} notes={[
                     leave > 0 ? `受僱者出國要請假：這趟請 ${t?.leaveMonths} 個月，出發時扣 $${fmt(leave)}（月薪 $${fmt(player.salary)} × ${t?.leaveMonths}）` : '自由行程：出國不扣薪',
                     tokenNote, '體驗值提高人生評分並計入人生指標「體驗」（≥ 45）', d.desc]}
-                  confirmLabel={leave > 0 ? `確認出發（共付 $${fmt(d.cost + leave)}）` : '確認出發'} onCancel={() => setTravelPreview(null)} disabled={player.cash < d.cost + leave} disabledReason="現金不足（旅費＋請假扣薪）"
+                  cancelLabel="取消旅遊" confirmLabel={leave > 0 ? `確認出發（共付 $${fmt(d.cost + leave)}）` : '確認出發'} onCancel={() => { setTravelPreview(null); setShowTravelPanel(false); }} disabled={player.cash < d.cost + leave} disabledReason="現金不足（旅費＋請假扣薪）"
                   onConfirm={() => { onTravel(d.id); setTravelPreview(null); setShowTravelPanel(false); }} />;
               })()}
               <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">

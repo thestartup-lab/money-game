@@ -91,6 +91,7 @@ test('第二人生排除玩家間借貸利息；市場卡不影響已故玩家',
   p.expenses = { taxes: 0, rent: 0, homeMortgagePayment: 0, carLoanPayment: 0, creditCardPayment: 0, otherExpenses: 10000 };
   p.liabilities = [];
   p.stats.health = 70; p.stats.careerSkill = 60;
+  p.car = { optionId:'test', name:'測試', runningCost:0, lifeExpPerRound:0, workVehicle:false };
   p.assets = [{ id: 'p2p-1', type: 'Other', name: '借出款項', cost: 1, currentValue: 1, monthlyCashflow: 10000 }];
   assert.equal(evaluateSecondLifeEligibility(p).eligible, false, 'P2P 利息不算被動收入');
   p.assets = [{ id: 'a', type: 'Other', name: '收入', cost: 1, currentValue: 1, monthlyCashflow: 10000 }];

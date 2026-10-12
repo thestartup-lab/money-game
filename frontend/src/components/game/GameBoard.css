@@ -52,6 +52,20 @@
   display: none;
 }
 
+.board-route-note {
+  position: absolute;
+  left: 87.5%;
+  top: 81.5%;
+  transform: translate(-50%, -50%);
+  border-radius: 6px;
+  padding: 2px 5px;
+  background: #fff9e9;
+  color: #123f51;
+  font-size: clamp(9px, 1vw, 15px);
+  font-weight: 900;
+  z-index: 6;
+}
+
 .board-orbit-outer { inset: 8.2% 4.4%; border-width: 3px; }
 .board-orbit-inner { inset: 22% 20%; border-color: rgba(147, 197, 253, 0.2); }
 
@@ -198,7 +212,7 @@
   gap: 2px;
   pointer-events: none;
   z-index: 20;
-  transition: transform 0.4s ease;
+  transition: left 0.22s ease, top 0.22s ease, transform 0.4s ease;
 }
 
 .board-token.active .board-token-circle {

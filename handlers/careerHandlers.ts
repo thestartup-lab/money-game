@@ -73,11 +73,13 @@ export function registerCareerHandlers(socket: Socket, onSafe: OnSafe): void {
     const gs = getRoomState(socket);
     const scene = gs?.facilitatorScene;
     const context = gs?.facilitatorSceneContext;
-    if (!gs || !context || scene?.kind !== 'retirement' || scene.id !== payload.sceneId || scene.stage !== 'prompt' || scene.careerPlayerId !== playerIdentity(socket)) {
+    if (!gs || !context || scene?.kind !== 'retirement' || scene.id !== payload.sceneId || scene.stage !== 'prompt' || !scene.retirementParticipants?.some(p=>p.playerId===playerIdentity(socket))) {
       emitClient(socket, 'error', { message: '只有本次轉折的玩家可以選擇。' }); return;
     }
     const player = gs.players.get(playerIdentity(socket));
-    if (!player) return;
+    if (!player?.isAlive || player.retirementStatus !== 'working') return;
+    const participant=scene.retirementParticipants!.find(p=>p.playerId===player.id)!;
+    if (participant.confirmed) { emitClient(socket,'error',{message:'已確認，請等待主持人揭曉。'}); return; }
     const choice = payload.choice;
     if (!['retire', 'consultant', 'startup', 'defer'].includes(choice)) { emitClient(socket, 'error', { message: '選項不正確。' }); return; }
     if (choice === 'defer' && player.retirementDeferrals >= RETIREMENT_MAX_DEFERRALS) { emitClient(socket, 'error', { message: '已經延後過一次，這次必須選擇。' }); return; }
@@ -87,11 +89,12 @@ export function registerCareerHandlers(socket: Socket, onSafe: OnSafe): void {
       if (!(RETIREMENT_STARTUP_AMOUNTS as readonly number[]).includes(startupAmount)) { emitClient(socket, 'error', { message: '請選擇創業投入金額。' }); return; }
       if (player.cash < startupAmount) { emitClient(socket, 'error', { message: `現金不足（需 $${startupAmount.toLocaleString()}）。` }); return; }
     }
-    context.choice = choice;
-    context.startupAmount = startupAmount;
-    scene.careerConfirmed = true;
+    const choices = context.retirementChoices as Record<string,{choice:string;startupAmount:number}>;
+    choices[player.id] = {choice,startupAmount};
+    participant.confirmed = true;
+    scene.careerConfirmed = scene.retirementParticipants!.every(p=>p.confirmed || !gs.players.get(p.playerId)?.isAlive);
     const labels: Record<string, string> = { retire: '退休領退休金', consultant: '當顧問', startup: `創業（投入 $${startupAmount.toLocaleString()}）`, defer: '延後一輪退休' };
-    scene.options = [{ id: 'reveal', label: `本人已選：${labels[choice]}・揭曉`, description: '正式套用選擇，再由主持人繼續遊戲。' }];
+    scene.options = scene.careerConfirmed ? [{ id:'reveal',label:'全員已確認・一起揭曉',description:'一次呈現所有人的退休結果。' }] : [];
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
 }

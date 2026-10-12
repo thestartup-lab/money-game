@@ -1,5 +1,6 @@
 /** 玩家落在棋盤格子時的處理：內圈與外圈每一種格子 */
 import { Socket } from 'socket.io';
+import { handleBoardAction } from './boardActions';
 import { GameState, Player, AssetType } from './gameDataModels';
 import { getLayoffMonths } from './gameLogic';
 import { getLoanLimit } from './gameConfig';
@@ -23,6 +24,7 @@ export async function handleLandingSquare(
   gs: GameState
 ): Promise<void> {
   const roomId = gs.gameId;
+  if (gs.boardJourneyEnabled && await handleBoardAction(socket, gs, player)) return;
 
   // ── 外圈落點處理 ─────────────────────────────────────────
   if (player.isInFastTrack) {

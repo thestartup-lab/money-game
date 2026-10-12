@@ -60,7 +60,7 @@ const GROWTH_FIELDS: { key: 'academic' | 'health' | 'social' | 'resource'; label
 
 /** 需要玩家在手機上做選擇的卡片；主持人收束決策階段時才會被清掉 */
 const DECISION_EVENT_KINDS = new Set<ActiveEvent['kind']>([
-  'deal_pick', 'charity', 'crisis_nt_skip', 'fast_track_travel', 'partnership_pick', 'partnership_response',
+  'board_choice', 'deal_pick', 'charity', 'crisis_nt_skip', 'fast_track_travel', 'partnership_pick', 'partnership_response',
   'tech_startup_offer', 'marriage_window', 'relationship_choice', 'crisis_rescue',
 ]);
 
@@ -610,6 +610,7 @@ export default function PlayerPage() {
         loanAvailable: p.loanAvailable,
       });
     });
+    s.on('boardChoiceRequired', (p: Omit<Extract<ActiveEvent, {kind: 'board_choice'}>, 'kind'>) => setActiveEvent({ kind: 'board_choice', ...p }));
     s.on('fastTrackTravelOptions', (p: {
       destinations: Array<{ id: string; name: string; region: string; cost: number; lifeExpGained: number }>;
       playerCash: number;
@@ -779,7 +780,6 @@ export default function PlayerPage() {
 
   function handleCardDecision(decision: Record<string, unknown>) {
     emit('submitCardDecision', { ...decision, phaseId: gameState?.decisionPhase?.id });
-    setActiveEvent(null);
   }
 
   function handlePaydaySubmit(plan: PaydayPlanPayload, lifeChoice: LifeChoice) {
@@ -792,7 +792,7 @@ export default function PlayerPage() {
   const canUseActions = Boolean(gameState && !gameState.facilitatorScene && (
     gameState.decisionPhase?.kind === 'actions'
     || (gameState.decisionPhase?.rescue && gameState.decisionPhase.playerId === myId)
-    || (gameState.actionPhaseEnabled === false && !gameState.decisionPhase)
+    || (!gameState.boardJourneyEnabled && gameState.actionPhaseEnabled === false && !gameState.decisionPhase)
     || gameState.gamePhase === 'GameOver'
   ));
   const myPlayer: Player | undefined = gameState?.players.find((p) => p.id === myId);
@@ -1391,7 +1391,7 @@ export default function PlayerPage() {
                   ? '全體人生規劃中'
                   : gameState.finalRoundStarted
                     ? '96 歲 · 第 20 輪（最後一輪）'
-                    : `人生第 ${Math.min(gameState.totalLifeRounds ?? 20, (gameState.completedLifeRounds ?? gameState.turnNumber) + 1)} 輪 · ${gameState.paydayTimer?.enabled ? (gameState.paydayTimer.due ? '人生規劃即將開始' : `下次人生規劃 ${formatCountdown(paydayRemaining)}`) : `人生規劃 ${Math.min(3, (gameState.roundsSinceGlobalPayday ?? 0) + 1)}/3`}`}
+                    : `人生第 ${Math.min(gameState.totalLifeRounds ?? 20, (gameState.completedLifeRounds ?? gameState.turnNumber) + 1)} 輪 · ${gameState.boardJourneyEnabled ? '落格決策・每輪自動結算' : gameState.paydayTimer?.enabled ? (gameState.paydayTimer.due ? '人生規劃即將開始' : `下次人生規劃 ${formatCountdown(paydayRemaining)}`) : `人生規劃 ${Math.min(3, (gameState.roundsSinceGlobalPayday ?? 0) + 1)}/3`}`}
               </span>
             </div>
           )}
@@ -1537,7 +1537,7 @@ export default function PlayerPage() {
           {/* ── 可展開面板 ── */}
           <div className="mt-2">
             {!isGameOver && !myPlayer.isInFastTrack && myPlayer.secondLifeProgress && (
-              <CollapsePanel title={`🚪 脫離內圈還差多少（${Math.min(150, Math.round(myPlayer.secondLifeProgress.coverageRatio * 100))}%）`} badge={myPlayer.secondLifeProgress.eligible ? '✓' : undefined}>
+              <CollapsePanel title="🚪 第二人生資格規則" badge={myPlayer.secondLifeProgress.eligible ? '✓' : undefined}>
                 <SecondLifeProgressPanel progress={myPlayer.secondLifeProgress} />
               </CollapsePanel>
             )}
@@ -1549,7 +1549,7 @@ export default function PlayerPage() {
               <div className="mx-4 my-2 rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-sm text-gray-300">
                 {gameState.actionPhaseEnabled === false
                   ? '🕒 大螢幕進行中，結束後就能在「行動」處理旅遊、聯誼、保險、投資與借還款。'
-                  : <>🕒 旅遊、聯誼、保險、投資、借還款在<strong className="text-white">每輪開始的「全體行動時間」</strong>一起處理；現在請看大螢幕。</>}
+                  : <>🕒 旅遊、聯誼、保險、投資、借還款在<strong className="text-white">地圖對應的格子或生活服務站</strong>一起處理；現在請看大螢幕。</>}
               </div>
             )}
             {canUseActions && <CollapsePanel title="行動" defaultOpen={Boolean(gameState.decisionPhase?.rescue) || gameState.decisionPhase?.kind === 'actions'}>

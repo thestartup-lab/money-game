@@ -51,10 +51,12 @@ export function runAutoHost(gs: GameState, now = Date.now()): string | null {
   if (gs.gamePhase !== GamePhase.RatRace && gs.gamePhase !== GamePhase.FastTrack) return null;
   const phase = gs.decisionPhase;
   const scene = gs.facilitatorScene;
+  if (gs.boardJourneyEnabled) return null;
   // 主持人手動暫停：不代按任何東西
   if (gs.pausedAt !== null && !phase && !scene) return null;
 
   if (phase) {
+    if (gs.boardJourneyEnabled && phase.kind !== 'auction') return null;
     if (phase.kind === 'reading') {
       if (phase.settlement) return null;
       const readingMs = gs.readingAutoContinueMs > 0 ? gs.readingAutoContinueMs : AUTO_HOST_TIMING.readingMs;
@@ -96,16 +98,7 @@ export function runAutoHost(gs: GameState, now = Date.now()): string | null {
       return null;
     }
     if (scene.kind === 'retirement') {
-      if (!scene.careerConfirmed && now >= deadline) {
-        // 時間到還沒選：預設退休（最常見、風險最低的選項），並在大螢幕說明
-        context.choice = 'retire';
-        scene.careerConfirmed = true;
-        emitToRoom(gs.gameId, 'notification', { message: `⏰ ${scene.participantNames[0]} 沒有在時間內選擇，系統依預設「退休」。` });
-      }
-      if (scene.careerConfirmed && context.choice) {
-        resolveFacilitatorSceneChoice(gs, scene.id, 'reveal', ignore);
-        return `揭曉人生轉折：${scene.title}`;
-      }
+      // Retirement remains host-controlled; no timed defaults.
       return null;
     }
     if (scene.kind === 'marriage') {

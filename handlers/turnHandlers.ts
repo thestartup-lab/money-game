@@ -1,5 +1,7 @@
 /** 擲骰回合、決策收束與提醒倒數、跳過回合、全體行動時間（由 socketServer 註冊到每條連線） */
 import type { Socket } from 'socket.io';
+import { moveBoardJourney } from '../boardJourney';
+import { captureBoardEffects, describeBoardEffects } from '../boardResults';
 import { Server } from 'socket.io';
 import { GamePhase } from '../gameDataModels';
 import { checkNaturalDeath } from '../gameLogic';
@@ -11,7 +13,7 @@ import {
   decisionReleaseWaiters, eliminatePlayer, emitClient, emitToRoom, enqueueBoardNotice, getRoomState,
   handleLandingSquare, isRoomAdmin, maybeCompleteActionPhase, playerIdentity, queueSecondLifeCandidates, readBoardNotices,
   runGlobalPayday, serializeGameState, tryOpenWorldEvent,
-  repairCurrentTurn,
+  repairCurrentTurn, boardNotices,
 } from '../socketServer';
 
 export function registerTurnHandlers(socket: Socket, onSafe: OnSafe): void {
@@ -123,7 +125,14 @@ export function registerTurnHandlers(socket: Socket, onSafe: OnSafe): void {
       // 內外圈使用不同位置欄位；先把移動前的位置記下，再呼叫 movePlayer
       const wasInFastTrack = player.isInFastTrack;
       const oldPos = wasInFastTrack ? player.fastTrackPosition : player.currentPosition;
-      const { passedPaydays } = movePlayer(player, rolled);
+      if (gs.boardJourneyEnabled) {
+        emitToRoom(roomId, 'playerRolled', { charityBonusDice, playerId: player.id, playerName: player.name,
+          colorIndex: Math.max(0, gs.playerOrder.indexOf(player.id)) % 6, dice: diceFaces, total: rolled,
+          oldPosition: oldPos, newPosition: oldPos, isInFastTrack: wasInFastTrack });
+        await new Promise(resolve => setTimeout(resolve, 3600));
+      }
+      const routePath = gs.boardJourneyEnabled ? await moveBoardJourney(socket, gs, player, rolled) : [];
+      const { passedPaydays } = gs.boardJourneyEnabled ? { passedPaydays: [] as number[] } : movePlayer(player, rolled);
       const newPos = wasInFastTrack ? player.fastTrackPosition : player.currentPosition;
 
       console.log(
@@ -143,7 +152,7 @@ export function registerTurnHandlers(socket: Socket, onSafe: OnSafe): void {
 
       // 廣播給整個房間（含 DisplayScreen），讓大螢幕播放骰子動畫
       const playerColorIndex = gs.playerOrder.indexOf(player.id);
-      emitToRoom(roomId, 'playerRolled', {
+      if (!gs.boardJourneyEnabled) emitToRoom(roomId, 'playerRolled', {
         charityBonusDice,
         playerId: player.id,
         playerName: player.name,
@@ -151,6 +160,7 @@ export function registerTurnHandlers(socket: Socket, onSafe: OnSafe): void {
         dice: diceFaces,
         total: rolled,
         oldPosition: oldPos,
+        routePath,
         newPosition: newPos,
         isInFastTrack: wasInFastTrack,
       });
@@ -165,7 +175,14 @@ export function registerTurnHandlers(socket: Socket, onSafe: OnSafe): void {
         title: `${player.name} 走到了「${landingLabel}」`,
         description: '請一起看清落格位置。主持人按「看完了，繼續」後，才進入本格事件與決策。' });
       await readBoardNotices(gs);
+      const effectsBefore = captureBoardEffects(gs);
       await handleLandingSquare(socket, player, gs);
+      if (gs.boardJourneyEnabled && !gs.facilitatorScene) {
+        const notices = boardNotices.get(gs) ?? [];
+        boardNotices.set(gs, []);
+        enqueueBoardNotice(gs, { playerId:player.id, playerName:player.name, title:`${player.name}・${landingLabel}結果`,
+          description:[...notices.map(n=>n.description), describeBoardEffects(gs,effectsBefore)].join('\n\n') });
+      }
       await readBoardNotices(gs);
 
       // ⚠ 玩家可能在 handleLandingSquare 中因危機/疾病死亡，
@@ -178,7 +195,7 @@ export function registerTurnHandlers(socket: Socket, onSafe: OnSafe): void {
 
       // --- 5b. 老鼠賽跑脫出檢查 ---
       // 偵測本次移動是否路過「第二人生」格（cell 24）
-      if (!player.isInFastTrack && !player.hasPassedSecondLife) {
+      if (!gs.boardJourneyEnabled && !player.isInFastTrack && !player.hasPassedSecondLife) {
         const newPos = player.currentPosition;
         const c = SECOND_LIFE_CELL;
         const crossedCell24 = newPos < oldPos
@@ -251,6 +268,10 @@ export function registerTurnHandlers(socket: Socket, onSafe: OnSafe): void {
       return;
     }
 
+    if (gs.boardJourneyEnabled && !gs.decisionPhase.submitted && !gs.decisionPhase.rescue
+      && !['reading', 'auction', 'actions'].includes(gs.decisionPhase.kind)) {
+      emitClient(socket, 'error', { message: '請等待本人確認選擇；倒數僅作提醒，不會代替玩家決定。' }); return;
+    }
     waiter.release();
   });
 

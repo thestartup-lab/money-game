@@ -61,8 +61,8 @@ test('資格保留雙路徑、財商乘數與人生指標，轉職後 SK 歸零�
   // 這個測試只看資格門檻；給一台沒有養車費的車，讓交通費不影響支出
   p.car = { optionId: 'test', name: '測試', runningCost: 0, lifeExpPerRound: 0, workVehicle: false };
   p.liabilities = []; p.stats.financialIQ = 1;
-  p.assets = [{ id: 'a', type: 'Other', name: '收入', cost: 1, monthlyCashflow: 7500 }];
-  p.stats.health = 70; p.stats.careerSkill = 60; p.relationshipPoints = 0; p.lifeExperience = 0;
+  p.assets = [{ id: 'a', type: 'Other', name: '收入', cost: 1, monthlyCashflow: 9000 }];
+  p.stats.health = 70; p.stats.careerSkill = 60; p.relationshipPoints = 0; p.lifeExperience = 45;
   p.paydayCount = 0;
   assert.equal(evaluateSecondLifeEligibility(p).eligible, false, '尚未結算過一季不得進入第二人生');
   p.paydayCount = 6;

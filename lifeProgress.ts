@@ -359,19 +359,19 @@ export function queueRetirementCandidates(gs: GameState): void {
 
 export function tryOpenRetirementScene(gs: GameState): boolean {
   if (gs.facilitatorScene || gs.decisionPhase || gs.turnInProgress || gs.globalPaydayInProgress) return false;
-  while (gs.retirementQueue.length > 0) {
-    const id = gs.retirementQueue.shift()!;
-    const player = gs.players.get(id);
-    if (!player?.isAlive || player.retirementStatus !== 'working') continue;
-    beginFacilitatorScene(gs, {
-      kind: 'retirement', kicker: '65 歲人生轉折', title: `${player.name} 的退休選擇`,
-      description: retirementSceneDescription(player), participantNames: [player.name],
-      careerPlayerId: player.id, careerConfirmed: false,
-      reminderEndsAt: Date.now() + 90_000, options: [],
-    }, { playerId: player.id, choice: null });
-    return true;
-  }
-  return false;
+  const eligible = gs.retirementQueue.map(id=>gs.players.get(id)).filter((p): p is Player=>!!p?.isAlive && p.retirementStatus==='working');
+  const players = gs.boardJourneyEnabled ? eligible : eligible.slice(0,1);
+  gs.retirementQueue=gs.boardJourneyEnabled ? [] : eligible.slice(1).map(p=>p.id);
+  if (!players.length) return false;
+  beginFacilitatorScene(gs, {
+    kind:'retirement', kicker:'同步人生轉折', title:'本輪退休選擇',
+    description:'本輪符合資格的玩家一起在手機選擇。倒數只作提醒，全員確認後由主持人一次揭曉。',
+    participantNames:players.map(p=>p.name), careerConfirmed:false,
+    careerPlayerId:gs.boardJourneyEnabled ? undefined : players[0].id,
+    retirementParticipants:players.map(p=>({playerId:p.id,name:p.name,description:retirementSceneDescription(p),confirmed:false})),
+    reminderEndsAt:Date.now()+90_000, options:[],
+  }, { retirementChoices:{} });
+  return true;
 }
 
 /** 僅在完整操作結算後保存達標快照，不在月結中途判斷。 */
@@ -381,7 +381,7 @@ export function queueSecondLifeCandidates(gs: GameState, settledPlayer?: Player)
   for (const player of settledPlayer ? [settledPlayer] : gs.players.values()) {
     if (!player.isAlive || player.isInFastTrack || !player.hasPassedSecondLife || queue.some(e => e.playerId === player.id)) continue;
     const eligibility = evaluateSecondLifeEligibility(player);
-    if (eligibility.eligible) queue.push({ playerId: player.id, eligibility });
+    if (eligibility.eligible && (!gs.boardJourneyEnabled || player.secondLifeStableRounds >= 2)) queue.push({ playerId: player.id, eligibility });
   }
   secondLifeQueue.set(gs, queue);
 }
@@ -389,12 +389,17 @@ export function queueSecondLifeCandidates(gs: GameState, settledPlayer?: Player)
 export function tryOpenSecondLife(gs: GameState): boolean {
   if (gs.gamePhase === GamePhase.GameOver || gs.facilitatorScene || gs.decisionPhase || gs.turnInProgress || gs.globalPaydayInProgress) return false;
   const queue = secondLifeQueue.get(gs) ?? [];
-  while (queue.length && (!gs.players.get(queue[0].playerId)?.isAlive || gs.players.get(queue[0].playerId)?.isInFastTrack)) queue.shift();
+  while (queue.length) {
+    const candidate = gs.players.get(queue[0].playerId);
+    if (candidate?.isAlive && !candidate.isInFastTrack && evaluateSecondLifeEligibility(candidate).eligible
+      && (!gs.boardJourneyEnabled || candidate.secondLifeStableRounds >= 2)) break;
+    queue.shift();
+  }
   const player = queue[0] && gs.players.get(queue[0].playerId);
   if (!player) return false;
   beginFacilitatorScene(gs, { kind: 'second_life', kicker: '第二人生資格已達成',
     title: player.name + ' 的第二人生即將啟動',
-    description: '已路過第二人生格，並在完整結算後達成資格。由主持人揭曉，無須再繞一圈。',
+    description: gs.boardJourneyEnabled ? '已路過第二人生格，並在連續兩輪完整結算後達標。由主持人揭曉，無須再繞一圈。' : '已路過第二人生格，並在完整結算後達成資格。由主持人揭曉，無須再繞一圈。',
     participantNames: [player.name], options: [{ id: 'reveal', label: '揭曉第二人生', description: '正式進入外圈。' }] },
     { playerId: player.id });
   return true;
@@ -406,7 +411,12 @@ export function revealSecondLife(gs: GameState): void {
   if (!entry || !player?.isAlive || player.isInFastTrack) {
     revealFacilitatorResult(gs, '資格公告已結束', '請主持人繼續遊戲。'); return;
   }
-  promoteSecondLife(gs, player, entry.eligibility);
+  const current = evaluateSecondLifeEligibility(player);
+  if (!current.eligible || (gs.boardJourneyEnabled && player.secondLifeStableRounds < 2)) {
+    revealFacilitatorResult(gs, '目前尚未符合資格', '狀態已變動，待後續完整結算重新確認；本次沒有進入外圈。');
+    return;
+  }
+  promoteSecondLife(gs, player, current);
 }
 
 export function promoteSecondLife(gs: GameState, player: Player, secondLifeEligibility: ReturnType<typeof evaluateSecondLifeEligibility>): void {

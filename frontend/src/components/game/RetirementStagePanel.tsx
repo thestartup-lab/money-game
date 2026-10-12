@@ -9,16 +9,17 @@ export default function RetirementStagePanel({ gameState, player, emit }: {
 }) {
   const scene = gameState.facilitatorScene;
   const [startupAmount, setStartupAmount] = useState(STARTUP_AMOUNTS[0]);
-  if (scene?.kind !== 'retirement' || scene.careerPlayerId !== player.id) return null;
+  const participant=scene?.retirementParticipants?.find(p=>p.playerId===player.id);
+  if (scene?.kind !== 'retirement' || !participant) return null;
   const button = 'min-h-14 w-full rounded-xl border-2 border-amber-400 bg-amber-900/70 p-3 text-lg font-black text-white disabled:opacity-40';
   const choose = (choice: string, extra: Record<string, unknown> = {}) => emit('chooseRetirement', { sceneId: scene.id, choice, ...extra });
-  const canDefer = scene.description.includes('延後一輪');
+  const canDefer = participant.description.includes('延後一輪');
   return (
     <section className="mx-4 mb-3 space-y-3 rounded-2xl border-2 border-amber-400 bg-slate-900 p-5" aria-label="65 歲人生轉折">
       <h3 className="text-2xl font-black text-amber-200">🎂 65 歲，你的下一段人生</h3>
-      <p className="whitespace-pre-line text-base leading-relaxed text-white">{scene.stage === 'result' ? scene.resultDescription : scene.description}</p>
+      <p className="whitespace-pre-line text-base leading-relaxed text-white">{scene.stage === 'result' ? scene.resultDescription : participant.description}</p>
       {scene.stage === 'prompt' ? (
-        scene.careerConfirmed ? (
+        participant.confirmed ? (
           <p className="text-xl font-bold text-emerald-200">已選擇，請看大螢幕，等待主持人揭曉。</p>
         ) : (
           <div className="space-y-2">

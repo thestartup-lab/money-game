@@ -30,7 +30,7 @@ import {
  * 手機端「脫離內圈還差多少」解析：把第二人生資格拆成可行動的缺口。
  * 已進外圈的玩家回傳 null。
  */
-export function buildSecondLifeProgress(p: Player): object | null {
+export function buildSecondLifeProgress(p: Player, boardJourneyEnabled = false): object | null {
   if (p.isInFastTrack) return null;
   const e = evaluateSecondLifeEligibility(p);
   const fqMultiplier = FQ_MULTIPLIERS[p.stats.financialIQ] ?? 1;
@@ -51,7 +51,8 @@ export function buildSecondLifeProgress(p: Player): object | null {
     };
   };
   return {
-    eligible: e.eligible,
+    eligible: e.eligible && (!boardJourneyEnabled || p.secondLifeStableRounds >= 2),
+    stableRounds: boardJourneyEnabled ? Math.min(2, p.secondLifeStableRounds ?? 0) : undefined,
     route: e.route,
     passedCell: p.hasPassedSecondLife,
     paydayCount: p.paydayCount,
@@ -349,7 +350,7 @@ export function serializePlayer(p: Player, gs: GameState): object {
     travelPenaltyRemaining: p.travelPenaltyRemaining,
     isInFastTrack: p.isInFastTrack,
     hasPassedSecondLife: p.hasPassedSecondLife,
-    secondLifeProgress: buildSecondLifeProgress(p),
+    secondLifeProgress: buildSecondLifeProgress(p, gs.boardJourneyEnabled),
     fastTrackPosition: p.fastTrackPosition,
     visitedDestinations: p.visitedDestinations ?? [],
     legacyBonusPoints: p.legacyBonusPoints ?? 0,
@@ -400,18 +401,19 @@ export function serializeGameState(gs: GameState): object {
     isPaused: gs.pausedAt !== null,
     // 只有主持人手動暫停才為 true；決策階段與舞台事件的自動暫停不算
     isManuallyPaused: gs.pausedAt !== null && !gs.decisionPhase && !gs.facilitatorScene,
-    readingAutoContinueMs: gs.readingAutoContinueMs,
+    readingAutoContinueMs: gs.boardJourneyEnabled ? 0 : gs.readingAutoContinueMs,
     marriageGiftOverride: gs.marriageGiftOverride,
     restoredAt: gs.restoredAt,
     monthsPerRound: gs.monthsPerRound || MONTHS_PER_ROUND,
-    autoRevealOnSubmit: gs.autoRevealOnSubmit,
-    autoHost: gs.autoHost,
+    autoRevealOnSubmit: gs.boardJourneyEnabled ? false : gs.autoRevealOnSubmit,
+    autoHost: gs.boardJourneyEnabled ? false : gs.autoHost,
     communityChoiceAuto: gs.communityChoiceAuto,
     reviewView: gs.gamePhase === GamePhase.GameOver ? (gs.reviewView ?? null) : null,
     bondRateAnnual: currentBondRate(gs),
     adviceCards: ADVICE_CARDS,
     actionPhaseDone: gs.decisionPhase?.playerId === '__all_players__' && (gs.decisionPhase.kind === 'actions' || gs.decisionPhase.kind === 'payday') ? [...gs.actionPhaseDone] : [],
-    actionPhaseEnabled: gs.actionPhaseEnabled,
+    boardJourneyEnabled: gs.boardJourneyEnabled,
+    actionPhaseEnabled: gs.boardJourneyEnabled ? false : gs.actionPhaseEnabled,
     activeAuctions: Object.entries(gs.activeAuctions ?? {}).map(([auctionId, a]) => ({
       auctionId,
       dealCardId: a.dealCardId,
@@ -432,7 +434,7 @@ export function serializeGameState(gs: GameState): object {
     totalLifeRounds: TOTAL_LIFE_ROUNDS,
     roundsSinceGlobalPayday: gs.roundsSinceGlobalPayday,
     paydayTimer: {
-      enabled: gs.paydayTimerEnabled,
+      enabled: !gs.boardJourneyEnabled && gs.paydayTimerEnabled,
       intervalMs: gs.paydayIntervalMs,
       remainingMs: paydayRemainingMs(gs),
       roundsSince: gs.turnNumber - gs.roundsAtLastPayday,

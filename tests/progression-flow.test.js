@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
+const { spawn: spawnNode } = require('node:child_process');
+// Preserve coverage for older persisted rooms without applying their rules to v6.
+const spawn = (command, args, options) => spawnNode(command, ['--require', require.resolve('./helpers/legacy-board.cjs'), ...args], options);
 const { io } = require('socket.io-client');
 
 function wait(s, event, predicate = () => true) {
@@ -22,7 +24,7 @@ async function fixture(t, port, passed, passive, autoReading = true, outer = fal
     const create=logic.createPlayer;
     logic.createPlayer=(...args)=>{
       const p=create(...args);p.pre20Done=true;p.cash=${deal ? 10_000_000 : 200000};
-      p.hasPassedSecondLife=${passed};p.stats.health=40;p.stats.careerSkill=0;
+      p.hasPassedSecondLife=${passed};p.stats.health=40;p.stats.careerSkill=60;
       p.isInFastTrack=${outer};p.paydayCount=${seasoned ? 6 : 0};
       p.growthStats={academic:1,health:0,social:0,resource:0};
       p.expenses={taxes:0,homeMortgagePayment:0,carLoanPayment:0,creditCardPayment:0,otherExpenses:10000};

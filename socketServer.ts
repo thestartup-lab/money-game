@@ -606,7 +606,7 @@ export async function readBoardNotices(gs: GameState): Promise<void> {
     if (!notice) return;
     const context = beginHostDecisionPhase(gs, { id: notice.playerId, name: notice.playerName }, 'reading', notice.title, notice.description, { settlement: notice.settlement });
     // 主持人可設定落格說明自動放行；主持人先按「繼續」時 waiter 已被移除，計時器不會重複放行
-    if (!notice.settlement && gs.readingAutoContinueMs > 0) {
+    if (!gs.boardJourneyEnabled && !notice.settlement && gs.readingAutoContinueMs > 0) {
       setTimeout(() => {
         const waiter = decisionReleaseWaiters.get(gs.gameId);
         if (waiter?.phaseId === context.phaseId) waiter.release();
@@ -1008,7 +1008,7 @@ export function continueAfterTurnAdvance(gs: GameState): void {
   if (tryOpenMarriageProposal(gs)) return;
 
   // 每輪開始：全體行動時間（發薪、舞台、第二人生都處理完之後才開）
-  if (gs.actionPhaseEnabled && gs.actionPhaseRound !== gs.turnNumber && !gs.turnInProgress && !gs.globalPaydayInProgress) {
+  if (!gs.boardJourneyEnabled && gs.actionPhaseEnabled && gs.actionPhaseRound !== gs.turnNumber && !gs.turnInProgress && !gs.globalPaydayInProgress) {
     void runActionPhase(gs).catch((error) => console.error(`[actionPhase] 房間 ${gs.gameId}：`, error));
   }
 }
@@ -1097,7 +1097,7 @@ setInterval(() => {
 export const playerSessions = new Map<string, { roomId: string; token: string; socketId: string; setupStep?: string; lineAccountKey?: string }>();
 export const pendingSubmissions = new Map<string, { phaseId: string; event: string; submit: (value: unknown) => void }>();
 export const privateReplay = new Map<string, Map<string, unknown[]>>();
-export const replayEvents = new Set(['paydayPlanningRequired', 'fastTrackDealCard', 'charityCardPending',
+export const replayEvents = new Set(['boardChoiceRequired', 'paydayPlanningRequired', 'fastTrackDealCard', 'charityCardPending',
   'techStartupOffer', 'fastTrackPartnershipOptions', 'fastTrackPartnershipInvitation', 'fastTrackTravelOptions',
   'crisisNTSkipAvailable', 'crisisRescueRequired', 'dealCardsDrawn', 'relationshipCardDrawn']);
 export function playerIdentity(socket: Socket): string { return socket.data.playerId ?? socket.id; }
@@ -1172,7 +1172,7 @@ io.on('connection', (socket: Socket) => {
     // 關掉行動時間的房間，才沿用「回合空檔」自由操作。回覆邀約、危機自救不受限。
     const allowed = rescueAllowed || actionsOpen
       || (responseActions.has(event) && idleFreeTime)
-      || (!gs?.actionPhaseEnabled && idleFreeTime);
+      || (!gs?.boardJourneyEnabled && !gs?.actionPhaseEnabled && idleFreeTime);
     if (financialActions.has(event) && !allowed) {
       emitClient(socket, 'error', { message: gs?.actionPhaseEnabled
         ? '財務與生活行動在每輪開始的「全體行動時間」進行，現在請一起看大螢幕。'

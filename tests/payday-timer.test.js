@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
+const { spawn: spawnNode } = require('node:child_process');
+// Preserve coverage for older persisted rooms without applying their rules to v6.
+const spawn = (command, args, options) => spawnNode(command, ['--require', require.resolve('./helpers/legacy-board.cjs'), ...args], options);
 const { io } = require('socket.io-client');
 
 const PORT = 3293;

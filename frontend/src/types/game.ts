@@ -118,6 +118,7 @@ export interface SecondLifeRouteProgress {
 }
 
 export interface SecondLifeProgress {
+  stableRounds?: number;
   eligible: boolean;
   route: 'financialBreakthrough' | 'balancedLife' | null;
   passedCell: boolean;
@@ -265,6 +266,7 @@ export interface BucketGoalDetail {
 }
 
 export interface GameState {
+  boardJourneyEnabled?: boolean;
   lineLoginRequired?: boolean;
   lineBrand?: LineBrand;
   gameId: string;
@@ -349,6 +351,7 @@ export interface GameState {
 }
 
 export interface FacilitatorScene {
+  retirementParticipants?: { playerId: string; name: string; description: string; confirmed: boolean }[];
   id: string;
   kind: 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family' | 'global_event' | 'second_life' | 'career' | 'retirement';
   stage: 'prompt' | 'result';
@@ -594,6 +597,7 @@ export interface DiseaseCrisisCard {
 
 /** 格子落點後的互動事件（在 PlayerPage 以 activeEvent state 控制顯示）*/
 export type ActiveEvent =
+  | { kind: 'board_choice'; title: string; description: string; options: { id: string; label: string; description: string; disabled?: boolean; group?: string }[] }
   | { kind: 'doodad'; title: string; description: string; cashDeducted: number; expenseIncrease: number }
   | { kind: 'crisis_nt_skip'; title: string; description: string; baseCost: number; network: number; timeoutMs: number;
       preview?: { effectiveCost: number; turnsLost: number; deathRisk: boolean; insurable: boolean; insuredCost: number; cash: number } }

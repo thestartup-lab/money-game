@@ -89,7 +89,7 @@ export function waitForHostControlledDecision<T>(
       }
       emitClient(socket, 'decisionSubmitted', { phaseId: context.phaseId });
       // 送出後自動揭曉：短暫停留讓大螢幕看到「已送出」，主持人若先按繼續則不重複放行
-      if (gs.autoRevealOnSubmit) {
+      if (gs.autoRevealOnSubmit && !gs.boardJourneyEnabled) {
         setTimeout(() => {
           const waiter = decisionReleaseWaiters.get(gs.gameId);
           if (waiter?.phaseId === context.phaseId) waiter.release();
@@ -98,6 +98,8 @@ export function waitForHostControlledDecision<T>(
     };
 
     const release = () => {
+      // New board decisions are explicit: expiry/host clicks never invent an answer.
+      if (gs.boardJourneyEnabled && !hasSubmitted && !gs.decisionPhase?.rescue) return;
       cleanup();
       if (gs.decisionPhase?.id === context.phaseId) gs.decisionPhase = null;
       emitToRoom(gs.gameId, 'decisionPhaseEnded', {
@@ -115,7 +117,20 @@ export function waitForHostControlledDecision<T>(
       resolve(submittedValue);
     };
 
-    pendingSubmissions.set(playerIdentity(socket), { phaseId: context.phaseId, event: eventName, submit: value => onDecision(value as T) });
+    pendingSubmissions.set(playerIdentity(socket), { phaseId: context.phaseId, event: eventName, submit: value => {
+      const prompt = privateReplay.get(playerIdentity(socket))?.get('boardChoiceRequired')?.[0];
+      if (prompt) {
+        const options = (prompt as { options: { id: string; label: string; description: string; disabled?: boolean }[] }).options;
+        const choiceId = (value as { choiceId?: string })?.choiceId;
+        if (!options.some(o => o.id === choiceId && !o.disabled)) {
+          emitClient(socket, 'error', { message: '請選擇一個目前可用的選項。' });
+          return;
+        }
+        const selected = options.find(o => o.id === choiceId)!;
+        if (!hasSubmitted && gs.decisionPhase?.id === context.phaseId) gs.decisionPhase.publicLines = [`本人已選擇：${selected.label}`, selected.description, '尚未生效，等待主持人揭曉。'];
+      }
+      onDecision(value as T);
+    } });
     decisionReleaseWaiters.set(gs.gameId, { phaseId: context.phaseId, release });
   });
 }
@@ -152,6 +167,10 @@ export function describePrompt(prompt: { event: string; payload: unknown } | und
   const p = prompt.payload as Record<string, any>;
   const money = (n: unknown) => `$${Number(n ?? 0).toLocaleString()}`;
   switch (prompt.event) {
+    case 'boardChoiceRequired':
+      return p.options?.some((o: any) => o.group)
+        ? [p.description, `可選服務：${[...new Set(p.options.map((o: any) => o.group ?? o.label))].join('、')}`, '請本人在手機展開選項；確認後會在這裡公開所選內容，主持人揭曉才生效。']
+        : [p.description, ...(p.options ?? []).map((o: any) => `${o.label}：${o.description}${o.disabled ? '（目前不可選）' : ''}`)];
     case 'dealCardsDrawn':
       return [
         ...(p.cards ?? []).map((c: any) => `📋 ${c.name}：頭期款 ${money(c.downPayment)}，月現金流 ${Number(c.monthlyCashflow) >= 0 ? '+' : ''}${money(c.monthlyCashflow)}`),

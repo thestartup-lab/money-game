@@ -2,7 +2,7 @@
 import type { Socket } from 'socket.io';
 import { GamePhase } from '../gameDataModels';
 import { syncPlayerAges } from '../gameLogic';
-import { MONTHS_PER_ROUND_OPTIONS } from '../gameConfig';
+import { MONTHS_PER_ROUND_OPTIONS, BOND_RATE_START_ANNUAL } from '../gameConfig';
 import { createPlayer, getCurrentAge, startGameClock, pauseGameClock, resumeGameClock } from '../gameLogic';
 import { MIN_GAME_DURATION_MS, MAX_GAME_DURATION_MS, YEARS_PER_COMPLETED_ROUND, TOTAL_LIFE_ROUNDS } from '../gameConfig';
 import { CRISIS_EVENTS, SMALL_DEALS, Deck, BIG_DEALS, DOODADS, MARKET_CARDS } from '../gameCards';
@@ -114,6 +114,14 @@ export function registerHostHandlers(socket: Socket, onSafe: OnSafe): void {
     repairCurrentTurn(gs);
     syncPlayerAges(gs);
     gs.turnNumber = 0;
+    gs.lastPaidRound = 0;
+    gs.lastCommunityChoicePayday = 0;
+    gs.communityChoiceHistory = [];
+    gs.communityChoiceLog = [];
+    gs.reviewView = null;
+    gs.actionPhaseRound = -1;
+    gs.bondRateAnnual = BOND_RATE_START_ANNUAL;
+    gs.bondRateHistory = [];
     gs.roundsSinceGlobalPayday = 0;
     gs.roundsAtLastPayday = 0;
     gs.lastPaydayActiveMs = 0;
@@ -183,6 +191,7 @@ export function registerHostHandlers(socket: Socket, onSafe: OnSafe): void {
   onSafe('triggerPaydayNow', () => {
     const gs = getRoomState(socket);
     if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
+    if (gs.boardJourneyEnabled) { emitClient(socket, 'error', { message: '新版已採落格決策，每輪自動結算，不另開人生規劃。' }); return; }
     if (!isRoomAdmin(socket, gs)) { emitClient(socket, 'error', { message: '只有管理員可以立即發薪。' }); return; }
     if (gs.gamePhase !== GamePhase.RatRace && gs.gamePhase !== GamePhase.FastTrack) { emitClient(socket, 'error', { message: '遊戲尚未進行中。' }); return; }
     if (gs.finalRoundStarted) { emitClient(socket, 'error', { message: '最後一輪不再發薪。' }); return; }
@@ -311,7 +320,7 @@ export function registerHostHandlers(socket: Socket, onSafe: OnSafe): void {
       emitClient(socket, 'error', { message: '只有管理員可以重啟遊戲。' });
       return;
     }
-    if (gs.decisionPhase || gs.facilitatorScene) {
+    if (gs.decisionPhase || gs.facilitatorScene || gs.turnInProgress) {
       emitClient(socket, 'error', { message: '請先結束目前的決策或大螢幕舞台事件，再重新開始遊戲。' });
       return;
     }
@@ -340,6 +349,20 @@ export function registerHostHandlers(socket: Socket, onSafe: OnSafe): void {
     gs.turnNumber = 0;
     gs.currentPlayerTurnId = gs.playerOrder[0] ?? '';
     gs.gameStartTime = null;
+    gs.lastPaidRound = 0;
+    gs.roundsAtLastPayday = 0;
+    gs.lastPaydayActiveMs = 0;
+    gs.paydayPausedMs = 0;
+    gs.paydayPausedAt = null;
+    gs.lastCommunityChoicePayday = 0;
+    gs.communityChoiceHistory = [];
+    gs.communityChoiceLog = [];
+    gs.bondRateAnnual = BOND_RATE_START_ANNUAL;
+    gs.bondRateHistory = [];
+    gs.reviewView = null;
+    gs.actionPhaseRound = -1;
+    gs.retirementQueue = [];
+    gs.restoredAt = null;
     gs.pausedAt = null;
     gs.totalPausedMs = 0;
     gs.marketEvents = [];

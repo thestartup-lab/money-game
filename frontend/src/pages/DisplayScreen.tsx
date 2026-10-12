@@ -903,8 +903,8 @@ export default function DisplayScreen() {
               </div>
             ) : null}
             {gameState.decisionPhase && gameState.decisionPhase.kind !== 'reading' && !centerEvent && !diceAnim && (
-              <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/65 px-6 backdrop-blur-sm">
-                <div className="w-full max-w-2xl rounded-3xl border-2 border-indigo-400 bg-gradient-to-br from-indigo-950/95 to-gray-950/95 px-10 py-9 text-center shadow-2xl">
+              <div className="absolute inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/65 p-6 backdrop-blur-sm">
+                <div className="my-auto w-full max-w-5xl rounded-3xl border-2 border-indigo-400 bg-gradient-to-br from-indigo-950/95 to-gray-950/95 px-10 py-9 text-center shadow-2xl">
                   <p className="text-sm font-bold uppercase tracking-[0.3em] text-indigo-300">全場決策時間</p>
                   <p className="mt-3 text-5xl font-black text-white">{gameState.decisionPhase.title}</p>
                   {(gameState.decisionPhase.publicLines ?? []).length > 0 && (

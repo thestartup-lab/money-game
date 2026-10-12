@@ -1,4 +1,5 @@
 import { AssetType, LifeStage } from './gameConstants';
+import { INNER_NODES, OUTER_NODES } from './frontend/src/boardLayout';
 
 // ============================================================
 // 棋盤格類型
@@ -36,32 +37,7 @@ export interface BoardSquare {
  * 老鼠賽跑圈的 24 格棋盤。發薪改為每三個完整輪次統一觸發，
  * 因此地圖只保留會產生選擇或人生事件的格位。
  */
-export const BOARD: readonly BoardSquare[] = [
-  { index: 0,  type: SquareType.SmallDeal,    label: '小交易' },
-  { index: 1,  type: SquareType.Doodad,       label: '意外支出' },
-  { index: 2,  type: SquareType.Relationship, label: '人際關係' },
-  { index: 3,  type: SquareType.BigDeal,      label: '大交易' },
-  { index: 4,  type: SquareType.Crisis,       label: '危機事件' },
-  { index: 5,  type: SquareType.Charity,      label: '慈善捐款' },
-  { index: 6,  type: SquareType.SmallDeal,    label: '小交易' },
-  { index: 7,  type: SquareType.Market,       label: '市場行情' },
-  { index: 8,  type: SquareType.Doodad,       label: '意外支出' },
-  { index: 9,  type: SquareType.Baby,         label: '家庭事件' },
-  { index: 10, type: SquareType.Relationship, label: '人際關係' },
-  { index: 11, type: SquareType.BigDeal,      label: '大交易' },
-  { index: 12, type: SquareType.Crisis,       label: '危機事件' },
-  { index: 13, type: SquareType.SmallDeal,    label: '小交易' },
-  { index: 14, type: SquareType.Market,       label: '市場行情' },
-  { index: 15, type: SquareType.Doodad,       label: '意外支出' },
-  { index: 16, type: SquareType.Downsizing,   label: '職涯轉折' },
-  { index: 17, type: SquareType.Relationship, label: '人際關係' },
-  { index: 18, type: SquareType.BigDeal,      label: '大交易' },
-  { index: 19, type: SquareType.Charity,      label: '慈善捐款' },
-  { index: 20, type: SquareType.SmallDeal,    label: '小交易' },
-  { index: 21, type: SquareType.Crisis,       label: '危機事件' },
-  { index: 22, type: SquareType.Market,       label: '市場行情' },
-  { index: 23, type: SquareType.SecondLife,   label: '第二人生' },
-];
+export const BOARD: readonly BoardSquare[] = INNER_NODES.map(([label,kind],index)=>({index,label,type:({deal:index===14?SquareType.BigDeal:SquareType.SmallDeal,market:SquareType.Market,expense:SquareType.Doodad,crisis:SquareType.Crisis,second:SquareType.SecondLife} as Record<string,SquareType>)[kind] ?? SquareType.Relationship}));
 
 // ============================================================
 // 卡牌介面
@@ -1200,25 +1176,7 @@ export interface FastTrackSquare {
  * FastTrack 外圈棋盤（17 格）。
  * 玩家脫出老鼠賽跑後切換到此棋盤循環行走。
  */
-export const FAST_TRACK_BOARD: readonly FastTrackSquare[] = [
-  { index: 0,  type: FastTrackSquareType.GlobalWave,        label: '時代浪潮'  },
-  { index: 1,  type: FastTrackSquareType.BigRealEstate,     label: '大型房地產' },
-  { index: 2,  type: FastTrackSquareType.StockOpportunity,  label: '股市大機會' },
-  { index: 3,  type: FastTrackSquareType.NetworkSummit,     label: '人脈峰會'  },
-  { index: 4,  type: FastTrackSquareType.Charity,           label: '慈善格'    },
-  { index: 5,  type: FastTrackSquareType.BusinessDeal,      label: '事業擴張'  },
-  { index: 6,  type: FastTrackSquareType.BigRealEstate,     label: '大型房地產' },
-  { index: 7,  type: FastTrackSquareType.TaxPlanning,       label: '稅務規劃'  },
-  { index: 8,  type: FastTrackSquareType.TechStartup,       label: '科技新創'  },
-  { index: 9,  type: FastTrackSquareType.GlobalWave,        label: '時代浪潮'  },
-  { index: 10, type: FastTrackSquareType.Partnership,       label: '合夥機會'  },
-  { index: 11, type: FastTrackSquareType.Crisis,            label: '危機考驗'  },
-  { index: 12, type: FastTrackSquareType.LifeJourney,       label: '生命歷練'  },
-  { index: 13, type: FastTrackSquareType.LifeJourney,       label: '生命歷練'  },
-  { index: 14, type: FastTrackSquareType.Relationship,      label: '人際關係'  },
-  { index: 15, type: FastTrackSquareType.AssetLeverage,     label: '資產槓桿'  },
-  { index: 16, type: FastTrackSquareType.DiseaseCrisis,     label: '疾病危機'  },
-];
+export const FAST_TRACK_BOARD: readonly FastTrackSquare[] = OUTER_NODES.map(([label,kind],index)=>({index,label,type:({deal:FastTrackSquareType.BusinessDeal,market:FastTrackSquareType.GlobalWave,crisis:FastTrackSquareType.Crisis,charity:FastTrackSquareType.Charity} as Record<string,FastTrackSquareType>)[kind] ?? FastTrackSquareType.Relationship}));
 
 /** 外圈發薪格索引 */
 export const FAST_TRACK_PAYDAY_LOCATIONS: readonly number[] = [];

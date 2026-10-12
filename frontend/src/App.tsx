@@ -64,7 +64,7 @@ function BoardPreview() {
           enableCalibration
         />
       </div>
-      <p className="text-gray-500 text-xs">發光棋子 = 當前回合玩家 ▎ 中央三段圓盤 = 下次人生規劃</p>
+      <p className="text-gray-300 text-sm">發光棋子＝當前回合玩家；第一人生 04、14 選路，支線在服務站匯合。</p>
     </div>
   );
 }

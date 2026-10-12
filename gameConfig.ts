@@ -70,16 +70,16 @@ export const SECOND_LIFE_CELL = 23;
 /**
  * 第二人生雙路徑資格。
  *
- * 財務突破：有效被動收入覆蓋 100% 支出，並完成至少 1 項人生指標。
- * 平衡人生：有效被動收入覆蓋 75% 支出，並完成至少 2 項人生指標。
+ * 財務突破：有效被動收入覆蓋 100% 支出，並完成至少 2 項人生指標。
+ * 平衡人生：有效被動收入覆蓋 90% 支出，並完成至少 3 項人生指標。
  *
  * 「有效被動收入」會套用 FQ 乘數；人生指標只在實際達成時參與判定，
  * 遊戲進行中不向玩家顯示尚差多少，完整明細留到賽後復盤。
  */
 export const SECOND_LIFE_FINANCIAL_COVERAGE_RATIO = 1;
-export const SECOND_LIFE_BALANCED_COVERAGE_RATIO = 0.75;
-export const SECOND_LIFE_FINANCIAL_INDICATORS_REQUIRED = 1;
-export const SECOND_LIFE_BALANCED_INDICATORS_REQUIRED = 2;
+export const SECOND_LIFE_BALANCED_COVERAGE_RATIO = 0.9;
+export const SECOND_LIFE_FINANCIAL_INDICATORS_REQUIRED = 2;
+export const SECOND_LIFE_BALANCED_INDICATORS_REQUIRED = 3;
 /** 健康指標門檻要高於最低起始 HP（50），否則人人開局就達標。 */
 export const SECOND_LIFE_HEALTH_THRESHOLD = 70;
 /** 至少結算過一季（6 個月）才可評估第二人生資格。 */

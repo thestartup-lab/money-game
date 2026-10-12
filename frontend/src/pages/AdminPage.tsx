@@ -627,7 +627,7 @@ export default function AdminPage() {
                 </p>
                 <button
                   className="w-full rounded-xl bg-indigo-500 px-4 py-3 text-base font-black text-white transition-colors hover:bg-indigo-400"
-                  onClick={() => emit('continueDecisionPhase', { phaseId: decisionPhase.id })}
+                  disabled={Boolean(gameState?.boardJourneyEnabled && !decisionPhase.submitted && !decisionPhase.rescue && !['reading','auction'].includes(decisionPhase.kind))} onClick={() => emit('continueDecisionPhase', { phaseId: decisionPhase.id })}
                 >
                   {decisionPhase.kind === 'actions'
                     ? `結束行動時間，開始擲骰 ▶（已完成 ${(gameState?.actionPhaseDone ?? []).length}/${players.filter((p: Player) => p.isAlive && !p.isDisconnected).length}）`
@@ -637,13 +637,15 @@ export default function AdminPage() {
                     ? '結束競標並揭曉 ▶'
                     : decisionPhase.submitted
                       ? '揭曉結果並繼續 ▶'
-                      : '略過本次決策並繼續 ▶'}
+                      : gameState?.boardJourneyEnabled && !decisionPhase.rescue ? '等待本人確認選擇' : '略過本次決策並繼續 ▶'}
                 </button>
               </div>
             )}
             {isRunning && (
               <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-2 text-xs text-gray-300">
                 <p className="mb-1 font-bold text-gray-200">落格說明節奏</p>
+                {gameState?.boardJourneyEnabled && <p>由主持人逐步確認落格、玩家選擇與結果；倒數只提醒，不代替本人決策。</p>}
+                {!gameState?.boardJourneyEnabled && <>
                 <div className="flex flex-wrap gap-1">
                   {[0, 5, 10, 20].map((sec) => {
                     const active = Math.round((gameState?.readingAutoContinueMs ?? 0) / 1000) === sec;
@@ -651,44 +653,47 @@ export default function AdminPage() {
                       <button
                         key={sec}
                         className={`rounded-lg px-2 py-1 font-bold ${active ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
-                        onClick={() => emit('setReadingAutoContinue', { seconds: sec })}
+                        disabled={gameState?.boardJourneyEnabled} onClick={() => emit('setReadingAutoContinue', { seconds: sec })}
                       >{sec === 0 ? '每次手動繼續' : `${sec} 秒自動放行`}</button>
                     );
                   })}
                 </div>
-                <p className="mt-1 text-[11px] text-gray-500">只影響「走到了某格」這類說明。</p>
+                <p className="mt-1 text-[11px] text-gray-500">新版由主持人手動確認落格、選擇與結果；以下自動控制只適用舊版場次。</p>
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <span className="font-bold text-gray-200">玩家送出後自動揭曉</span>
                   <button
                     className={`rounded-lg px-2 py-1 font-bold ${gameState?.autoRevealOnSubmit !== false ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
-                    onClick={() => emit('setAutoRevealOnSubmit', { enabled: gameState?.autoRevealOnSubmit === false })}
+                    disabled={gameState?.boardJourneyEnabled} onClick={() => emit('setAutoRevealOnSubmit', { enabled: gameState?.autoRevealOnSubmit === false })}
                   >{gameState?.autoRevealOnSubmit !== false ? '開啟中（點此改為手動揭曉）' : '關閉中（點此開啟）'}</button>
                 </div>
-                <p className="mt-1 text-[11px] text-gray-500">開啟時玩家一送出就在 1.5 秒後揭曉；競標仍由你按「結束競標」。</p>
+                <p className="mt-1 text-[11px] text-gray-500">新版一律等待主持人揭曉，不會倒數自動送出。</p>
+                </>}
                 <div className="mt-2 flex items-center justify-between gap-2">
-                  <span className="font-bold text-gray-200">🗳️ 人生規劃後全場共同抉擇</span>
+                  <span className="font-bold text-gray-200">🗳️ 定期全場共同抉擇</span>
                   <button
                     className={`rounded-lg px-2 py-1 font-bold ${gameState?.communityChoiceAuto !== false ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
                     onClick={() => emit('setCommunityChoiceAuto', { enabled: gameState?.communityChoiceAuto === false })}
                   >{gameState?.communityChoiceAuto !== false ? '開啟中' : '關閉中'}</button>
                 </div>
-                <p className="mt-1 text-[11px] text-gray-500">每次人生規劃結束自動出現一張（8 張輪替），每人在手機投票，你按「依多數決揭曉」或自己裁定。</p>
+                <p className="mt-1 text-[11px] text-gray-500">每三輪環境週期結束出現一張（8 張輪替），每人在手機投票，你按「依多數決揭曉」或自己裁定。</p>
+                {!gameState?.boardJourneyEnabled && <>
                 <div className="mt-2 flex items-center justify-between gap-2">
-                  <span className="font-bold text-gray-200">🤖 全自動主持</span>
+                  <span className="font-bold text-gray-200">🤖 全自動主持{gameState?.boardJourneyEnabled ? '（新版採手動控場）' : ''}</span>
                   <button
                     className={`rounded-lg px-2 py-1 font-bold ${gameState?.autoHost ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
-                    onClick={() => emit('setAutoHost', { enabled: !gameState?.autoHost })}
+                    disabled={gameState?.boardJourneyEnabled} onClick={() => emit('setAutoHost', { enabled: !gameState?.autoHost })}
                   >{gameState?.autoHost ? '開啟中（點此改回手動）' : '關閉中（點此開啟）'}</button>
                 </div>
-                <p className="mt-1 text-[11px] text-gray-500">適合小場次：倒數結束自動收束決策與競標、系統舞台停留 8 秒後自動揭曉、結果 8 秒後關閉、轉職申請自動依序開啟。轉職與 65 歲轉折仍等本人選，逾時轉職取消、轉折預設退休。全場共同抉擇在全員投完或倒數結束時依多數決揭曉。你自己開的合作契約、傳承與暫停仍由你控制。</p>
+                <p className="mt-1 text-[11px] text-gray-500">適合小場次：倒數結束自動收束決策與競標、系統舞台停留 8 秒後自動揭曉、結果 8 秒後關閉、轉職申請自動依序開啟。退休必須等本人選擇，再由主持人揭曉。全場共同抉擇在全員投完或倒數結束時依多數決揭曉。你自己開的合作契約、傳承與暫停仍由你控制。</p>
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <span className="font-bold text-gray-200">每輪開始的全體行動時間</span>
                   <button
                     className={`rounded-lg px-2 py-1 font-bold ${gameState?.actionPhaseEnabled !== false ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
-                    onClick={() => emit('setActionPhaseEnabled', { enabled: gameState?.actionPhaseEnabled === false })}
+                    disabled={gameState?.boardJourneyEnabled} onClick={() => emit('setActionPhaseEnabled', { enabled: gameState?.actionPhaseEnabled === false })}
                   >{gameState?.actionPhaseEnabled !== false ? '開啟中（點此關閉）' : '關閉中（點此開啟）'}</button>
                 </div>
                 <p className="mt-1 text-[11px] text-gray-500">開啟時每輪擲骰前全員同時處理行動，全員完成或你按結束後開始擲骰。</p>
+                </>}
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <span className="font-bold text-gray-200">結婚禮金</span>
                   <span className="text-gray-300">{gameState?.marriageGiftOverride ? `$${gameState.marriageGiftOverride.toLocaleString()}` : '預設（$6,000–$17,000 依路徑浮動）'}</span>
@@ -699,27 +704,29 @@ export default function AdminPage() {
                 </div>
                 <div className="mt-3 border-t border-gray-700 pt-2">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-bold text-gray-200">計時人生規劃</span>
+                    <span className="font-bold text-gray-200">{gameState?.boardJourneyEnabled ? '新版回合制' : '計時人生規劃'}</span>
                     <span className="text-gray-300">
                       {gameState?.paydayTimer?.enabled
                         ? (gameState.paydayTimer.due ? '到期，等目前行動結束' : `下次 ${formatCountdown(paydayRemaining)}`)
-                        : '關閉（每三輪一次）'}
+                        : gameState?.boardJourneyEnabled ? '落格決策（不開規劃）' : '關閉（每三輪一次）'}
                     </span>
                   </div>
+                {!gameState?.boardJourneyEnabled && <>
                   <div className="mt-1 flex flex-wrap gap-1">
                     {[5, 10, 15, 20].map((min) => {
                       const active = gameState?.paydayTimer?.enabled && Math.round((gameState.paydayTimer.intervalMs ?? 0) / 60000) === min;
                       return (
                         <button key={min} className={`rounded-lg px-2 py-1 font-bold ${active ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
-                          onClick={() => emit('setPaydayTimer', { minutes: min, enabled: true })}>{min} 分鐘</button>
+                          disabled={gameState?.boardJourneyEnabled} onClick={() => emit('setPaydayTimer', { minutes: min, enabled: true })}>{min} 分鐘</button>
                       );
                     })}
                     <button className={`rounded-lg px-2 py-1 font-bold ${gameState?.paydayTimer?.enabled === false ? 'bg-emerald-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
-                      onClick={() => emit('setPaydayTimer', { enabled: false })}>改用每三輪</button>
+                      disabled={gameState?.boardJourneyEnabled} onClick={() => emit('setPaydayTimer', { enabled: false })}>改用每三輪</button>
                     <button className="rounded-lg bg-amber-700 px-2 py-1 font-bold text-white hover:bg-amber-600"
-                      onClick={() => { if (window.confirm('立即安排人生規劃？會在目前玩家行動結束後開始。')) emit('triggerPaydayNow'); }}>立即規劃</button>
+                      disabled={gameState?.boardJourneyEnabled} onClick={() => { if (window.confirm('立即安排人生規劃？會在目前玩家行動結束後開始。')) emit('triggerPaydayNow'); }}>立即規劃</button>
                   </div>
                   <p className="mt-1 text-[11px] text-gray-500">薪水每輪結束自動入帳，不用等。人生規劃是全場停下來填投資、保險、生活方式：時間到就排在目前玩家行動結束後（至少要完成一輪）；超過 {gameState?.paydayTimer?.maxRounds ?? 3} 輪沒規劃會自動開。決策與舞台期間照常計時，只有你按暫停與規劃進行中會停。距上次規劃 {gameState?.paydayTimer?.roundsSince ?? 0} 輪。</p>
+                </>}
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <span className="font-bold text-gray-200">每輪結算月數</span>
                     <div className="flex gap-1">

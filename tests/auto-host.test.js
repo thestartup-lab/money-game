@@ -1,7 +1,9 @@
 // 自動主持仍須由主持人確認收支結算；其他決策由系統推進。
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
+const { spawn: spawnNode } = require('node:child_process');
+// Preserve coverage for older persisted rooms without applying their rules to v6.
+const spawn = (command, args, options) => spawnNode(command, ['--require', require.resolve('./helpers/legacy-board.cjs'), ...args], options);
 const { io } = require('socket.io-client');
 
 const PORT = 3299;
@@ -35,6 +37,14 @@ test('自動主持保留結算確認，收支對帳正確並能跑到終局', { 
   const summaries = new Set();
   let heldSummary = false;
   admin.on('gameStateUpdate', (g) => { latest = g;
+    const scene = g.facilitatorScene;
+    if (scene?.kind === 'retirement' && scene.stage === 'prompt') {
+      for (const p of scene.retirementParticipants ?? []) {
+        const index = ids.indexOf(p.playerId);
+        if (!p.confirmed && index >= 0) players[index].emit('chooseRetirement', { sceneId:scene.id, choice:'retire' });
+      }
+      if (scene.careerConfirmed) admin.emit('resolveFacilitatorScene', { sceneId:scene.id, choiceId:'reveal' });
+    }
     const phase = g.decisionPhase;
     if (phase?.settlement && !summaries.has(phase.id)) {
       summaries.add(phase.id);

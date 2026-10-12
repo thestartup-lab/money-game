@@ -218,6 +218,7 @@ export interface DecisionPhaseState {
 export type FacilitatorSceneKind = 'community' | 'echo' | 'cooperation' | 'legacy' | 'marriage' | 'family' | 'global_event' | 'second_life' | 'career' | 'retirement';
 
 export interface FacilitatorSceneState {
+  retirementParticipants?: { playerId: string; name: string; description: string; confirmed: boolean }[];
   id: string;
   kind: FacilitatorSceneKind;
   stage: 'prompt' | 'result';
@@ -431,6 +432,10 @@ export interface PlayerEvent {
  * 皆為 getter，從原始數據動態計算，確保永遠一致。
  */
 export class Player {
+  boardDirection?: 'career' | 'life';
+  secondLifeStableRounds = 0;
+  secondLifeCheckedRound = -1;
+  familyStoryCursor = 0;
   /** 獨立於財務月數的健康／自然人脈成長週期。 */
   growthPaydayCount = 0;
   worldEffects: { eventId: string; title: string; expiresAfterPayday: number; effect: GlobalEventEffect }[] = [];
@@ -965,7 +970,8 @@ export class GameState {
   reviewView: ReviewViewState | null = null;
   /** 已跑過「全體行動時間」的輪數（turnNumber）；每輪開始只跑一次 */
   /** 每輪開始是否開「全體行動時間」（主持人可關） */
-  actionPhaseEnabled = true;
+  boardJourneyEnabled = true;
+  actionPhaseEnabled = false;
   actionPhaseRound = -1;
   /** 人生轉折：待處理的玩家順序 */
   retirementQueue: string[] = [];
@@ -1154,7 +1160,7 @@ export class GameState {
           if (!this.finalRoundStarted && !this.globalPaydayInProgress && !this.globalPaydayPending) {
             this.roundsSinceGlobalPayday += 1;
             // 計時器關閉時才用「每三輪」備援；開啟時由伺服器依時間判定
-            if (!this.paydayTimerEnabled && this.roundsSinceGlobalPayday >= 3) {
+            if (!this.boardJourneyEnabled && !this.paydayTimerEnabled && this.roundsSinceGlobalPayday >= 3) {
               this.globalPaydayPending = true;
             }
           }

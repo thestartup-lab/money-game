@@ -33,6 +33,8 @@ const borderColors: Record<string, string> = {
 
 export default function EventCard({ event, onDecision, onDismiss, reminderEndsAt, playerCash }: EventCardProps) {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [boardSelection, setBoardSelection] = useState<string | null>(null);
+  const selectedBoardOption = event.kind === 'board_choice' ? event.options.find(o => o.id === boardSelection) : undefined;
 
   const borderClass =
     event.kind === 'tech_startup_result'
@@ -51,15 +53,30 @@ export default function EventCard({ event, onDecision, onDismiss, reminderEndsAt
         <>
           <div className="text-red-400 font-bold text-base">💸 {event.title}</div>
           <p className="text-sm text-gray-300">{event.description}</p>
-          {event.cashDeducted > 0 && (
-            <p className="text-sm text-red-300">現金損失：<span className="font-bold">-${event.cashDeducted.toLocaleString()}</span></p>
-          )}
-          {event.expenseIncrease > 0 && (
-            <p className="text-sm text-orange-300">月支出增加：<span className="font-bold">+${event.expenseIncrease.toLocaleString()}/月</span></p>
-          )}
-          <button className="w-full btn-secondary py-2 rounded-xl text-sm" onClick={onDismiss}>確認</button>
+          {event.cashDeducted > 0 && <p>現金 −${event.cashDeducted.toLocaleString()}</p>}
+          {event.expenseIncrease > 0 && <p>月支出 +${event.expenseIncrease.toLocaleString()}</p>}
+          <button className="btn-secondary" onClick={onDismiss}>確認</button>
         </>
       )}
+      {event.kind === 'board_choice' && <>
+        <h3 className="text-2xl font-black text-amber-200">{event.title}</h3>
+        <p className="whitespace-pre-line text-lg text-white">{event.description}</p>
+        {selectedBoardOption ? <div className="space-y-4 rounded-xl border-2 border-amber-400 p-4">
+          <h4 className="text-2xl font-bold text-white">{selectedBoardOption.label}</h4>
+          <p className="text-lg text-white">{selectedBoardOption.description}</p>
+          <p className="text-base text-gray-200">送出後由主持人揭曉才生效。</p>
+          <button type="button" className="min-h-16 w-full rounded-xl bg-emerald-700 text-xl font-bold text-white" onClick={()=>onDecision({choiceId:selectedBoardOption.id})}>確認這個選擇</button>
+          <button type="button" className="min-h-16 w-full rounded-xl border-2 border-gray-300 text-xl text-white" onClick={()=>setBoardSelection(null)}>取消，返回選項（不扣款）</button>
+        </div> : [...new Set(event.options.map(o=>o.group??'本格選項'))].map(group => {
+          const buttons=event.options.filter(o=>(o.group??'本格選項')===group).map(option=><button type="button" key={option.id} disabled={option.disabled}
+            className="mb-2 block min-h-16 w-full rounded-xl border border-amber-400 p-3 text-left text-white disabled:opacity-40"
+            onClick={()=>setBoardSelection(option.id)}>
+            <span className="block text-xl font-bold">{option.label}</span><span className="block text-base">{option.description}</span>
+          </button>);
+          return group==='本格選項' ? <div key={group}>{buttons}</div> : <details key={group} className="rounded-xl border border-gray-500 p-3"><summary className="cursor-pointer py-2 text-xl font-bold text-white">{group}</summary>{buttons}</details>;
+        })}
+      </>}
+
 
       {event.kind === 'crisis_nt_skip' && (
         <>

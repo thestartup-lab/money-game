@@ -406,7 +406,7 @@ export default function HostControlPage() {
             ) : null}
             <button
               className="host-primary-button host-continue-button"
-              onClick={() => emit('continueDecisionPhase', { phaseId: decisionPhase.id })}
+              disabled={Boolean(gameState?.boardJourneyEnabled && !decisionPhase.submitted && !decisionPhase.rescue && !['reading','auction'].includes(decisionPhase.kind))} onClick={() => emit('continueDecisionPhase', { phaseId: decisionPhase.id })}
             >
               {decisionPhase.kind === 'actions'
                 ? `結束行動時間，開始擲骰（${(gameState?.actionPhaseDone ?? []).length}/${players.filter((player) => player.isAlive && !player.isDisconnected).length} 已完成）`
@@ -416,7 +416,7 @@ export default function HostControlPage() {
                 ? '結束競標並揭曉'
                 : decisionPhase.submitted
                   ? '揭曉結果並繼續'
-                  : '略過本次決策並繼續'}
+                  : gameState?.boardJourneyEnabled && !decisionPhase.rescue ? '等待本人確認選擇' : '略過本次決策並繼續'}
             </button>
           </section>
         ) : null}
@@ -469,8 +469,8 @@ export default function HostControlPage() {
           ) : null}
           {isRunning ? (
             <button className={gameState?.autoHost ? 'host-primary-button' : 'host-secondary-button'}
-              onClick={() => emit('setAutoHost', { enabled: !gameState?.autoHost })}>
-              {gameState?.autoHost ? '🤖 全自動主持中（點此改回手動）' : '🤖 開啟全自動主持'}
+              disabled={gameState?.boardJourneyEnabled} onClick={() => emit('setAutoHost', { enabled: !gameState?.autoHost })}>
+              {gameState?.autoHost ? '🤖 全自動主持中（點此改回手動）' : gameState?.boardJourneyEnabled ? '新版採主持人手動控場' : '🤖 開啟全自動主持'}
             </button>
           ) : null}
           {gameState?.autoHost ? <p className="host-help">倒數結束自動繼續、系統舞台自動揭曉；你按暫停時不會動作。</p> : null}

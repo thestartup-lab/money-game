@@ -43,6 +43,10 @@ export default function FacilitatorSceneOverlay({ scene }: Props) {
           </div>
         ) : null}
 
+        {!isResult && scene.retirementParticipants ? <div className="mt-5 grid grid-cols-2 gap-3 text-2xl text-white">
+          {scene.retirementParticipants.map(p=><p key={p.playerId} className="rounded-xl border border-amber-400 p-3">{p.name}：{p.confirmed?'已確認':'思考中'}</p>)}
+        </div> : null}
+
         {!isResult && scene.kind !== 'global_event' && scene.kind !== 'second_life' && scene.kind !== 'career' && scene.options && scene.options.length > 0 ? (
           <div className={`mx-auto mt-6 grid max-w-5xl gap-4 ${scene.options.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
             {scene.options.map((option, index) => (
@@ -91,7 +95,7 @@ export default function FacilitatorSceneOverlay({ scene }: Props) {
         ) : null}
 
         <p className="mt-5 text-xl font-black text-emerald-300">
-          {isResult ? '請一起觀察：這個結果改變了誰？' : scene.kind === 'career' ? (scene.careerConfirmed ? '本人已確認，等待主持人揭曉。' : '等待本人在手機確認；時間到不會自動轉職。') : scene.kind === 'retirement' ? (scene.careerConfirmed ? '本人已選擇，等待主持人揭曉。' : '請本人在手機選擇退休、顧問、創業或延後。') : scene.kind === 'community' ? '結果套用到全場每個人：先討論，再各自在手機投票，多數決揭曉。' : scene.kind === 'marriage' ? (scene.careerConfirmed ? '本人已決定，等待揭曉。' : '要不要結婚，由本人在手機決定。') : '請抬頭看大螢幕共同討論，由主持人決定何時揭曉。'}
+          {isResult ? '請一起觀察：這個結果改變了誰？' : scene.kind === 'career' ? (scene.careerConfirmed ? '本人已確認，等待主持人揭曉。' : '等待本人在手機確認；時間到不會自動轉職。') : scene.kind === 'retirement' ? (scene.careerConfirmed ? '全員已確認，等待主持人一次揭曉。' : '本輪符合資格的人同時選擇，倒數僅作提醒。') : scene.kind === 'community' ? '結果套用到全場每個人：先討論，再各自在手機投票，多數決揭曉。' : scene.kind === 'marriage' ? (scene.careerConfirmed ? '本人已決定，等待揭曉。' : '要不要結婚，由本人在手機決定。') : '請抬頭看大螢幕共同討論，由主持人決定何時揭曉。'}
         </p>
       </section>
     </main>

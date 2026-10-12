@@ -36,12 +36,12 @@ test('手機端 secondLifeProgress：內圈玩家拿到缺口明細，與資格�
   assert.equal(pg.indicators.length, 4);
   for (const i of pg.indicators) assert.equal(i.gap, Math.max(0, i.threshold - i.value));
   const bl = pg.routes.balancedLife, fb = pg.routes.financialBreakthrough;
-  assert.equal(bl.coverageRequired, 0.75); assert.equal(fb.coverageRequired, 1);
-  assert.equal(bl.targetEffectivePassiveIncome, Math.ceil(pg.totalExpenses * 0.75));
+  assert.equal(bl.coverageRequired, 0.9); assert.equal(fb.coverageRequired, 1);
+  assert.equal(bl.targetEffectivePassiveIncome, Math.ceil(pg.totalExpenses * 0.9));
   assert.equal(bl.effectivePassiveGap, Math.max(0, bl.targetEffectivePassiveIncome - pg.effectivePassiveIncome));
   assert.equal(bl.rawPassiveGap, Math.ceil(bl.effectivePassiveGap / pg.fqMultiplier));
   assert.ok(fb.effectivePassiveGap >= bl.effectivePassiveGap, '財務突破的缺口不會比平衡人生小');
-  assert.equal(bl.indicatorGap, Math.max(0, 2 - pg.achievedIndicatorCount));
-  assert.equal(fb.indicatorGap, Math.max(0, 1 - pg.achievedIndicatorCount));
+  assert.equal(bl.indicatorGap, Math.max(0, 3 - pg.achievedIndicatorCount));
+  assert.equal(fb.indicatorGap, Math.max(0, 2 - pg.achievedIndicatorCount));
   assert.equal(Math.abs(pg.coverageRatio - pg.effectivePassiveIncome / pg.totalExpenses) < 0.001, true);
 });
