@@ -11,7 +11,7 @@ import { applyMarriageScene } from '../facilitatorScenes';
 import { adviceBlockReason, adviceCard, giveAdvice, mentorBlockReason, mentorPlayer } from '../lateLife';
 import { GamePhase } from '../gameDataModels';
 import {
-  OnSafe, calcNetWorth, emitClient, emitToRoom, getPlayerSocket, getRoomState,
+  OnSafe, calcNetWorth, checkBucketGoals, emitClient, emitToRoom, getPlayerSocket, getRoomState,
   io, isRoomAdmin, logPlayerEvent, playerIdentity, serializeGameState, socketRoomMap,
 } from '../socketServer';
 
@@ -32,6 +32,7 @@ export function registerSocialHandlers(socket: Socket, onSafe: OnSafe): void {
     const message = mentorPlayer(gs, mentor, target);
     logPlayerEvent(mentor, gs, 'mentor', `指導後輩 ${target.name}（傳承 +5、體驗 +5）`, mCB, mFB, mNW, { targetName: target.name, role: 'mentor' });
     logPlayerEvent(target, gs, 'mentor', `接受 ${mentor.name} 的指導（專長 +10）`, tCB, tFB, tNW, { mentorName: mentor.name, role: 'mentee' });
+    checkBucketGoals(mentor,gs,gs.gameId,socket);
     emitToRoom(gs.gameId, 'mentorshipGiven', { mentorId: mentor.id, mentorName: mentor.name, targetId: target.id, targetName: target.name, message });
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
   });
@@ -55,6 +56,7 @@ export function registerSocialHandlers(socket: Socket, onSafe: OnSafe): void {
     if (!result) return;
     // eventType 為 null 表示已由共用流程記錄（例如付費婚配走婚姻紀錄）
     if (result.eventType) logPlayerEvent(player, gs, result.eventType, result.message, cashBefore, flowBefore, worthBefore, { source: event });
+    checkBucketGoals(player,gs,gs.gameId,socket);
     emitClient(socket, 'familyActionResult', { event, message: result.message });
     emitToRoom(gs.gameId, 'notification', { message: result.announce });
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));

@@ -1,6 +1,7 @@
 /** 送給前端的狀態：玩家與房間的序列化、手機說明用的效果與組成資料 */
 import { GameState, Player, GamePhase } from './gameDataModels';
 import { roomLineBrand } from './lineBrands';
+import { planningGrowthOptions } from './boardActions';
 import { BASIC_INVESTMENTS } from './basicInvestments';
 import { getHomeOffers } from './householdLoans';
 import { BOND_FUND_ID, currentBondRate } from './bondFund';
@@ -201,7 +202,7 @@ export function serializePlayer(p: Player, gs: GameState): object {
 
   // 月現金流逐項組成（手機點「月現金流」顯示）
   const fqMultiplier = FQ_MULTIPLIERS[p.stats.financialIQ] ?? 1;
-  const ftMultiplier = p.isInFastTrack ? FAST_TRACK_INCOME_MULTIPLIER : 1;
+  const ftMultiplier = p.isInFastTrack && !p.secondLifeJourney ? FAST_TRACK_INCOME_MULTIPLIER : 1;
   const incomeItems: { label: string; amount: number; note?: string }[] = [];
   const salaryLabel = p.retirementStatus === 'retired' ? '退休金' : p.retirementStatus === 'consultant' ? '顧問收入' : p.retirementStatus === 'founder' ? '薪資（已退休創業）' : `薪資（${p.profession.name}）`;
   incomeItems.push({ label: salaryLabel, amount: p.salary,
@@ -217,7 +218,7 @@ export function serializePlayer(p: Player, gs: GameState): object {
   }
   const passiveMultiplier = fqMultiplier * ftMultiplier;
   if (passiveMultiplier !== 1 && p.totalPassiveIncome > 0) {
-    incomeItems.push({ label: `被動收入乘數（財商 ×${fqMultiplier}${p.isInFastTrack ? `、外圈 ×${FAST_TRACK_INCOME_MULTIPLIER}` : ''}）`,
+    incomeItems.push({ label: `被動收入乘數（財商 ×${fqMultiplier}${ftMultiplier !== 1 ? `、外圈 ×${ftMultiplier}` : ''}）`,
       amount: Math.round(p.totalPassiveIncome * passiveMultiplier) - Math.max(0, p.totalPassiveIncome), note: '以被動收入總額乘算後的差額' });
   }
   if (p.marriageBonus) incomeItems.push({ label: '婚姻加成（舊版）', amount: p.marriageBonus });
@@ -323,6 +324,8 @@ export function serializePlayer(p: Player, gs: GameState): object {
     congratulationsReceived: p.congratulationsReceived,
     paydayCount: p.paydayCount,
     stats: p.stats,
+    planningOptions: gs.boardJourneyEnabled && gs.decisionPhase?.kind === 'actions' && p.isAlive && !gs.actionPhaseDone.has(p.id)
+      ? planningGrowthOptions(gs,p).map(({id,label,description,disabled,group})=>({id,label,description,disabled,group})) : [],
     paydayPlanningPending: p.paydayPlanningPending,
     turnsToSkip: p.turnsToSkip,
     downsizingTurnsLeft: p.downsizingTurnsLeft,
@@ -349,6 +352,7 @@ export function serializePlayer(p: Player, gs: GameState): object {
     isBedridden: p.isBedridden,
     travelPenaltyRemaining: p.travelPenaltyRemaining,
     isInFastTrack: p.isInFastTrack,
+    secondLifeJourney: p.secondLifeJourney,
     hasPassedSecondLife: p.hasPassedSecondLife,
     secondLifeProgress: buildSecondLifeProgress(p, gs.boardJourneyEnabled),
     fastTrackPosition: p.fastTrackPosition,

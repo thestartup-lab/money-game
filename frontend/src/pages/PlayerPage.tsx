@@ -4,6 +4,7 @@ import type { GameState, Player, PlayerAnalysis, ActiveEvent, PaydayFormData, Pa
 import FinancialStatement from '../components/game/FinancialStatement';
 import DiceRoller from '../components/game/DiceRoller';
 import ActionPanel from '../components/game/ActionPanel';
+import PlanningChoices from '../components/game/PlanningChoices';
 import CareerStagePanel from '../components/game/CareerStagePanel';
 import RetirementStagePanel from '../components/game/RetirementStagePanel';
 import MarriageChoicePanel from '../components/game/MarriageChoicePanel';
@@ -709,7 +710,7 @@ export default function PlayerPage() {
     // B1：人生夢想清單分配 / 達成
     s.on('bucketListAssigned', (p: { goals: { id: string; emoji: string; title: string; description: string }[] }) => {
       const list = p.goals.map((g) => `${g.emoji} ${g.title}`).join('、');
-      addNotification(`🎯 進入外圈！抽到夢想清單：${list}`);
+      addNotification(`🎯 進入外圈！第二人生目標：${list}`);
     });
     s.on('bucketGoalAchieved', (p: { playerId: string; playerName: string; goalEmoji: string; goalTitle: string; legacyReward: number; lifeExpReward: number; cashReward: number }) => {
       if (p.playerId === playerIdRef.current) {
@@ -790,7 +791,7 @@ export default function PlayerPage() {
   const paydayRemaining = usePaydayCountdown(gameState?.paydayTimer, Boolean(gameState?.paydayTimer?.frozen));
   // 行動面板開放的時段：全體行動時間、本人危機自救；主持人關掉行動時間時才開放回合空檔
   const canUseActions = Boolean(gameState && !gameState.facilitatorScene && (
-    gameState.decisionPhase?.kind === 'actions'
+    (gameState.decisionPhase?.kind === 'actions' && (!gameState.boardJourneyEnabled || !(gameState.actionPhaseDone ?? []).includes(myId)))
     || (gameState.decisionPhase?.rescue && gameState.decisionPhase.playerId === myId)
     || (!gameState.boardJourneyEnabled && gameState.actionPhaseEnabled === false && !gameState.decisionPhase)
     || gameState.gamePhase === 'GameOver'
@@ -1391,7 +1392,7 @@ export default function PlayerPage() {
                   ? '全體人生規劃中'
                   : gameState.finalRoundStarted
                     ? '96 歲 · 第 20 輪（最後一輪）'
-                    : `人生第 ${Math.min(gameState.totalLifeRounds ?? 20, (gameState.completedLifeRounds ?? gameState.turnNumber) + 1)} 輪 · ${gameState.boardJourneyEnabled ? '落格決策・每輪自動結算' : gameState.paydayTimer?.enabled ? (gameState.paydayTimer.due ? '人生規劃即將開始' : `下次人生規劃 ${formatCountdown(paydayRemaining)}`) : `人生規劃 ${Math.min(3, (gameState.roundsSinceGlobalPayday ?? 0) + 1)}/3`}`}
+                    : `人生第 ${Math.min(gameState.totalLifeRounds ?? 20, (gameState.completedLifeRounds ?? gameState.turnNumber) + 1)} 輪 · ${gameState.boardJourneyEnabled ? `落格事件・距人生規劃 ${3 - (gameState.turnNumber % 3)} 輪` : gameState.paydayTimer?.enabled ? (gameState.paydayTimer.due ? '人生規劃即將開始' : `下次人生規劃 ${formatCountdown(paydayRemaining)}`) : `人生規劃 ${Math.min(3, (gameState.roundsSinceGlobalPayday ?? 0) + 1)}/3`}`}
               </span>
             </div>
           )}
@@ -1450,7 +1451,7 @@ export default function PlayerPage() {
             return (
               <div className="mx-4 mb-3 rounded-2xl border-2 border-emerald-500 bg-emerald-950/70 px-4 py-3 text-center">
                 <p className="text-lg font-black text-emerald-200">🕒 {gameState.decisionPhase.title}</p>
-                <p className="mt-1 text-xs text-emerald-100/80">打開下方「行動」面板：旅遊、聯誼、保險、投資、借還款都在這裡處理。</p>
+                <p className="mt-1 text-base text-emerald-100/80">打開下方「行動」：買房、投資、買賣、保險、還款及生活安排。每筆確認即生效；完成後鎖定，主持人統一結束並顯示摘要。</p>
                 <DecisionCountdown reminderEndsAt={gameState.decisionPhase.reminderEndsAt} className="mt-2 block font-mono text-lg font-black text-yellow-300" />
                 <p className="mt-1 text-xs text-gray-300">已完成 {alive.filter((p) => done.has(p.id)).length}/{alive.length}</p>
                 <button
@@ -1459,7 +1460,7 @@ export default function PlayerPage() {
                   disabled={meDone}
                   onClick={() => emit('finishActionPhase')}
                 >
-                  {meDone ? '已完成，等待其他人' : '我這輪完成了'}
+                  {meDone ? '已完成，等待主持人結束' : '我已完成規劃'}
                 </button>
               </div>
             );
@@ -1547,12 +1548,15 @@ export default function PlayerPage() {
 
             {!isGameOver && !canUseActions && (gameState.gamePhase === 'RatRace' || gameState.gamePhase === 'FastTrack') && (
               <div className="mx-4 my-2 rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-sm text-gray-300">
-                {gameState.actionPhaseEnabled === false
+                {gameState.boardJourneyEnabled ? '平常落格處理隨機事件；每三個完整回合開放一次人生規劃，可自行買房、投資與買賣資產。已完成規劃者請等待主持人。' : gameState.actionPhaseEnabled === false
                   ? '🕒 大螢幕進行中，結束後就能在「行動」處理旅遊、聯誼、保險、投資與借還款。'
                   : <>🕒 旅遊、聯誼、保險、投資、借還款在<strong className="text-white">地圖對應的格子或生活服務站</strong>一起處理；現在請看大螢幕。</>}
               </div>
             )}
             {canUseActions && <CollapsePanel title="行動" defaultOpen={Boolean(gameState.decisionPhase?.rescue) || gameState.decisionPhase?.kind === 'actions'}>
+              {gameState.boardJourneyEnabled && gameState.decisionPhase?.kind === 'actions' && <PlanningChoices
+                key={gameState.decisionPhase.id} options={myPlayer.planningOptions ?? []}
+                onConfirm={choiceId=>emit('planningAction',{phaseId:gameState.decisionPhase?.id,choiceId})} />}
               <ActionPanel
                 player={myPlayer}
                 currentAge={personalAge}

@@ -44,6 +44,9 @@ export function mentorBlockReason(gs: GameState, mentor: Player | undefined, tar
 export function mentorPlayer(gs: GameState, mentor: Player, target: Player): string {
   mentor.lastMentorRound = gs.turnNumber;
   mentor.mentorCount = (mentor.mentorCount ?? 0) + 1;
+  if (mentor.secondLifeJourney && !mentor.secondLifeJourney.practices.some(x=>x.id==='mentor:'+target.id)) {
+    mentor.secondLifeJourney.practices.push({id:'mentor:'+target.id,domain:'contribute',mode:'指導交流',success:true});
+  }
   mentor.legacyBonusPoints += MENTOR_LEGACY_POINTS;
   // 指導後輩也算家庭連結（像長輩照顧晚輩）
   const { FAMILY_TIE_MENTOR_POINTS, FAMILY_TIE_CAP } = require('./gameConfig') as typeof import('./gameConfig');

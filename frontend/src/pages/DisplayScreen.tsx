@@ -848,7 +848,8 @@ export default function DisplayScreen() {
               <aside className="absolute top-3 left-3 z-10 max-w-md rounded-xl bg-slate-950/95 border border-amber-500 p-4 text-white">
                 <h3 className="text-xl font-bold text-amber-200">{currentTurnPlayer.name} 的第二人生</h3>
                 <p className="text-sm text-gray-300">體驗、關係與傳承、經營：財務自由後仍有選擇。</p>
-                {(currentTurnPlayer.bucketGoals ?? []).map(goal => <p key={goal.id} className="mt-2 text-lg">{goal.claimed ? '✓' : goal.emoji} {goal.title}</p>)}
+                {(currentTurnPlayer.bucketGoals ?? []).map(goal => <p key={goal.id} className="mt-2 text-lg">{goal.claimed ? '✓' : goal.emoji} {goal.title}<span className="block text-base">{goal.progress}</span></p>)}
+                {currentTurnPlayer.secondLifeJourney && <p className="mt-3 text-lg">實踐 {currentTurnPlayer.secondLifeJourney.practices.length} 次不同挑戰／指導・進外圈不自動加倍收入</p>}
               </aside>
             )}
             <DiceRollOverlay

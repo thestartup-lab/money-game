@@ -136,6 +136,7 @@ export interface SecondLifeProgress {
 }
 
 export interface Player {
+  planningOptions?: {id:string;label:string;description:string;disabled?:boolean;group?:string}[];
   loginMethod?: 'line' | 'guest';
   careerOptions?: CareerOption[];
   /** SK 已達 100 但暫時不能申請的原因 */
@@ -244,6 +245,7 @@ export interface Player {
   retirementOutlook?: { age: number; yearsToRetire: number; pension: number; passive: number; spouse: number; incomeAfter: number; expensesAfter: number; gap: number; yearsCovered: number | null; passiveNeeded: number } | null;
   /** 夢想清單的個人化說明與進度（伺服器計算） */
   bucketGoals?: { id: string; emoji: string; title: string; description: string; progress: string; claimed: boolean; legacyReward: number; lifeExpReward: number }[];
+  secondLifeJourney?: { enteredRound: number; familyBaseline: number; practices: { id: string; domain: 'explore' | 'connect' | 'contribute'; mode: string; success: boolean }[] };
   /** 外圈指導後輩：累計次數與最後一次的輪數 */
   mentorCount?: number;
   lastMentorRound?: number;

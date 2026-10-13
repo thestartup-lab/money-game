@@ -1,6 +1,7 @@
 import type { Socket } from 'socket.io';
 import type { GameState, Player } from './gameDataModels';
 import { INNER_NODES, OUTER_NODES } from './frontend/src/boardLayout';
+import { drawSecondLifeChallenge, buildSecondLifeChallenge } from './secondLifeChallenges';
 import { chooseBoardAction, BoardChoice } from './boardJourney';
 import { buyInsurance, cancelInsurance, attendSocialEvent, goTravel, travelLeaveCost, sellAsset } from './gameLogic';
 import { repayRoomLoan } from './playerLoans';
@@ -24,7 +25,7 @@ function pay(p: Player, cost: number, run: () => void, result: string): string {
 }
 function health(p: Player): Action {
   const cost = HP_BOOST_COST + HP_MAINTENANCE_COST * 2;
-  return { id: 'health', group: '健康與學習', label: '健康照顧', description: `${money(cost)}，HP +${HP_BOOST_AMOUNT}（上限 100），維護三輪。`, disabled: p.cash < cost,
+  return { id: 'health', group: '健康與學習', label: '健康照顧', description: `${money(cost)}，HP +${HP_BOOST_AMOUNT}（上限 100），維護三輪。`, disabled: p.cash < cost || (p.stats.health >= 100 && (p.healthMaintenanceRounds ?? 0) >= 3),
     run: () => pay(p, cost, () => { applyHPChange(p, HP_BOOST_AMOUNT); p.healthMaintenanceRounds = 3; }, '健康照顧完成，維護涵蓋接下來三輪。') };
 }
 function training(p: Player): Action[] {
@@ -77,13 +78,15 @@ function familyOptions(gs: GameState, p: Player): { title: string; description: 
 export async function handleBoardAction(socket: Socket, gs: GameState, p: Player): Promise<boolean> {
   const node = (p.isInFastTrack ? OUTER_NODES : INNER_NODES)[p.isInFastTrack ? p.fastTrackPosition : p.currentPosition];
   const kind: string = node[1];
-  if (['deal','market','expense','crisis','charity','second'].includes(kind)) return false;
+  const outerChallenge = p.isInFastTrack && ['dream','travel','cooperate','legacy','crisis'].includes(kind);
+  if (!outerChallenge && ['deal','market','expense','crisis','charity','second'].includes(kind)) return false;
   let title: string = node[0], description = '請本人選擇；送出後由主持人揭曉。';
   let options: Action[] = [];
   if (kind === 'start' || kind === 'fork') {
     emitCellEvent(socket,gs.gameId,p.name,title,kind==='fork' ? `已選擇${p.boardDirection==='life'?'生活':'事業'}方向，下次沿此路線前進。` : '新的旅程開始。本格不另行發薪。'); return true;
   }
-  if (kind === 'family') ({title,description,options} = familyOptions(gs,p));
+  if (outerChallenge) ({title,description,options} = drawSecondLifeChallenge(p,kind==='crisis'));
+  else if (kind === 'family') ({title,description,options} = familyOptions(gs,p));
   else if (kind === 'health') options = [health(p)];
   else if (kind === 'training' || kind === 'career') {
     options = training(p);
@@ -101,8 +104,11 @@ export async function handleBoardAction(socket: Socket, gs: GameState, p: Player
       options.push({id:type,group:'保險',label:(owned?'解除':'投保')+label,description:owned?'不退費，停止保費並失去保障。':`啟動費 ${money(INSURANCE_ACTIVATION_FEE[type])}，月保費 ${money(premium)}。`,disabled:!owned&&p.cash<INSURANCE_ACTIVATION_FEE[type],run:()=>{if(owned){cancelInsurance(p,type);return '已解除'+label+'，沒有退費。';}const r=buyInsurance(p,type);return r.success?'已投保'+label:r.message??'投保未執行。';}});
     }
     options.push(...management(gs,p));
+    options = selectServiceOffer(p, options);
+    description = '本次隨機遇到一個服務機會，可接受或不安排；完整自主行動請等每三回合的人生規劃。';
   } else if (kind === 'assets') {
-    options=management(gs,p);
+    options=selectServiceOffer(p,management(gs,p));
+    description = '本次收到一個資產調整機會，可接受或略過。完整配置在人生規劃中自行安排。';
   } else if (kind === 'legacy') {
     options=[...gs.players.values()].filter(target=>target.id!==p.id&&target.isAlive).map(target=>({
       id:target.id,label:'指導 '+target.name,description:'對方 SK +10、體驗 +3；自己傳承 +5、體驗 +5，並增加家庭連結。每輪最多一次。',disabled:!!mentorBlockReason(gs,p,target),
@@ -127,6 +133,34 @@ export async function handleBoardAction(socket: Socket, gs: GameState, p: Player
   emitCellEvent(socket,gs.gameId,p.name,title,result);
   announceCareerUnlock(gs,p);
   return true;
+}
+
+export function selectServiceOffer(p: Player, options: Action[]): Action[] {
+  const valid = options.filter(o => !o.disabled);
+  const fresh = valid.filter(o => o.id !== p.lastServiceOfferId);
+  const pool = fresh.length ? fresh : valid;
+  if (!pool.length) return [];
+  const groups = [...new Set(pool.map(o=>o.group ?? '其他'))];
+  const group = groups[Math.floor(Math.random()*groups.length)];
+  const grouped = pool.filter(o=>(o.group ?? '其他')===group);
+  const chosen = grouped[Math.floor(Math.random()*grouped.length)];
+  p.lastServiceOfferId = chosen.id;
+  return [{...chosen, group:undefined}];
+}
+
+/** Extra voluntary choices; investment, home/car purchase and sale retain their existing panels. */
+export function planningGrowthOptions(gs: GameState, p: Player): Action[] {
+  const challenge = p.isInFastTrack && p.secondLifeJourney && p.planningChallengeId
+    ? buildSecondLifeChallenge(p,p.planningChallengeId) : null;
+  const practices = challenge ? challenge.options.map(o=>({...o,
+    id:`journey:${p.planningChallengeId}:${o.id}`,group:'第二人生實踐',
+    label:`${challenge.title}・${o.label}`,description:challenge.description+' '+o.description,
+    disabled:o.disabled || (p.planningActionIds ?? []).some(id=>id.startsWith('journey:')),
+  })) : [];
+  return [health(p), ...training(p).map(o=>({...o,group:'健康與學習'})),
+    ...management(gs,p).filter(o=>o.id==='network'||o.id.startsWith('basic-')||o.id.startsWith('life:')||o.id.startsWith('habit:')), ...practices]
+    .map(o=>({...o,disabled:o.disabled || (p.planningActionIds ?? []).includes(o.id)
+      || (o.id.startsWith('basic-') && (p.planningActionIds ?? []).some(id=>id.startsWith('basic-')))}));
 }
 
 function management(gs: GameState, p: Player): Action[] {

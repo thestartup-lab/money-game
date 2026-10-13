@@ -1,5 +1,6 @@
 /** 人生進程：里程碑、夢想清單、第二人生、65 歲轉折、死亡與終局 */
 import { GameState, Player, GamePhase } from './gameDataModels';
+import { balancedMilestoneReview } from './milestoneRewards';
 import { computePension, computeConsultantIncome, addLifeExperience, getCurrentAge, calculateLifeScore } from './gameLogic';
 import { BASIC_PENSION_MONTHLY, LIFE_EXP, RETIREMENT_ROUND, RETIREMENT_STARTUP_AMOUNTS, RETIREMENT_STARTUP_SUCCESS_ROLL, RETIREMENT_STARTUP_RETURN_RATE, RETIREMENT_DEFER_HP_COST, RETIREMENT_MAX_DEFERRALS, CONSULTANT_HP_COST_PER_CYCLE, CONSULTANT_MIN_HP, CONSULTANT_SK_RATE, CONSULTANT_NT_RATE, PENSION_RATE_BY_QUADRANT, SKILL_CAREER_CHANGE_THRESHOLD } from './gameConfig';
 import { handlePlayerDeath, evaluateSecondLifeEligibility } from './cardSystem';
@@ -117,6 +118,7 @@ export function checkLifeMilestones(
     if ((player.stats?.health ?? 0) >= 70) review.health += 10;
     if ((player.charityTotal ?? 0) >= 50_000) review.legacy += 10;
     if (player.totalPassiveIncome >= 10_000) review.wealth += 10;
+    if (gs.boardJourneyEnabled) Object.assign(review,balancedMilestoneReview(player,calcNetWorth(player)));
 
     // 統合：legacy/lifeExp 加成
     const legacyGain = review.family + review.wealth + review.health + review.legacy;
@@ -437,7 +439,7 @@ export function promoteSecondLife(gs: GameState, player: Player, secondLifeEligi
   if (allAlivePlayersAreInFastTrack) gs.gamePhase = GamePhase.FastTrack;
   addLifeExperience(player, LIFE_EXP.FAST_TRACK_ENTER);
 
-  // B1：進入外圈時隨機抽 3 個人生夢想目標
+  // 新地圖提供共同的實踐方向；舊存檔保留原本目標。
   assignBucketList(player, gs, 3);
   const goalDetails = player.bucketList
     .map((e) => getBucketGoal(e.id))
@@ -490,7 +492,9 @@ export function promoteSecondLife(gs: GameState, player: Player, secondLifeEligi
 
   // 立刻檢查一次：高被動收入、長壽等可能在進外圈當下就達成
   if (socket) checkBucketGoals(player, gs, roomId, socket);
-  revealFacilitatorResult(gs, player.name + ' 的第二人生啟動了！', '完成「' + escapeRouteLabel + '」，正式進入外圈。新的機會與風險，現在開始。');
+  revealFacilitatorResult(gs, player.name + ' 的第二人生啟動了！', '完成「' + escapeRouteLabel + '」，正式進入外圈。' + (player.secondLifeJourney
+    ? '接下來實踐探索、連結、回饋。每三回合的人生規劃提供一項主動挑戰；可以投入金錢或體力，嘗試未達預期也留下紀錄。進外圈不會自動收入加倍或贈送資產紅利。'
+    : '新的機會與風險，現在開始。'));
 }
 
 /** SK 首次達 100 時通知本人一次（發薪、旅遊、主持人調數值都可能觸發） */

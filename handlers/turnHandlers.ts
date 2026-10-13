@@ -2,6 +2,9 @@
 import type { Socket } from 'socket.io';
 import { moveBoardJourney } from '../boardJourney';
 import { captureBoardEffects, describeBoardEffects } from '../boardResults';
+import { planningGrowthOptions } from '../boardActions';
+import { logPlayerEvent, calcNetWorth, announceCareerUnlock } from '../socketServer';
+
 import { Server } from 'socket.io';
 import { GamePhase } from '../gameDataModels';
 import { checkNaturalDeath } from '../gameLogic';
@@ -17,6 +20,25 @@ import {
 } from '../socketServer';
 
 export function registerTurnHandlers(socket: Socket, onSafe: OnSafe): void {
+  onSafe('planningAction', (payload: { phaseId: string; choiceId: string }) => {
+    const gs = getRoomState(socket);
+    const p = gs?.players.get(playerIdentity(socket));
+    if (!gs || !p?.isAlive || !gs.boardJourneyEnabled || gs.decisionPhase?.kind !== 'actions'
+      || gs.decisionPhase.id !== payload.phaseId || gs.actionPhaseDone.has(p.id)) {
+      emitClient(socket,'error',{message:'目前不是可操作的人生規劃階段。'}); return;
+    }
+    const ids = p.planningActionIds ?? [];
+    const option = planningGrowthOptions(gs,p).find(o=>o.id===payload.choiceId&&!o.disabled);
+    if (!option || ids.includes(option.id)) { emitClient(socket,'error',{message:'此項目無法執行，或本次規劃已辦理。'}); return; }
+    p.planningActionIds = [...ids,option.id];
+    const cash=p.cash,flow=p.monthlyCashflow,worth=calcNetWorth(p);
+    const result=option.run();
+    logPlayerEvent(p,gs,'payday_plan',`人生規劃：${option.label}。${result}`,cash,flow,worth);
+    checkBucketGoals(p,gs,gs.gameId,socket);
+    announceCareerUnlock(gs,p);
+    emitClient(socket,'notification',{message:result});
+    emitToRoom(gs.gameId,'gameStateUpdate',serializeGameState(gs));
+  });
 
   // ----------------------------------------------------------
   // 玩家擲骰 (playerRoll)

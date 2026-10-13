@@ -191,7 +191,7 @@ export function registerHostHandlers(socket: Socket, onSafe: OnSafe): void {
   onSafe('triggerPaydayNow', () => {
     const gs = getRoomState(socket);
     if (!gs) { emitClient(socket, 'error', { message: '尚未加入任何房間。' }); return; }
-    if (gs.boardJourneyEnabled) { emitClient(socket, 'error', { message: '新版已採落格決策，每輪自動結算，不另開人生規劃。' }); return; }
+    if (gs.boardJourneyEnabled) { emitClient(socket, 'error', { message: '新版每三個完整回合自動開啟人生規劃；薪資每輪結算，不額外重開或重發。' }); return; }
     if (!isRoomAdmin(socket, gs)) { emitClient(socket, 'error', { message: '只有管理員可以立即發薪。' }); return; }
     if (gs.gamePhase !== GamePhase.RatRace && gs.gamePhase !== GamePhase.FastTrack) { emitClient(socket, 'error', { message: '遊戲尚未進行中。' }); return; }
     if (gs.finalRoundStarted) { emitClient(socket, 'error', { message: '最後一輪不再發薪。' }); return; }

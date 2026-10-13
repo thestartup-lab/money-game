@@ -1,6 +1,6 @@
 import type { Socket } from 'socket.io';
 import type { GameState, Player } from './gameDataModels';
-import { INNER_NODES, OUTER_NODES, nextInnerNode } from './frontend/src/boardLayout';
+import { nextInnerNode } from './frontend/src/boardLayout';
 import { waitForCardDecision } from './decisionPhases';
 import { emitToRoom } from './socketServer';
 import { serializeGameState } from './playerView';
@@ -31,14 +31,6 @@ export async function moveBoardJourney(socket: Socket, gs: GameState, player: Pl
     }
     emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
     await new Promise(resolve => setTimeout(resolve, 240));
-    const node = (outer ? OUTER_NODES : INNER_NODES)[position];
-    if (node[1] === 'service' && i < steps - 1) {
-      const choice = await chooseBoardAction(socket, gs, player, '路過生活服務站', `還有 ${steps - i - 1} 步。停下可辦理一項服務，剩餘步數作廢。`, [
-        { id: 'stop', label: '停下辦理服務', description: '結束本次移動，選擇一項服務。' },
-        { id: 'continue', label: '繼續前進', description: '保留剩餘步數，本次不辦理服務。' },
-      ]);
-      if (choice === 'stop') break;
-    }
   }
   if (!outer && (position === 3 || position === 13)) player.boardDirection = await chooseDirection(socket, gs, player);
   return path;

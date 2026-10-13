@@ -10,9 +10,13 @@ process.on('message', async m=>{
   try{
     const gs=server.rooms.get('BOARD6');let result=true;
     if(m.action==='position'){const p=gs.players.get(m.id);p.currentPosition=m.position;p.boardDirection=m.direction;}
+    if(m.action==='passService'){const p=gs.players.get(m.id);p.currentPosition=19;result=await require('../../dist/boardJourney').moveBoardJourney({},gs,p,2);}
+    if(m.action==='planning'){gs.turnNumber=3;gs.lastPaidRound=3;server.continueAfterTurnAdvance(gs);}
+    if(m.action==='outer'){const p=gs.players.get(m.id);p.isInFastTrack=true;require('../../dist/bucketList').assignBucketList(p,gs);}
+    if(m.action==='inner'){const p=gs.players.get(m.id);p.isInFastTrack=false;p.secondLifeJourney=undefined;p.bucketList=[];}
     if(m.action==='seedRestart'){gs.lastPaidRound=17;gs.lastCommunityChoicePayday=5;gs.communityChoiceHistory=['old'];gs.actionPhaseRound=17;gs.retirementQueue=['old'];}
     if(m.action==='auditRestart'){result={paid:gs.lastPaidRound,community:gs.lastCommunityChoicePayday,history:gs.communityChoiceHistory,action:gs.actionPhaseRound,retirement:gs.retirementQueue};}
-    if(m.action==='retirement'){gs.turnNumber=require('../../dist/gameConfig').RETIREMENT_ROUND;require('../../dist/lifeProgress').queueRetirementCandidates(gs);require('../../dist/lifeProgress').tryOpenRetirementScene(gs);}
+    if(m.action==='retirement'){gs.turnNumber=require('../../dist/gameConfig').RETIREMENT_ROUND;gs.actionPhaseRound=gs.turnNumber;require('../../dist/lifeProgress').queueRetirementCandidates(gs);require('../../dist/lifeProgress').tryOpenRetirementScene(gs);}
     if(m.action==='qualification'){
       const p=gs.players.get(m.id);p.hasPassedSecondLife=true;p.stats.health=100;p.stats.careerSkill=100;p.relationshipPoints=100;p.lifeExperience=100;
       p.assets.push({id:'qualified',type:'Other',name:'測試',cost:1,currentValue:1,monthlyCashflow:1000000});p.paydayCount=12;

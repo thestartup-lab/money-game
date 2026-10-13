@@ -406,10 +406,10 @@ export default function HostControlPage() {
             ) : null}
             <button
               className="host-primary-button host-continue-button"
-              disabled={Boolean(gameState?.boardJourneyEnabled && !decisionPhase.submitted && !decisionPhase.rescue && !['reading','auction'].includes(decisionPhase.kind))} onClick={() => emit('continueDecisionPhase', { phaseId: decisionPhase.id })}
+              disabled={Boolean(gameState?.boardJourneyEnabled && !decisionPhase.submitted && !decisionPhase.rescue && !['reading','auction','actions'].includes(decisionPhase.kind))} onClick={() => emit('continueDecisionPhase', { phaseId: decisionPhase.id })}
             >
               {decisionPhase.kind === 'actions'
-                ? `結束行動時間，開始擲骰（${(gameState?.actionPhaseDone ?? []).length}/${players.filter((player) => player.isAlive && !player.isDisconnected).length} 已完成）`
+                ? `結束規劃，查看摘要（${(gameState?.actionPhaseDone ?? []).length}/${players.filter((player) => player.isAlive && !player.isDisconnected).length} 已完成）`
                 : decisionPhase.kind === 'payday' && decisionPhase.playerId === '__all_players__'
                 ? `以空白方案結束並結算（${(gameState?.actionPhaseDone ?? []).length}/${players.filter((player) => player.isAlive && !player.isDisconnected).length} 已送出）`
                 : decisionPhase.kind === 'auction'

@@ -42,6 +42,27 @@ const philanthropyTarget = (p: Player) => Math.max(200_000, Math.round(p.totalEx
 // ----------------------------------------------------------
 export const BUCKET_LIST_GOALS: BucketListGoal[] = [
   {
+    id:'purpose_explore',emoji:'🧭',title:'探索：重新成為學習者',
+    description:'進入第二人生後，實踐一種探索挑戰。小規模、時間投入及未達預期的嘗試都算；只看新的實踐。',
+    legacyReward:5,lifeExpReward:5,
+    isAchieved:p=>Boolean(p.secondLifeJourney?.practices.some(x=>x.domain==='explore')),
+    progress:p=>p.secondLifeJourney?.practices.some(x=>x.domain==='explore')?'已留下探索紀錄':'尚未實踐探索挑戰',
+  },
+  {
+    id:'purpose_connect',emoji:'🤝',title:'連結：練習不同的相處方式',
+    description:'實踐一種連結挑戰，或在進外圈後新增 10 點家庭連結；不要求結婚、生子。',
+    legacyReward:5,lifeExpReward:5,
+    isAchieved:p=>Boolean(p.secondLifeJourney && (p.secondLifeJourney.practices.some(x=>x.domain==='connect') || (p.familyTiePoints??0)-p.secondLifeJourney.familyBaseline>=10)),
+    progress:p=>`連結挑戰 ${p.secondLifeJourney?.practices.some(x=>x.domain==='connect')?'已實踐':'未實踐'}；新增家庭連結 ${Math.max(0,(p.familyTiePoints??0)-(p.secondLifeJourney?.familyBaseline??0))}/10`,
+  },
+  {
+    id:'purpose_contribute',emoji:'🌱',title:'回饋：讓經驗對別人有用',
+    description:'實踐一種回饋挑戰，或真正指導另一位玩家一次。沒有其他玩家時，可用回饋挑戰完成。',
+    legacyReward:5,lifeExpReward:5,
+    isAchieved:p=>Boolean(p.secondLifeJourney?.practices.some(x=>x.domain==='contribute')),
+    progress:p=>p.secondLifeJourney?.practices.some(x=>x.domain==='contribute')?'已留下回饋紀錄':'尚未實踐回饋或指導',
+  },
+  {
     id: 'world_traveler',
     emoji: '🌍',
     title: '環遊世界',
@@ -140,8 +161,15 @@ export function getBucketGoal(id: string): BucketListGoal | undefined {
  * 重複進入（理論上不會）時會重新分配。
  */
 export function assignBucketList(player: Player, gs?: GameState, count = 3): void {
+  if (gs?.boardJourneyEnabled) {
+    if (player.secondLifeJourney) return;
+    player.secondLifeJourney = {enteredRound:gs.turnNumber,familyBaseline:player.familyTiePoints??0,practices:[]};
+    player.bucketList = ['purpose_explore','purpose_connect','purpose_contribute'].map(id=>({id,claimed:false}));
+    return;
+  }
   // 已經達成的目標不該再抽到，否則下一次擲骰就白拿獎勵
-  const unmet = gs ? BUCKET_LIST_GOALS.filter((g) => !g.isAchieved(player, gs)) : [...BUCKET_LIST_GOALS];
+  const legacyGoals = BUCKET_LIST_GOALS.filter(g=>!g.id.startsWith('purpose_'));
+  const unmet = gs ? legacyGoals.filter((g) => !g.isAchieved(player, gs)) : [...legacyGoals];
   const pool = [...unmet];
   const picked: BucketListGoal[] = [];
   const n = Math.min(count, pool.length);
@@ -209,7 +237,7 @@ export function evaluateBucketList(player: Player, gs: GameState): BucketCheckRe
   let perfectBonus: BucketCheckResult['perfectBonus'] | undefined;
   if (allDone && newlyClaimed.length > 0) {
     // 全部達成（且本次有新達成 → 屬於「最後一筆」），給予一次性大獎
-    perfectBonus = { legacy: 30, lifeExp: 50, cash: 100_000 };
+    perfectBonus = player.secondLifeJourney ? {legacy:5,lifeExp:5,cash:0} : { legacy: 30, lifeExp: 50, cash: 100_000 };
     player.legacyBonusPoints += perfectBonus.legacy;
     player.lifeExperience += perfectBonus.lifeExp;
     player.cash += perfectBonus.cash;

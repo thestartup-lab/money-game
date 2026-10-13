@@ -1,4 +1,6 @@
 import * as http from 'http';
+import { chooseSecondLifeChallengeId } from './secondLifeChallenges';
+import { captureBoardEffects, describeBoardEffects } from './boardResults';
 import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 import { Server, Socket } from 'socket.io';
 import { validateSocketPayload } from './socketValidation';
@@ -625,6 +627,8 @@ export function emitCellEvent(
 ): void {
   emitClient(socket, 'squareLandingNotice', { cellName, message });
   const gs = rooms.get(roomId);
+  // Simultaneous planning keeps individual feedback on phones; the shared screen gets one final summary.
+  if (gs?.boardJourneyEnabled && gs.decisionPhase?.kind === 'actions') return;
   if (gs?.turnInProgress) {
     enqueueBoardNotice(gs, { playerId: playerIdentity(socket), playerName, title: cellName, description: message });
     return;
@@ -923,9 +927,14 @@ export function skipCurrentEducationTurns(gs: GameState): void {
  */
 export async function runActionPhase(gs: GameState): Promise<void> {
   const roomId = gs.gameId;
+  const before = captureBoardEffects(gs);
+  const logStarts = new Map([...gs.players.values()].map(p => [p.id, p.eventLog.length]));
   gs.actionPhaseRound = gs.turnNumber;
   gs.actionPhaseDone = new Set();
   for (const player of gs.players.values()) {
+    player.planningActionIds = [];
+    player.planningChallengeId = player.isAlive && player.isInFastTrack && player.secondLifeJourney
+      ? chooseSecondLifeChallengeId(player) : undefined;
     if (player.isAlive && !player.profession.hasFlexibleSchedule) player.actionTokensThisPayday = 1;
   }
   const roundLabel = gs.finalRoundStarted ? '最後一輪' : `第 ${gs.turnNumber + 1} 輪`;
@@ -933,11 +942,21 @@ export async function runActionPhase(gs: GameState): Promise<void> {
     gs,
     { id: '__all_players__', name: '全體玩家' },
     'actions',
-    `${roundLabel}全體行動時間`,
-    '所有人同時在手機處理旅遊、聯誼、保險、投資與借還款；完成後按「我這輪完成了」，全員完成就開始擲骰。',
+    gs.boardJourneyEnabled ? `第 ${Math.floor(gs.turnNumber / 3)} 次人生規劃` : `${roundLabel}全體行動時間`,
+    gs.boardJourneyEnabled
+      ? '每三個完整回合，全員同步自主行動：買房、投資、資產買賣、保險、還款與生活安排。每筆確認即生效；完成後鎖定。主持人控制結束，倒數不自動放行。'
+      : '所有人同時在手機處理旅遊、聯誼、保險、投資與借還款；完成後按「我這輪完成了」，全員完成就開始擲骰。',
   );
   emitToRoom(roomId, 'actionPhaseStarted', { phaseId: context.phaseId, round: gs.turnNumber + 1 });
   await waitForHostRelease(gs, context);
+  if (gs.boardJourneyEnabled) {
+    const decisions = [...gs.players.values()].map(p => {
+      const logs = p.eventLog.slice(logStarts.get(p.id) ?? p.eventLog.length);
+      return `${p.name}：${logs.length ? logs.map(e => e.description).join('；') : '未新增已記錄的行動'}`;
+    });
+    enqueueBoardNotice(gs, { playerId: '__all_players__', playerName: '全體玩家', title: '人生規劃・全場結果摘要',
+      description: decisions.join('\n') + '\n\n實際變化\n' + describeBoardEffects(gs, before) });
+  }
   gs.actionPhaseDone = new Set();
   emitToRoom(roomId, 'actionPhaseEnded', { phaseId: context.phaseId });
   emitToRoom(roomId, 'gameStateUpdate', serializeGameState(gs));
@@ -956,6 +975,10 @@ export function maybeCompleteActionPhase(gs: GameState): void {
   const waiting = [...gs.players.values()].filter((p) => p.isAlive && !p.isDisconnected && !gs.actionPhaseDone.has(p.id));
   if (waiting.length > 0) return;
   phase.submitted = true;
+  if (gs.boardJourneyEnabled) {
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+    return; // Countdown and all-done are reminders; the host ends planning.
+  }
   const waiter = decisionReleaseWaiters.get(gs.gameId);
   if (waiter?.phaseId === phase.id) waiter.release();
 }
@@ -994,6 +1017,13 @@ export function continueAfterTurnAdvance(gs: GameState): void {
       emitToRoom(gs.gameId, 'globalPaydayFailed', { message: '季度發薪發生錯誤，已解除流程鎖定。' });
       emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
     });
+    return;
+  }
+
+  // 新版只在每三輪結束開一次自主規劃，不在開局或每輪插入選單。
+  if (gs.boardJourneyEnabled && gs.turnNumber >= 3 && !gs.finalRoundStarted && !gs.turnInProgress
+    && gs.actionPhaseRound < Math.floor(gs.turnNumber / 3) * 3) {
+    void runActionPhase(gs).catch(error => console.error('[lifePlanning]', error));
     return;
   }
 
@@ -1114,7 +1144,7 @@ export function emitClient(socket: Socket, event: string, ...args: unknown[]) {
     io.to(id).emit(event, ...args);
   } else socket.emit(event, ...args);
 }
-export const financialActions = new Set(['sellAsset', 'buyInsurance', 'cancelInsurance',
+export const financialActions = new Set(['planningAction', 'sellAsset', 'buyInsurance', 'cancelInsurance',
   'takeEmergencyLoan', 'investStockDCA', 'investBond', 'buyHome', 'takeLeverageLoan', 'repayLoan', 'buyFranchise',
   'partnershipOffer', 'partnershipResponse', 'loanOffer', 'loanResponse', 'loanRequest', 'loanRequestResponse',
   'goTravel', 'attendSocialEvent', 'mentorPlayer', 'seekMarriage',
@@ -1165,7 +1195,8 @@ io.on('connection', (socket: Socket) => {
     const rescueAllowed = Boolean(gs && player?.isAlive && gs.decisionPhase?.rescue && gs.decisionPhase.playerId === player.id
       && ['sellAsset', 'takeEmergencyLoan'].includes(event));
     // 全體行動時間：所有存活玩家都可自由操作
-    const actionsOpen = Boolean(gs && player?.isAlive && gs.decisionPhase?.kind === 'actions' && !gs.facilitatorScene);
+    const actionsOpen = Boolean(gs && player?.isAlive && gs.decisionPhase?.kind === 'actions' && !gs.facilitatorScene
+      && (!gs.boardJourneyEnabled || !gs.actionPhaseDone.has(player.id)));
     const idleFreeTime = Boolean(gs && player?.isAlive && [GamePhase.RatRace, GamePhase.FastTrack].includes(gs.gamePhase) && gs.pausedAt === null &&
       !gs.decisionPhase && !gs.facilitatorScene && !gs.turnInProgress && !gs.globalPaydayPending && !gs.globalPaydayInProgress);
     // 開著全體行動時間時，主動的財務與生活行動只在行動時間進行；擲骰時大家一起看大螢幕。
@@ -1176,7 +1207,7 @@ io.on('connection', (socket: Socket) => {
     if (financialActions.has(event) && !allowed) {
       emitClient(socket, 'error', { message: gs?.actionPhaseEnabled
         ? '財務與生活行動在每輪開始的「全體行動時間」進行，現在請一起看大螢幕。'
-        : '目前不是自由操作時間，請等待主持人完成決策或恢復遊戲。' });
+        : gs?.boardJourneyEnabled ? '自主行動只在人生規劃期間開放；已完成者請等待主持人結束規劃。' : '目前不是自由操作時間，請等待主持人完成決策或恢復遊戲。' });
       return;
     }
     if (setupActions.has(event) && (!gs || gs.gamePhase !== GamePhase.Pre20 || !player || player.pre20Done)) {

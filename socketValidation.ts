@@ -1,5 +1,6 @@
 /** Validate untrusted Socket.IO payloads before any stateful handler runs. */
 const required: Record<string, string[]> = {
+  planningAction: ['phaseId', 'choiceId'],
   playerJoin: ['playerName', 'roomCode'], playerRejoin: ['playerName', 'roomCode', 'reconnectToken'],
   adminLogin: ['password'], joinDisplay: ['roomId'], requestCareerChange: ['newProfessionId'],
   sellAsset: ['assetId'], buyInsurance: ['insuranceType'], cancelInsurance: ['insuranceType'],

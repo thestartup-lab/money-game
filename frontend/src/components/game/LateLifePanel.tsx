@@ -24,6 +24,7 @@ function SecondLifeGoals({ gameState, me, canUseActions, emit }: Props) {
       <div>
         <p className="text-base font-black text-purple-200">🎯 第二人生的目標</p>
         <p className="text-xs text-gray-400">財務自由不是終點：完成夢想、照顧健康、把經驗傳下去；也要繼續面對風險與退休選擇。</p>
+        {me.secondLifeJourney && <p className="mt-2 text-base text-purple-100">已留下 {me.secondLifeJourney.practices.length} 次不同實踐。每三回合規劃提供一項挑戰，可花錢或投入體力；同一挑戰只計一次。進外圈不自動加倍收入。進度不必全滿，也值得復盤。</p>}
       </div>
       {goals.length > 0 && (
         <div className="space-y-1.5">
@@ -41,7 +42,7 @@ function SecondLifeGoals({ gameState, me, canUseActions, emit }: Props) {
         </div>
       )}
       <div className="rounded-xl border border-indigo-700 bg-indigo-950/50 p-3">
-        <p className="text-sm font-bold text-indigo-100">🧑‍🏫 指導後輩（每輪一次）</p>
+        <p className="text-sm font-bold text-indigo-100">🧑‍🏫 指導後輩（每次人生規劃一次）</p>
         <p className="text-xs text-gray-400">選一位其他玩家（內外圈皆可）：對方專長 +10、體驗 +3；你傳承 +5、體驗 +5。在全體行動時間進行。</p>
         {juniors.length === 0 ? (
           <p className="mt-2 text-xs text-gray-500">目前沒有其他在世玩家可交流。</p>

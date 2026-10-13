@@ -1082,6 +1082,7 @@ export function addLifeExperience(player: Player, amount: number): void {
  * 此函數在玩家處於 FastTrack 階段的每個 triggerPayday 後呼叫。
  */
 export function applyFastTrackAppreciation(player: Player, share = 1): void {
+  if (player.secondLifeJourney) return;
   const rate = FAST_TRACK_ASSET_APPRECIATION_RATE * share;
   player.assets.forEach((asset) => {
     asset.currentValue = Math.round(asset.currentValue * (1 + rate));
@@ -1094,6 +1095,7 @@ export function applyFastTrackAppreciation(player: Player, share = 1): void {
  * @returns 紅利金額
  */
 export function applyFastTrackPaydayBonus(player: Player, share = 1): number {
+  if (player.secondLifeJourney) return 0;
   const totalAssetValue = player.assets.reduce((sum, a) => sum + (a.currentValue ?? 0), 0);
   const bonus = Math.round(totalAssetValue * FAST_TRACK_PAYDAY_BONUS_RATE * share);
   player.cash += bonus;

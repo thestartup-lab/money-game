@@ -48,6 +48,7 @@ test('晚年一次性補關係不等於長期經營', () => {
 
 test('外圈夢想跨三類、無重複且不抽已達成；全員外圈仍可交流', () => {
   const gs = new GameState('balance');
+  gs.boardJourneyEnabled=false; // Legacy snapshots retain their original random goals.
   const p = createPlayer('p', '玩家', 'teacher');
   const other = createPlayer('o', '同伴', 'teacher');
   p.isInFastTrack = true; other.isInFastTrack = true;

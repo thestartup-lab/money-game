@@ -436,6 +436,15 @@ export class Player {
   secondLifeStableRounds = 0;
   secondLifeCheckedRound = -1;
   familyStoryCursor = 0;
+  lastServiceOfferId?: string;
+  secondLifeChallengeHistory: string[] = [];
+  secondLifeJourney?: {
+    enteredRound: number;
+    familyBaseline: number;
+    practices: { id: string; domain: 'explore' | 'connect' | 'contribute'; mode: string; success: boolean }[];
+  };
+  planningChallengeId?: string;
+  planningActionIds: string[] = [];
   /** 獨立於財務月數的健康／自然人脈成長週期。 */
   growthPaydayCount = 0;
   worldEffects: { eventId: string; title: string; expiresAfterPayday: number; effect: GlobalEventEffect }[] = [];
@@ -887,7 +896,7 @@ export class Player {
    */
   get totalIncome(): number {
     const fqMultiplier = FQ_MULTIPLIERS[this.stats.financialIQ] ?? 1.0;
-    const ftMultiplier = this.isInFastTrack ? FAST_TRACK_INCOME_MULTIPLIER : 1.0;
+    const ftMultiplier = this.isInFastTrack && !this.secondLifeJourney ? FAST_TRACK_INCOME_MULTIPLIER : 1.0;
     return this.salary + Math.round(this.totalPassiveIncome * fqMultiplier * ftMultiplier) + this.marriageBonus + this.spouseIncome;
   }
 

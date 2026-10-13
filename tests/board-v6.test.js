@@ -65,28 +65,58 @@ test('新版手機→主持人→結果：旅遊、分岔、重連、服務站�
 
   // A route choice cannot silently default or be submitted by another player.
   await command('position',{id:sb.playerId,position:2});
-  const forkPrompt=wait(b,'boardChoiceRequired');b.emit('playerRoll',{diceCount:1});await forkPrompt;
-  await send(resumed,'submitCardDecision',{phaseId:latest.decisionPhase.id,choiceId:'career'},'error');
-  await send(b,'submitCardDecision',{phaseId:latest.decisionPhase.id,choiceId:'life'},'decisionSubmitted');
-  const forkRead=await send(host,'continueDecisionPhase',{phaseId:latest.decisionPhase.id},'gameStateUpdate',g=>g.decisionPhase?.kind==='reading');
+  const forkPrompt=wait(b,'boardChoiceRequired'),forkState=wait(host,'gameStateUpdate',g=>g.decisionPhase?.kind==='relationship');
+  b.emit('playerRoll',{diceCount:1});await forkPrompt;const forkId=(await forkState).decisionPhase.id;
+  await send(resumed,'submitCardDecision',{phaseId:forkId,choiceId:'career'},'error');
+  await send(b,'submitCardDecision',{phaseId:forkId,choiceId:'life'},'decisionSubmitted');
+  const forkRead=await send(host,'continueDecisionPhase',{phaseId:forkId},'gameStateUpdate',g=>g.decisionPhase?.kind==='reading');
   let nextRead=await send(host,'continueDecisionPhase',{phaseId:forkRead.decisionPhase.id},'gameStateUpdate',g=>g.decisionPhase?.kind==='reading'&&g.decisionPhase.id!==forkRead.decisionPhase.id);
   await send(host,'continueDecisionPhase',{phaseId:nextRead.decisionPhase.id},'gameStateUpdate',g=>g.decisionPhase?.settlement);
   await send(host,'continueDecisionPhase',{phaseId:latest.decisionPhase.id},'gameStateUpdate',g=>!g.decisionPhase&&!g.turnInProgress);
 
-  // Buy insurance via service, not the removed free-action menu. Duplicate submit applies once.
+  // Passing a service never prompts or stops movement; landing offers one random action only.
+  assert.deepEqual(await command('passService',{id:sa.playerId}),[20,21]);
   await command('position',{id:sa.playerId,position:9});
   const serviceRead=await send(resumed,'playerRoll',{diceCount:1},'gameStateUpdate',g=>g.decisionPhase?.kind==='reading');
   const servicePrompt=wait(resumed,'boardChoiceRequired');
   await send(host,'continueDecisionPhase',{phaseId:serviceRead.decisionPhase.id},'gameStateUpdate',g=>g.decisionPhase?.kind==='relationship');
-  const service=await servicePrompt;assert.ok(service.options.some(o=>o.group==='生活設定'));
+  const service=await servicePrompt;assert.equal(service.options.length,2);assert.equal(service.options[0].id,'health');
   const phase2=latest.decisionPhase.id;const before=latest.players.find(p=>p.id===sa.playerId);
-  await send(resumed,'submitCardDecision',{phaseId:phase2,choiceId:'medical'},'decisionSubmitted');
-  resumed.emit('submitCardDecision',{phaseId:phase2,choiceId:'medical'});
+  await send(resumed,'submitCardDecision',{phaseId:phase2,choiceId:'health'},'decisionSubmitted');
+  resumed.emit('submitCardDecision',{phaseId:phase2,choiceId:'health'});
   const result=await send(host,'continueDecisionPhase',{phaseId:phase2},'gameStateUpdate',g=>g.decisionPhase?.kind==='reading');
   const after=result.players.find(p=>p.id===sa.playerId);
-  assert.equal(after.insurance.hasMedicalInsurance,true);assert.equal(before.cash-after.cash,require('../dist/gameConfig').INSURANCE_ACTIVATION_FEE.medical);
-  assert.match(result.decisionPhase.description,/月支出/);
+  const cfg=require('../dist/gameConfig');assert.equal(before.cash-after.cash,cfg.HP_BOOST_COST+2*cfg.HP_MAINTENANCE_COST);
+  assert.match(result.decisionPhase.description,/健康照顧/);
   await send(host,'continueDecisionPhase',{phaseId:result.decisionPhase.id},'gameStateUpdate',g=>!g.decisionPhase&&!g.turnInProgress);
+
+  // Voluntary home purchase / investment only every third round. Host controls close even if all done.
+  await send(resumed,'buyHome',{optionId:'forged'},'error');
+  await command('outer',{id:sa.playerId});
+  const planningState=wait(host,'gameStateUpdate',g=>g.decisionPhase?.kind==='actions');await command('planning');
+  const planning=await planningState,planningId=planning.decisionPhase.id;
+  assert.match(planning.decisionPhase.title,/人生規劃/);
+  const challengeOptions=planning.players.find(p=>p.id===sa.playerId).planningOptions.filter(o=>o.id.startsWith('journey:'));
+  assert.equal(challengeOptions.length,3);
+  const timeOption=challengeOptions.find(o=>o.id.endsWith('challenge-time'));
+  const practiced=await send(resumed,'planningAction',{phaseId:planningId,choiceId:timeOption.id},'gameStateUpdate',g=>g.players.find(p=>p.id===sa.playerId).secondLifeJourney.practices.length===1);
+  assert.equal(practiced.players.find(p=>p.id===sa.playerId).bucketGoals[0].claimed,true);
+  assert.ok(practiced.players.find(p=>p.id===sa.playerId).planningOptions.filter(o=>o.id.startsWith('journey:')).every(o=>o.disabled));
+  await send(resumed,'planningAction',{phaseId:planningId,choiceId:challengeOptions[0].id},'error');
+  const home=require('../dist/householdLoans').getHomeOffers(require('../dist/gameLogic').createPlayer('offers','測試','teacher'))[0];
+  const bought=await send(resumed,'buyHome',{optionId:home.id},'gameStateUpdate',g=>g.players.find(p=>p.id===sa.playerId).assets.some(a=>a.id.startsWith('home-')));
+  assert.ok(bought.players.find(p=>p.id===sa.playerId).liabilities.some(l=>l.id.startsWith('home-loan-')));
+  const growth=await send(resumed,'planningAction',{phaseId:planningId,choiceId:'skill'},'gameStateUpdate');
+  assert.ok(growth.players.find(p=>p.id===sa.playerId).planningOptions.find(o=>o.id==='skill').disabled);
+  await send(resumed,'planningAction',{phaseId:planningId,choiceId:'skill'},'error');
+  await send(resumed,'finishActionPhase',{},'gameStateUpdate',g=>g.actionPhaseDone.includes(sa.playerId));
+  await send(resumed,'investBond',{amount:50000},'error');
+  await send(b,'finishActionPhase',{},'gameStateUpdate',g=>g.decisionPhase?.submitted);
+  assert.equal(latest.decisionPhase.id,planningId,'全員完成仍等主持人');
+  const summary=await send(host,'continueDecisionPhase',{phaseId:planningId},'gameStateUpdate',g=>g.decisionPhase?.kind==='reading');
+  assert.match(summary.decisionPhase.title,/人生規劃.*摘要/);assert.match(summary.decisionPhase.description,/負債/);
+  assert.match(summary.decisionPhase.description,/重新當一次學徒/);assert.match(summary.decisionPhase.description,/探索/);
+  await send(host,'continueDecisionPhase',{phaseId:summary.decisionPhase.id},'gameStateUpdate',g=>!g.decisionPhase&&!g.turnInProgress);
 
   // Both players choose together; no retirement takes effect before host reveal.
   const retireState=wait(host,'gameStateUpdate',g=>g.facilitatorScene?.kind==='retirement');await command('retirement');
@@ -100,6 +130,7 @@ test('新版手機→主持人→結果：旅遊、分岔、重連、服務站�
   assert.equal(retired.players.find(p=>p.id===sa.playerId).retirementStatus,'retired');assert.equal(retired.players.find(p=>p.id===sb.playerId).retirementStatus,'consultant');
   await send(host,'resolveFacilitatorScene',{sceneId:scene.id,choiceId:'reveal'},'error');
   await send(host,'closeFacilitatorScene',{sceneId:scene.id},'gameStateUpdate',g=>!g.facilitatorScene);
+  await command('inner',{id:sa.playerId});
   const qualification=await command('qualification',{id:sa.playerId});
   assert.equal(qualification.first,false);assert.equal(qualification.second,true);assert.equal(qualification.revoked,false);
   assert.equal(qualification.afterFirst,1);assert.equal(qualification.repeated,1);assert.equal(qualification.afterSecond,2);assert.equal(qualification.reset,0);assert.equal(qualification.cycles,1);
@@ -109,7 +140,7 @@ test('新版手機→主持人→結果：旅遊、分岔、重連、服務站�
   assert.equal(errors.trim(),'');
 });
 
-test('新版整場三人：落格決策、共同結算、同步退休到終局，不再出現每輪行動選单', {timeout:60000}, async t=>{
+test('新版整場三人：落格決策、每三輪規劃、共同結算、同步退休到終局', {timeout:60000}, async t=>{
   const server=fork(require.resolve('./helpers/board-v6-server.cjs'),[],{env:{...process.env,PORT:'3397',NODE_ENV:'test'},silent:true});
   let errors='';server.stderr.on('data',d=>errors+=d);const sockets=[];
   t.after(()=>{sockets.forEach(s=>s.disconnect());server.kill();});
@@ -118,7 +149,7 @@ test('新版整場三人：落格決策、共同結算、同步退休到終局�
   const host=await connect(),players=[await connect(),await connect(),await connect()];
   const room=await send(host,'createRoom',{roomId:'WHOLE6'},'roomCreated');const ids=[];
   for(const [i,p]of players.entries())ids.push((await send(p,'playerJoin',{roomCode:room.roomId,playerName:'玩家'+i},'playerSession')).playerId);
-  let latest,rolledKey='',settlements=0,choices=0,maxRetirementCohort=0;
+  let latest,rolledKey='',settlements=0,choices=0,maxRetirementCohort=0;const planningRounds=[];
   const clientErrors=[];for(const socket of [host,...players])socket.on('error',e=>{clientErrors.push(e.message);if(e.message.includes('主持人控制流程'))rolledKey='';});
   const tryRoll=()=>{
     const g=latest;if(!g||!['RatRace','FastTrack'].includes(g.gamePhase))return;
@@ -129,7 +160,11 @@ test('新版整場三人：落格決策、共同結算、同步退休到終局�
   const handled=new Set();
   host.on('gameStateUpdate',g=>{
     latest=g;const phase=g.decisionPhase,scene=g.facilitatorScene;
-    assert.ok(!phase||!['actions','payday'].includes(phase.kind),'新版不得重開全體行動或人生規劃');
+    assert.notEqual(phase?.kind,'payday','薪资不可重複發放');
+    if(phase?.kind==='actions'&&!handled.has('plan:'+phase.id)){
+      handled.add('plan:'+phase.id);planningRounds.push(g.turnNumber);assert.equal(g.turnNumber%3,0);assert.ok(g.turnNumber>0);
+      for(const p of players)p.emit('finishActionPhase');
+    }
     if(phase&&(phase.kind==='reading'||phase.kind==='auction'||phase.submitted)&&!handled.has(phase.id)){
       handled.add(phase.id);
       if(phase.settlement){settlements++;for(const p of phase.settlement.payouts)assert.equal(Object.values(p.ledger).reduce((a,b)=>a+b,0),p.total);}
@@ -163,5 +198,6 @@ test('新版整場三人：落格決策、共同結算、同步退休到終局�
   const ended=new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Game stuck: '+JSON.stringify({round:latest?.turnNumber,phase:latest?.decisionPhase,scene:latest?.facilitatorScene?.kind,turn:latest?.currentPlayerTurnId,rolledKey,busy:latest?.turnInProgress,paused:latest?.isPaused,payday:latest?.globalPaydayInProgress,pending:latest?.globalPaydayPending,clientErrors:clientErrors.slice(-5)}))),15000);host.on('gameStateUpdate',g=>{if(g.gamePhase==='GameOver'){clearTimeout(timer);resolve(g);}});});
   host.emit('startGame',{force:true});const final=await ended;
   assert.ok(final.turnNumber>=12);assert.ok(choices>15);assert.ok(settlements>=12);assert.equal(maxRetirementCohort,3);assert.ok(final.globalPaydayNumber>=4);
+  assert.ok(planningRounds.length>=3);assert.equal(new Set(planningRounds).size,planningRounds.length);
   assert.equal(errors.trim(),'');
 });

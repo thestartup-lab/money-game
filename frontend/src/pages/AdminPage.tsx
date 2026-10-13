@@ -627,10 +627,10 @@ export default function AdminPage() {
                 </p>
                 <button
                   className="w-full rounded-xl bg-indigo-500 px-4 py-3 text-base font-black text-white transition-colors hover:bg-indigo-400"
-                  disabled={Boolean(gameState?.boardJourneyEnabled && !decisionPhase.submitted && !decisionPhase.rescue && !['reading','auction'].includes(decisionPhase.kind))} onClick={() => emit('continueDecisionPhase', { phaseId: decisionPhase.id })}
+                  disabled={Boolean(gameState?.boardJourneyEnabled && !decisionPhase.submitted && !decisionPhase.rescue && !['reading','auction','actions'].includes(decisionPhase.kind))} onClick={() => emit('continueDecisionPhase', { phaseId: decisionPhase.id })}
                 >
                   {decisionPhase.kind === 'actions'
-                    ? `結束行動時間，開始擲骰 ▶（已完成 ${(gameState?.actionPhaseDone ?? []).length}/${players.filter((p: Player) => p.isAlive && !p.isDisconnected).length}）`
+                    ? `結束規劃，查看摘要 ▶（已完成 ${(gameState?.actionPhaseDone ?? []).length}/${players.filter((p: Player) => p.isAlive && !p.isDisconnected).length}）`
                     : decisionPhase.kind === 'payday' && decisionPhase.playerId === '__all_players__'
                     ? `未送出者以空白方案結束並結算 ▶（已送出 ${(gameState?.actionPhaseDone ?? []).length}/${players.filter((p: Player) => p.isAlive && !p.isDisconnected).length}）`
                     : decisionPhase.kind === 'auction'
@@ -708,7 +708,7 @@ export default function AdminPage() {
                     <span className="text-gray-300">
                       {gameState?.paydayTimer?.enabled
                         ? (gameState.paydayTimer.due ? '到期，等目前行動結束' : `下次 ${formatCountdown(paydayRemaining)}`)
-                        : gameState?.boardJourneyEnabled ? '落格決策（不開規劃）' : '關閉（每三輪一次）'}
+                        : gameState?.boardJourneyEnabled ? '落格事件＋每三輪自主規劃' : '關閉（每三輪一次）'}
                     </span>
                   </div>
                 {!gameState?.boardJourneyEnabled && <>
