@@ -163,7 +163,22 @@ export const SKILL_TRAINING_COST = 9_000;
 /** 每次進修培訓獲得的 SK 增量 */
 export const SKILL_TRAINING_GAIN = 20;
 /** SK 達到此值解鎖轉職機會 */
-export const SKILL_CAREER_CHANGE_THRESHOLD = 100;
+export const SKILL_CAREER_CHANGE_THRESHOLD = 20;
+/** 成功轉職後完成自己的三次回合（含休息／跳過）才能再次申請。 */
+export const CAREER_CHANGE_COOLDOWN_TURNS = 3;
+/** 遊戲內的專業準備門檻，不代表職業價值或真實執業資格。 */
+export const CAREER_SK_REQUIREMENTS: Record<string, number> = {
+  janitor: 20, retail_staff: 20, salesperson: 20, taxi_driver: 20,
+  delivery_rider: 20, temp_worker: 20, mlm_agent: 20, market_vendor: 20,
+  chef: 40, police: 40, insurance_agent: 40, real_estate_agent: 40,
+  freelance_designer: 40, freelance_photographer: 40, beautician: 40,
+  teacher: 60, nurse: 60, sales_manager: 60, store_manager: 60,
+  civil_servant: 60, cram_teacher: 60, trainer: 60, renovation_contractor: 60,
+  restaurant_owner: 60, franchise_owner: 60,
+  engineer: 80, accountant: 80, it_engineer: 80, consultant: 80,
+  financial_advisor: 80, counselor: 80, angel_investor: 80,
+  doctor: 100, solo_lawyer: 100,
+};
 
 // --- 人脈值 NT (Network, 1–10) ---
 

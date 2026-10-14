@@ -6,6 +6,64 @@ const { createPlayer } = require('../dist/gameLogic');
 const { previewCareerChange } = require('../dist/careerStage');
 const { executeCareerChange } = require('../dist/statsSystem');
 const { validateSocketPayload } = require('../dist/socketValidation');
+const { GameState } = require('../dist/gameDataModels');
+const { PROFESSIONS, CAREER_SK_REQUIREMENTS } = require('../dist/gameConfig');
+const { encode, decode } = require('../dist/roomPersistence');
+
+test('所有職業有明確門檻；差 1 SK 拒絕、剛好達標成功且保留 SK', () => {
+  assert.deepEqual(Object.keys(CAREER_SK_REQUIREMENTS).sort(), PROFESSIONS.map(p => p.id).sort());
+  for (const profession of PROFESSIONS) {
+    const p = createPlayer('p', '測試', profession.id === 'teacher' ? 'janitor' : 'teacher');
+    p.cash = 100000000; p.stats.health = 80;
+    p.stats.careerSkill = CAREER_SK_REQUIREMENTS[profession.id] - 1;
+    const before = JSON.stringify(p);
+    assert.equal(executeCareerChange(p, profession.id).success, false, profession.id);
+    assert.equal(JSON.stringify(p), before);
+    p.stats.careerSkill++;
+    const preview = previewCareerChange(p, profession.id);
+    assert.equal(preview.error, undefined, profession.id);
+    assert.equal(executeCareerChange(p, profession.id).success, true, profession.id);
+    assert.equal(p.stats.careerSkill, CAREER_SK_REQUIREMENTS[profession.id]);
+    assert.equal(p.salary, preview.projected.salary);
+    assert.equal(p.careerCooldownTurns, 3);
+  }
+});
+
+test('冷卻僅扣本人回合，三次後解鎖；存檔保留、舊存檔補預設值', () => {
+  const gs = new GameState('COOLDOWN');
+  const p = createPlayer('p', '甲', 'teacher'), b = createPlayer('b', '乙', 'teacher');
+  p.stats.careerSkill = 100; p.stats.health = 80;
+  gs.addPlayer(p); gs.addPlayer(b); gs.currentPlayerTurnId = b.id;
+  assert.equal(executeCareerChange(p, 'doctor').success, true);
+  assert.equal(decode(encode(p)).careerCooldownTurns, 3);
+  const old = encode(p); delete old.v.careerCooldownTurns;
+  assert.equal(decode(old).careerCooldownTurns, 0);
+  for (let left = 3; left > 0; left--) {
+    const before = JSON.stringify(p);
+    assert.equal(executeCareerChange(p, 'teacher').success, false);
+    assert.equal(JSON.stringify(p), before);
+    gs.advanceToNextTurn(); // 乙結束，不扣甲的冷卻
+    assert.equal(p.careerCooldownTurns, left);
+    gs.advanceToNextTurn(); // 甲結束
+    assert.equal(p.careerCooldownTurns, left - 1);
+  }
+  assert.equal(executeCareerChange(p, 'teacher').success, true);
+  assert.equal(p.careerCooldownTurns, 3);
+  assert.equal(p.stats.careerSkill, 100);
+});
+
+test('直接執行也阻擋退休、臥床、健康不足、相同職業、資金不足，且不消耗冷卻', () => {
+  for (const setup of [p => p.retirementStatus = 'retired', p => p.isBedridden = true, p => p.stats.health = 29, p => p.isAlive = false]) {
+    const p = createPlayer('p', '玩家', 'teacher'); p.stats.careerSkill = 100; p.stats.health = 80;
+    setup(p); const before = JSON.stringify(p);
+    assert.equal(executeCareerChange(p, 'doctor').success, false);
+    assert.equal(JSON.stringify(p), before);
+  }
+  const p = createPlayer('p', '玩家', 'teacher'); p.stats.careerSkill = 100; p.stats.health = 80; p.cash = 0;
+  assert.equal(executeCareerChange(p, 'teacher').success, false);
+  assert.equal(executeCareerChange(p, 'restaurant_owner').success, false);
+  assert.equal(p.careerCooldownTurns, 0);
+});
 
 test('轉職預覽保留 getter、不修改玩家、收支與正式執行一致', () => {
   const p = createPlayer('p', '玩家', 'teacher'); p.stats.careerSkill = 100; p.stats.health = 80; p.cash = 1000000;
@@ -23,12 +81,13 @@ test('轉職預覽保留 getter、不修改玩家、收支與正式執行一致'
 
 function wait(s, event, predicate = () => true) {
   return new Promise((resolve, reject) => {
-    const listener = v => { if (predicate(v)) { clearTimeout(timer); s.off(event, listener); resolve(v); } };
-    const timer = setTimeout(() => { s.off(event, listener); reject(Error('Timeout: ' + event)); }, 5000);
+    let lastMessage;
+    const listener = v => { lastMessage = v?.message; if (predicate(v)) { clearTimeout(timer); s.off(event, listener); resolve(v); } };
+    const timer = setTimeout(() => { s.off(event, listener); reject(Error('Timeout: ' + event + (lastMessage ? ': ' + lastMessage : ''))); }, 5000);
     s.on(event, listener);
   });
 }
-function send(s, event, payload, response, predicate) { const p = wait(s, response, predicate); s.emit(event, payload); return p; }
+function send(s, event, payload, response, predicate) { const p = wait(s, response, predicate); s.emit(event, payload); return p.catch(error => { error.message += ' after ' + event; throw error; }); }
 
 test('轉職排隊→暫停舞台→本人確認→主持揭曉→繼續；權限、重連、取消、重複提交與重驗證', { timeout: 30000 }, async t => {
   const boot = `const l=require('./dist/gameLogic');const c=l.createPlayer;l.createPlayer=(...a)=>{const p=c(...a);p.pre20Done=true;p.stats.careerSkill=100;p.stats.health=80;p.cash=1000000;return p;};require('./dist/socketServer');`;
@@ -71,14 +130,16 @@ test('轉職排隊→暫停舞台→本人確認→主持揭曉→繼續；權�
   await send(rejoined, 'confirmCareerScene', { sceneId, accepted: true }, 'gameStateUpdate', g => g.facilitatorScene?.careerConfirmed);
   const result = await send(admin, 'resolveFacilitatorScene', { sceneId, choiceId: 'reveal' }, 'gameStateUpdate', g => g.facilitatorScene?.stage === 'result');
   const changed = result.players.find(p => p.id === sa.playerId);
-  assert.equal(changed.profession.id, target); assert.equal(changed.stats.careerSkill, 0); assert.equal(result.isPaused, true);
+  assert.equal(changed.profession.id, target); assert.equal(changed.stats.careerSkill, 100); assert.equal(changed.careerCooldownTurns, 3); assert.equal(result.isPaused, true);
   await send(admin, 'resolveFacilitatorScene', { sceneId, choiceId: 'reveal' }, 'error');
   const closed = await send(admin, 'closeFacilitatorScene', { sceneId }, 'gameStateUpdate', g => !g.facilitatorScene);
   assert.equal(closed.isPaused, false);
+  await send(rejoined, 'requestCareerChange', { newProfessionId: target === 'doctor' ? 'teacher' : 'doctor' }, 'error', e => e.message.includes('轉職適應中'));
   const next = await send(admin, 'startCareerScene', { requestId: q2.careerRequests[1].id }, 'gameStateUpdate', g => g.facilitatorScene?.kind === 'career');
   await send(b, 'confirmCareerScene', { sceneId: next.facilitatorScene.id, accepted: false }, 'gameStateUpdate', g => g.facilitatorScene?.stage === 'result');
   const cancelled = await send(admin, 'closeFacilitatorScene', { sceneId: next.facilitatorScene.id }, 'gameStateUpdate', g => !g.facilitatorScene);
   assert.equal(cancelled.players.find(p => p.id === sb.playerId).stats.careerSkill, 100);
+  assert.equal(cancelled.players.find(p => p.id === sb.playerId).careerCooldownTurns, 0);
   const bTarget = q2.careerRequests[1].professionId;
   const pending = await send(b, 'requestCareerChange', { newProfessionId: bTarget }, 'gameStateUpdate', g => g.careerRequests?.length === 1);
   await send(admin, 'setPlayerStats', { targetPlayerId: sb.playerId, stats: { hp: 10 } }, 'gameStateUpdate', g => g.players.find(p => p.id === sb.playerId).stats.health === 10);

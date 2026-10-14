@@ -10,6 +10,8 @@ import {
   SKILL_TRAINING_COST,
   SKILL_TRAINING_GAIN,
   SKILL_CAREER_CHANGE_THRESHOLD,
+  CAREER_SK_REQUIREMENTS, CAREER_CHANGE_COOLDOWN_TURNS, HP_ACTIVITY_THRESHOLDS,
+  SALARY_MULT_BY_STAGE, HEALTH_HABIT_OPTIONS,
   NETWORK_AUTO_GAIN_INTERVAL,
   NETWORK_AUTO_GROWTH_CAP,
   NETWORK_INVEST_COST,
@@ -368,13 +370,13 @@ export function applyNTAutoGrowth(player: Player, growthCount = player.paydayCou
 /**
  * 執行玩家轉職。
  *
- * 前提：player.stats.careerSkill >= SKILL_CAREER_CHANGE_THRESHOLD（由呼叫方驗證）。
+ * 所有入口共用資格檢查，包含目標職業門檻與冷卻期。
  *
  * 轉職效果：
- * - 薪資更新為新職業的 startingSalary
- * - 基本支出更新為新職業的起始支出（房貸、車貸、信用卡、其他支出）
+ * - 薪資以新職業及保留的能力、倍率計算（隨機收入先用估值）
+ * - 信用卡、其他支出更新為新職業設定；房貸與車貸保留
  * - 資產、負債、保險、現金、成長數值、paydayCount 全部保留
- * - 第二專長值 SK 歸零
+ * - 保留 SK，開始三次本人回合的冷卻期
  *
  * @param player          玩家物件（直接修改）
  * @param newProfessionId 目標職業 ID（必須存在於 PROFESSION_MAP）
@@ -392,6 +394,14 @@ export function executeCareerChange(
       message: `找不到職業 ID：${newProfessionId}`,
     };
   }
+
+  const requiredSK = CAREER_SK_REQUIREMENTS[newProfessionId] ?? 100;
+  if (!player.isAlive || player.isBedridden || player.stats.health < HP_ACTIVITY_THRESHOLDS.careerChange) {
+    return { success: false, message: '角色需存活、非臥床且健康至少 30 才能轉職。' };
+  }
+  if (player.retirementStatus !== 'working') return { success: false, message: '已完成退休選擇，無法再申請轉職。' };
+  if ((player.careerCooldownTurns ?? 0) > 0) return { success: false, message: `轉職適應中，還需完成自己的 ${player.careerCooldownTurns} 次回合。` };
+  if (player.stats.careerSkill < requiredSK) return { success: false, message: `${newProfession.name} 需要 SK ${requiredSK}，目前 ${player.stats.careerSkill}（還差 ${requiredSK - player.stats.careerSkill}）。` };
 
   if (newProfession.id === player.profession.id) {
     return {
@@ -415,7 +425,15 @@ export function executeCareerChange(
 
   // 更新職業與財務
   player.profession = newProfession;
-  player.salary = newProfession.startingSalary;
+  // 隨機收入採職業估值預覽，下次發薪才抽取；預覽不可擲骰改變條款。
+  const baseSalary = newProfession.salaryType === 'sk_driven'
+    ? newProfession.startingSalary + player.stats.careerSkill * (newProfession.salaryPerSK ?? 50)
+    : newProfession.salaryType === 'nt_driven'
+      ? (newProfession.salaryBase ?? 0) + player.stats.network * (newProfession.salaryPerNT ?? 400)
+      : newProfession.startingSalary;
+  const habit = HEALTH_HABIT_OPTIONS[player.healthHabit] ?? HEALTH_HABIT_OPTIONS.normal;
+  player.salary = player.downsizingTurnsLeft > 0 ? 0 : Math.round(baseSalary * SALARY_MULT_BY_STAGE[player.lifeStage] * player.salaryGrowthMultiplier * habit.salaryMultiplier);
+  if (player.salary > 0) player.salary += player.salaryBonus ?? 0;
   // 房貸與車貸是玩家自己的，換工作不會換房子與車子；保留現有月付與本金
   player.expenses.creditCardPayment = newProfession.startingCreditCard;
   player.expenses.otherExpenses = newProfession.startingOtherExpenses;
@@ -465,15 +483,14 @@ export function executeCareerChange(
     player.stats.financialIQ = Math.max(player.stats.financialIQ, newProfession.startingFQ);
   }
 
-  // SK 歸零
-  player.stats.careerSkill = 0;
+  player.careerCooldownTurns = CAREER_CHANGE_COOLDOWN_TURNS;
 
   return {
     success: true,
     message: `${previousProfession} → ${newProfession.name} 轉職成功！`,
     previousProfession,
     newProfession: newProfession.name,
-    salaryChange: newProfession.startingSalary - oldSalary,
+    salaryChange: player.salary - oldSalary,
     assetCostPaid: assetCost,
     injectedAssets: injectedAssets.length > 0 ? injectedAssets : undefined,
     fqBefore,

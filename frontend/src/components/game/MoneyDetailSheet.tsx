@@ -161,7 +161,7 @@ export default function MoneyDetailSheet({ player, mode, onClose }: Props) {
             </section>
             <section className="rounded-xl bg-gray-800 p-3">
               <p className="font-bold text-purple-300">第二專長 SK {player.stats.careerSkill}</p>
-              <p className="text-[11px] text-gray-400">{info.skill.perSK ? `技能驅動職業：每 1 SK 月薪 +$${fmt(info.skill.perSK)}；` : ''}≥ {info.skill.raiseThreshold} 每輪多加薪 2%、裁員月數減半、完成人生指標「成長」；{info.skill.careerChangeThreshold} 可申請轉職；退休顧問收入 SK × 300。</p>
+              <p className="text-[11px] text-gray-400">{info.skill.perSK ? `技能驅動職業：每 1 SK 月薪 +$${fmt(info.skill.perSK)}；` : ''}≥ {info.skill.raiseThreshold} 每輪多加薪 2%、裁員月數減半、完成人生指標「成長」；各職業轉職門檻 SK 20～100，轉職保留 SK，冷卻 3 次本人回合；退休顧問收入 SK × 300。</p>
             </section>
             <section className="rounded-xl bg-gray-800 p-3">
               <p className="font-bold text-yellow-300">人脈 NT {player.stats.network}</p>

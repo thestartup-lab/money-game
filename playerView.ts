@@ -12,6 +12,7 @@ import { naturalDeathProbability, travelLeaveCost, isOnPayrollSchedule } from '.
 import { LIFESTYLE_OPTIONS, HEALTH_HABIT_OPTIONS, CHILD_EXPENSE_BY_AGE, SOCIAL_INSURANCE_RATE, PREMIUM_MULT_BY_STAGE } from './gameConfig';
 import { getAvailableLoan, getCurrentAge, getRemainingActivityTimeMs, getLifeStage } from './gameLogic';
 import { RELATIONSHIP_MARRIAGE_THRESHOLD, HP_ACTIVITY_THRESHOLDS, PROFESSIONS, SECOND_LIFE_MIN_PAYDAYS, SECOND_LIFE_FINANCIAL_COVERAGE_RATIO, SECOND_LIFE_BALANCED_COVERAGE_RATIO, SECOND_LIFE_FINANCIAL_INDICATORS_REQUIRED, SECOND_LIFE_BALANCED_INDICATORS_REQUIRED, PAYDAY_MAX_ROUNDS, MONTHS_PER_ROUND, YEARS_PER_COMPLETED_ROUND, TOTAL_LIFE_ROUNDS, STOCK_DCA_MONTHLY_RETURN_RATE, STOCK_DCA_MONTHLY_DIVIDEND_RATE, SKILL_CAREER_CHANGE_THRESHOLD, getLoanLimit, getLoanRate } from './gameConfig';
+import { CAREER_SK_REQUIREMENTS, CAREER_CHANGE_COOLDOWN_TURNS } from './gameConfig';
 import { MEDICAL_INSURANCE_PREMIUM, LIFE_INSURANCE_PREMIUM, PROPERTY_INSURANCE_PREMIUM, FQ_MULTIPLIERS, FAST_TRACK_INCOME_MULTIPLIER } from './gameConstants';
 import { getFQUpgradeCost } from './statsSystem';
 import { CRISIS_EVENTS } from './gameCards';
@@ -292,7 +293,9 @@ export function serializePlayer(p: Player, gs: GameState): object {
     netWorthBreakdown: buildNetWorthBreakdown(p),
     actionInfo: buildActionInfo(p, gs),
     cashLedger,
-    careerOptions: p.isAlive && p.stats.careerSkill >= SKILL_CAREER_CHANGE_THRESHOLD ? buildAvailableProfessions(p) : [],
+    careerOptions: p.isAlive ? buildAvailableProfessions(p) : [],
+    careerCooldownTurns: p.careerCooldownTurns ?? 0,
+    careerCooldownDuration: CAREER_CHANGE_COOLDOWN_TURNS,
     careerBlockReason: careerBlockReason(p, gs),
     careerQueuePosition: gs.careerRequests.findIndex((r) => r.playerId === p.id) + 1,
     quadrant: p.profession.quadrant,
@@ -500,16 +503,18 @@ export function buildAffordableOptions(player: Player, settlementMonths = 1): ob
       value: `本次不衰退：省下 ${Math.round(decay * habitMult)} HP × ${coveredMonths} 輪（${player.lifeStage === 'Youth' ? '青年期' : player.lifeStage === 'Family' ? '成家期' : player.lifeStage === 'Transition' ? '轉型期' : '高齡'}每輪自然衰退 ${decay}${habitMult !== 1 ? `，健康習慣 ×${habitMult}` : ''}）` },
     healthBoost: { available: player.cash >= totalBoostCost, cost: totalBoostCost,
       value: `HP ${player.stats.health} → ${Math.min(100, player.stats.health + cfg.HP_BOOST_AMOUNT)}，並含本次維護；HP ≥ 70 完成人生指標「健康」、危機費用減半；< 50 不能旅遊、< 40 不能聯誼` },
-    skillTraining: { available: player.cash >= skillCost && player.stats.careerSkill < SKILL_CAREER_CHANGE_THRESHOLD, cost: skillCost, currentSK: player.stats.careerSkill,
-      value: `SK ${player.stats.careerSkill} → ${Math.min(100, player.stats.careerSkill + 20)}；${player.profession.salaryType === 'sk_driven' ? `技能驅動職業：月薪 +$${((player.profession.salaryPerSK ?? 0) * 20).toLocaleString()}；` : ''}≥ 60 每輪多加薪 2%、裁員月數減半、完成人生指標「成長」；100 可申請轉職；退休顧問收入 SK × 300` },
+    skillTraining: { available: player.cash >= skillCost && player.stats.careerSkill < 100, cost: skillCost, currentSK: player.stats.careerSkill,
+      value: `SK ${player.stats.careerSkill} → ${Math.min(100, player.stats.careerSkill + 20)}；${player.profession.salaryType === 'sk_driven' ? `技能驅動職業：月薪 +$${((player.profession.salaryPerSK ?? 0) * Math.min(20, 100-player.stats.careerSkill)).toLocaleString()}；` : ''}≥ 60 每輪多加薪 2%、裁員月數減半、完成人生指標「成長」；轉職依職業要求 SK 20～100 並保留 SK；退休顧問收入 SK × 300` },
     networkInvest: { available: player.cash >= ntCost && player.stats.network < (player.profession.salaryType === 'nt_driven' ? Infinity : 10), cost: ntCost, currentNT: player.stats.network,
       value: `NT ${player.stats.network} → ${player.stats.network + 1}；${player.profession.salaryType === 'nt_driven' ? `人脈驅動職業：月薪 +$${(player.profession.salaryPerNT ?? 0).toLocaleString()}；` : ''}≥ 3 有一次人脈護盾免除危機；≥ 5 交易抽 2 張擇一、父母事件親友分攤減半、退休創業擲骰 +1；退休顧問收入 NT × 3,000` },
   };
 }
 
-/** 已達 SK 100 但暫時不能申請轉職的原因（手機顯示，不再默默藏起清單） */
+/** 共通限制，不隱藏未達門檻的目標職業。 */
 export function careerBlockReason(p: Player, gs: GameState): string | null {
-  if (!p.isAlive || p.stats.careerSkill < SKILL_CAREER_CHANGE_THRESHOLD) return null;
+  if (!p.isAlive) return '角色已出局';
+  if (p.retirementStatus !== 'working') return '已完成退休選擇，無法再申請轉職';
+  if ((p.careerCooldownTurns ?? 0) > 0) return `轉職適應中，還需完成自己的 ${p.careerCooldownTurns} 次回合（含休息／跳過）`;
   if (p.isBedridden) return '臥床中無法轉職，先恢復健康';
   if (p.stats.health < HP_ACTIVITY_THRESHOLDS.careerChange) return `健康值 ${p.stats.health} 未達 ${HP_ACTIVITY_THRESHOLDS.careerChange}，先在發薪規劃投資健康`;
   if (gs.facilitatorScene?.kind === 'career' && gs.facilitatorScene.careerPlayerId === p.id) return null;
@@ -539,6 +544,8 @@ export function buildAvailableProfessions(player: Player): object[] {
         startingFQ: p.startingFQ,
         assetCost, // 轉職到 B/I 需從現金扣除的「自有資產成本」
         canAfford: assetCost === 0 || player.cash >= assetCost,
+        requiredSK: CAREER_SK_REQUIREMENTS[p.id] ?? 100,
+        skillGap: Math.max(0, (CAREER_SK_REQUIREMENTS[p.id] ?? 100) - player.stats.careerSkill),
       };
     });
 }

@@ -497,7 +497,7 @@ export function promoteSecondLife(gs: GameState, player: Player, secondLifeEligi
     : '新的機會與風險，現在開始。'));
 }
 
-/** SK 首次達 100 時通知本人一次（發薪、旅遊、主持人調數值都可能觸發） */
+/** SK 首次達入門門檻時通知本人一次。 */
 export function announceCareerUnlock(gs: GameState, player: Player): void {
   if (!player.isAlive || player.careerUnlockAnnounced || player.stats.careerSkill < SKILL_CAREER_CHANGE_THRESHOLD) return;
   player.careerUnlockAnnounced = true;
@@ -505,13 +505,13 @@ export function announceCareerUnlock(gs: GameState, player: Player): void {
   const blocked = careerBlockReason(player, gs);
   if (socket) emitClient(socket, 'careerChangeUnlocked', {
     message: blocked
-      ? `第二專長已達 100，可以轉職！但目前${blocked}。手機「🎯 申請轉職」區會列出所有職業。`
-      : '第二專長已達 100，可以轉職！打開手機「🎯 申請轉職」區，點職業看薪資與代價，送出申請後由主持人在大螢幕開舞台。',
+      ? `SK 已達入門轉職門檻！但目前${blocked}。手機「🎯 申請轉職」區可查看各職業要求。`
+      : 'SK 已達入門轉職門檻！可隨時在手機查看各職業所需 SK、薪資與代價，符合條件即可申請，主持人會安排大螢幕舞台。',
     availableProfessions: buildAvailableProfessions(player),
     blockReason: blocked,
   });
   emitToRoom(gs.gameId, 'milestoneAnnounced', {
     playerId: player.id, playerName: player.name, milestone: '轉職解鎖',
-    description: `${player.name} 的第二專長達到頂峰，可以申請轉職了！`,
+    description: `${player.name} 已達入門轉職門檻，新的職涯選擇開放了！`,
   });
 }

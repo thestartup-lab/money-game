@@ -91,7 +91,7 @@ export async function handleBoardAction(socket: Socket, gs: GameState, p: Player
   else if (kind === 'health') options = [health(p)];
   else if (kind === 'training' || kind === 'career') {
     options = training(p);
-    description = kind === 'career' ? '可先提升技能；SK 達 100 後可在手機申請轉職，由主持人安排轉職舞台。' : '這次選擇一項學習，不同能力影響往後的機會。';
+    description = kind === 'career' ? '可先提升技能；手機可隨時查看轉職職業，達到各職業 SK 門檻且冷卻結束即可申請，由主持人安排舞台。轉職保留 SK。' : '這次選擇一項學習，不同能力影響往後的機會。';
   } else if (kind === 'travel' || kind === 'experience' || kind === 'dream') {
     options = TRAVEL_DESTINATIONS.filter(d => p.isInFastTrack || d.tier !== 'outer').map(d => {
       const cost = d.cost + travelLeaveCost(p,d);

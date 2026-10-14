@@ -102,6 +102,7 @@ export interface CareerOption {
   id: string; name: string; quadrant?: string; salaryType?: string; salary?: number; salaryRange?: [number, number];
   salaryPerNT?: number; salaryBase?: number; salaryPerSK?: number; startingCashflow?: number; otherExpenses?: number; creditCard?: number;
   flexible?: boolean; startingFQ?: number; assetCost?: number; canAfford?: boolean;
+  requiredSK?: number; skillGap?: number;
 }
 
 export interface SecondLifeRouteProgress {
@@ -139,6 +140,8 @@ export interface Player {
   planningOptions?: {id:string;label:string;description:string;disabled?:boolean;group?:string}[];
   loginMethod?: 'line' | 'guest';
   careerOptions?: CareerOption[];
+  careerCooldownTurns?: number;
+  careerCooldownDuration?: number;
   /** SK 已達 100 但暫時不能申請的原因 */
   careerBlockReason?: string | null;
   /** 在轉職申請隊列中的順位（0 = 沒有申請） */

@@ -55,7 +55,7 @@ test('基本投資一人一期一份、可放棄、不能偽造價格、不能�
   assert.equal(validateSocketPayload('submitPaydayPlan', { phaseId: 'phase', basicInvestmentId: {} }), false);
 });
 
-test('資格保留雙路徑、財商乘數與人生指標，轉職後 SK 歸零會改變資格', () => {
+test('資格保留雙路徑、財商乘數與人生指標，SK 下降會改變資格', () => {
   const p = createPlayer('p', '玩家');
   p.expenses = { taxes: 0, rent: 0, homeMortgagePayment: 0, carLoanPayment: 0, creditCardPayment: 0, otherExpenses: 10000 };
   // 這個測試只看資格門檻；給一台沒有養車費的車，讓交通費不影響支出

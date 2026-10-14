@@ -250,7 +250,7 @@ export function resolveFacilitatorSceneChoice(gs: GameState, sceneId: string | u
     if (!result.success) { revealFacilitatorResult(gs, '本次轉職未執行', result.message); return; }
     logPlayerEvent(player, gs, 'career_change', `轉職：${result.previousProfession} → ${result.newProfession}`, cash, flow, worth,
       { previousProfession: result.previousProfession, newProfession: result.newProfession, salaryChange: result.salaryChange });
-    revealFacilitatorResult(gs, `${player.name} 的新職涯啟動了`, `${scene.description.split('\n').slice(0, -1).join('\n')}\n轉職已生效，SK 已歸零；請主持人帶領觀察後繼續。`);
+    revealFacilitatorResult(gs, `${player.name} 的新職涯啟動了`, `${scene.description.split('\n').slice(0, -1).join('\n')}\n轉職已生效，SK ${player.stats.careerSkill} 保留；完成自己的 ${player.careerCooldownTurns} 次回合後可再次申請。請主持人帶領觀察後繼續。`);
     const target = getPlayerSocket(player.id);
     if (target) emitClient(target, 'careerChangeResult', { ...result, staged: true });
     return;

@@ -681,6 +681,8 @@ export class Player {
   layoffMonthsTotal: number;
   /** 轉職解鎖通知只發一次 */
   careerUnlockAnnounced: boolean;
+  /** 僅在本人回合結束時遞減，重連與存檔不重置。 */
+  careerCooldownTurns = 0;
 
   constructor(id: string, name: string, profession: Profession) {
     this.id = id;
@@ -1159,6 +1161,10 @@ export class GameState {
    */
   advanceToNextTurn(): void {
     if (this.playerOrder.length === 0) return;
+    const finishingPlayer = this.players.get(this.currentPlayerTurnId);
+    if (finishingPlayer?.isAlive) {
+      finishingPlayer.careerCooldownTurns = Math.max(0, (finishingPlayer.careerCooldownTurns ?? 0) - 1);
+    }
 
     if (this.finalRoundStarted) {
       this.finalRoundPendingPlayerIds = this.finalRoundPendingPlayerIds.filter(
