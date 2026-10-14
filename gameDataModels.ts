@@ -146,6 +146,8 @@ export interface Asset {
   isResidence?: boolean;
   /** 出租房空置剩餘結算月數；空置期間沒有租金 */
   vacantMonthsLeft?: number;
+  /** New rental model: monthlyCashflow is gross rent; deduct operating costs and linked loan interest. */
+  rentalOperatingCost?: number;
 }
 
 /** 負債 */
@@ -445,6 +447,7 @@ export class Player {
   };
   planningChallengeId?: string;
   planningActionIds: string[] = [];
+  lastRentalPurchaseRound?: number;
   /** 獨立於財務月數的健康／自然人脈成長週期。 */
   growthPaydayCount = 0;
   worldEffects: { eventId: string; title: string; expiresAfterPayday: number; effect: GlobalEventEffect }[] = [];
@@ -861,14 +864,23 @@ export class Player {
 
   /** 所有資產的每月現金流總和 */
   get totalPassiveIncome(): number {
-    return this.assets.reduce((sum, asset) => {
-      if (asset.isResidence || (asset.vacantMonthsLeft ?? 0) > 0) return sum;
+    return this.assets.reduce((sum,asset)=>sum+this.assetPassiveIncome(asset),0);
+  }
+
+  assetPassiveIncome(asset: Asset): number {
+      if (asset.rentalOperatingCost !== undefined) {
+        const loan=this.liabilities.find(l=>l.id===asset.linkedLiabilityId);
+        const interest=loan ? Math.round(loan.totalDebt*(loan.monthlyRate??0.04/12)) : 0;
+        const multiplier=this.worldEffects.reduce((factor,entry)=>entry.effect.type==='CashflowChange'&&entry.effect.targetAssetType===asset.type
+          ? factor*(entry.effect.multiplier??1) : factor,1);
+        return ((asset.vacantMonthsLeft??0)>0 ? 0 : Math.round(asset.monthlyCashflow*multiplier))-asset.rentalOperatingCost-interest;
+      }
+      if (asset.isResidence || (asset.vacantMonthsLeft ?? 0) > 0) return 0;
       const multiplier = this.worldEffects.reduce((factor, entry) =>
         entry.effect.type === 'CashflowChange' && entry.effect.targetAssetType === asset.type
           ? factor * (entry.effect.multiplier ?? 1) : factor, 1);
       // 負現金流是既有成本，景氣下滑不應反而減輕它。
-      return sum + (asset.monthlyCashflow > 0 ? Math.round(asset.monthlyCashflow * multiplier) : asset.monthlyCashflow);
-    }, 0);
+      return asset.monthlyCashflow > 0 ? Math.round(asset.monthlyCashflow * multiplier) : asset.monthlyCashflow;
   }
 
   /** 65 歲後：HP < 60 每月醫療 +3,000；HP < 30 再加長照 +9,000 */

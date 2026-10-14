@@ -177,7 +177,7 @@ export function buildSalaryItems(p: Player): { label: string; note?: string }[] 
 /** 淨資產 = 現金 + 資產市值 − 負債（逐項列出）。 */
 export function buildNetWorthBreakdown(p: Player): object {
   const liabilityById = new Map(p.liabilities.map((l) => [l.id, l]));
-  const assets = p.assets.map((a) => ({ id: a.id, name: a.name, value: a.currentValue ?? a.cost, cost: a.cost, debt: a.linkedLiabilityId ? (liabilityById.get(a.linkedLiabilityId)?.totalDebt ?? 0) : 0, monthlyCashflow: a.monthlyCashflow, isResidence: Boolean(a.isResidence) }));
+  const assets = p.assets.map((a) => ({ id: a.id, name: a.name, value: a.currentValue ?? a.cost, cost: a.cost, debt: a.linkedLiabilityId ? (liabilityById.get(a.linkedLiabilityId)?.totalDebt ?? 0) : 0, monthlyCashflow: a.rentalOperatingCost!==undefined ? p.assetPassiveIncome(a) : a.monthlyCashflow, isResidence: Boolean(a.isResidence) }));
   const liabilities = p.liabilities.map((l) => ({ id: l.id, name: l.name, debt: l.totalDebt, monthlyPayment: l.monthlyPayment ?? 0 }));
   const assetTotal = assets.reduce((s, a) => s + a.value, 0);
   const liabilityTotal = liabilities.reduce((s, l) => s + l.debt, 0);
@@ -213,13 +213,14 @@ export function serializePlayer(p: Player, gs: GameState): object {
     const worldFactor = p.worldEffects.reduce((factor, entry) =>
       entry.effect.type === 'CashflowChange' && entry.effect.targetAssetType === a.type ? factor * (entry.effect.multiplier ?? 1) : factor, 1);
     const vacant = (a.vacantMonthsLeft ?? 0) > 0;
-    incomeItems.push({ label: a.name, amount: vacant ? 0 : Math.round(a.monthlyCashflow * worldFactor),
-      note: vacant ? `空置中，還要 ${a.vacantMonthsLeft} 個月才有新租客（原租金 $${a.monthlyCashflow.toLocaleString()}）` : worldFactor !== 1 ? `世界事件 ×${worldFactor.toFixed(2)}` : undefined });
+    incomeItems.push({ label: a.name, amount: p.assetPassiveIncome(a),
+      note: a.rentalOperatingCost!==undefined ? `租金扣維護及貸款利息後的淨額${vacant?'；空置中，租金為零但費用照付':''}`
+        : vacant ? `空置中，還要 ${a.vacantMonthsLeft} 個月才有新租客（原租金 $${a.monthlyCashflow.toLocaleString()}）` : worldFactor !== 1 ? `世界事件 ×${worldFactor.toFixed(2)}` : undefined });
   }
   const passiveMultiplier = fqMultiplier * ftMultiplier;
-  if (passiveMultiplier !== 1 && p.totalPassiveIncome > 0) {
+  if (passiveMultiplier !== 1 && p.totalPassiveIncome !== 0) {
     incomeItems.push({ label: `被動收入乘數（財商 ×${fqMultiplier}${ftMultiplier !== 1 ? `、外圈 ×${ftMultiplier}` : ''}）`,
-      amount: Math.round(p.totalPassiveIncome * passiveMultiplier) - Math.max(0, p.totalPassiveIncome), note: '以被動收入總額乘算後的差額' });
+      amount: Math.round(p.totalPassiveIncome * passiveMultiplier) - p.totalPassiveIncome, note: '以被動收入總額乘算後的差額' });
   }
   if (p.marriageBonus) incomeItems.push({ label: '婚姻加成（舊版）', amount: p.marriageBonus });
   if (p.spouse) incomeItems.push({ label: '配偶收入', amount: p.spouseIncome,
@@ -314,7 +315,7 @@ export function serializePlayer(p: Player, gs: GameState): object {
     recurringExpenses: p.recurringExpenses,
     layoffMonthsTotal: p.layoffMonthsTotal,
     naturalDeathProbability: naturalDeathProbability(p),
-    assets: p.assets.map((asset) => ({ ...asset, monthlyCashflow: asset.monthlyCashflow > 0
+    assets: p.assets.map((asset) => ({ ...asset, monthlyCashflow: asset.rentalOperatingCost!==undefined ? p.assetPassiveIncome(asset) : asset.monthlyCashflow > 0
       ? Math.round(asset.monthlyCashflow * p.worldEffects.reduce((factor, entry) =>
         entry.effect.type === 'CashflowChange' && entry.effect.targetAssetType === asset.type
           ? factor * (entry.effect.multiplier ?? 1) : factor, 1)) : asset.monthlyCashflow })),

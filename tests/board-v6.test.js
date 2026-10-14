@@ -106,6 +106,11 @@ test('新版手機→主持人→結果：旅遊、分岔、重連、服務站�
   const home=require('../dist/householdLoans').getHomeOffers(require('../dist/gameLogic').createPlayer('offers','測試','teacher'))[0];
   const bought=await send(resumed,'buyHome',{optionId:home.id},'gameStateUpdate',g=>g.players.find(p=>p.id===sa.playerId).assets.some(a=>a.id.startsWith('home-')));
   assert.ok(bought.players.find(p=>p.id===sa.playerId).liabilities.some(l=>l.id.startsWith('home-loan-')));
+  const rental=await send(resumed,'planningAction',{phaseId:planningId,choiceId:'rental:studio'},'gameStateUpdate',g=>g.players.find(p=>p.id===sa.playerId).assets.some(a=>a.id.startsWith('rental-')));
+  const rented=rental.players.find(p=>p.id===sa.playerId);
+  assert.ok(rented.assets.find(a=>a.id.startsWith('rental-')).monthlyCashflow<5000,'顯示扣除貸款及維護的淨額，不是毛租金');
+  assert.ok(rented.planningOptions.filter(o=>o.id.startsWith('rental:')).every(o=>o.disabled));
+  await send(resumed,'planningAction',{phaseId:planningId,choiceId:'rental:apartment'},'error');
   const growth=await send(resumed,'planningAction',{phaseId:planningId,choiceId:'skill'},'gameStateUpdate');
   assert.ok(growth.players.find(p=>p.id===sa.playerId).planningOptions.find(o=>o.id==='skill').disabled);
   await send(resumed,'planningAction',{phaseId:planningId,choiceId:'skill'},'error');
@@ -116,6 +121,7 @@ test('新版手機→主持人→結果：旅遊、分岔、重連、服務站�
   const summary=await send(host,'continueDecisionPhase',{phaseId:planningId},'gameStateUpdate',g=>g.decisionPhase?.kind==='reading');
   assert.match(summary.decisionPhase.title,/人生規劃.*摘要/);assert.match(summary.decisionPhase.description,/負債/);
   assert.match(summary.decisionPhase.description,/重新當一次學徒/);assert.match(summary.decisionPhase.description,/探索/);
+  assert.match(summary.decisionPhase.description,/小型出租套房/);
   await send(host,'continueDecisionPhase',{phaseId:summary.decisionPhase.id},'gameStateUpdate',g=>!g.decisionPhase&&!g.turnInProgress);
 
   // Both players choose together; no retirement takes effect before host reveal.

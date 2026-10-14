@@ -899,6 +899,9 @@ export function repayLoan(
 
   liability.totalDebt -= repayAmount;
   player.cash -= repayAmount;
+  if (player.assets.some(a=>a.linkedLiabilityId===liabilityId && a.rentalOperatingCost!==undefined)) {
+    liability.monthlyPayment=Math.round(liability.totalDebt*(liability.monthlyRate??0.04/12));
+  }
   // 房貸／車貸：月付依剩餘本金等比例調降
   applyHouseholdRepayment(player, liabilityId, debtBefore, liability.totalDebt);
   // 信用加分依還款佔債務比例計算：還 $1 不會得到整筆加分，避免刷信用

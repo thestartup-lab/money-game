@@ -1,4 +1,5 @@
 import type { Socket } from 'socket.io';
+import { rentalPlanningOffers, buyPlanningRental } from './rentalPlanning';
 import type { GameState, Player } from './gameDataModels';
 import { INNER_NODES, OUTER_NODES } from './frontend/src/boardLayout';
 import { drawSecondLifeChallenge, buildSecondLifeChallenge } from './secondLifeChallenges';
@@ -150,6 +151,8 @@ export function selectServiceOffer(p: Player, options: Action[]): Action[] {
 
 /** Extra voluntary choices; investment, home/car purchase and sale retain their existing panels. */
 export function planningGrowthOptions(gs: GameState, p: Player): Action[] {
+  const rentals=rentalPlanningOffers(gs,p).map(o=>({id:'rental:'+o.id,group:'出租置產',label:o.name,
+    description:o.description,disabled:!!o.reason,run:()=>buyPlanningRental(gs,p,o.id)}));
   const challenge = p.isInFastTrack && p.secondLifeJourney && p.planningChallengeId
     ? buildSecondLifeChallenge(p,p.planningChallengeId) : null;
   const practices = challenge ? challenge.options.map(o=>({...o,
@@ -158,7 +161,7 @@ export function planningGrowthOptions(gs: GameState, p: Player): Action[] {
     disabled:o.disabled || (p.planningActionIds ?? []).some(id=>id.startsWith('journey:')),
   })) : [];
   return [health(p), ...training(p).map(o=>({...o,group:'健康與學習'})),
-    ...management(gs,p).filter(o=>o.id==='network'||o.id.startsWith('basic-')||o.id.startsWith('life:')||o.id.startsWith('habit:')), ...practices]
+    ...management(gs,p).filter(o=>o.id==='network'||o.id.startsWith('basic-')||o.id.startsWith('life:')||o.id.startsWith('habit:')), ...rentals, ...practices]
     .map(o=>({...o,disabled:o.disabled || (p.planningActionIds ?? []).includes(o.id)
       || (o.id.startsWith('basic-') && (p.planningActionIds ?? []).some(id=>id.startsWith('basic-')))}));
 }

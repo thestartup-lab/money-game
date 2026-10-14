@@ -6,7 +6,7 @@ export default function PlanningChoices({options,onConfirm}:{options:NonNullable
   const selected=options.find(o=>o.id===selectedId);
   if (selected) return <section className="rounded-xl border border-amber-400 bg-slate-900 p-4 text-lg text-white">
     <h3 className="font-bold">{selected.label}</h3><p className="my-3 leading-relaxed">{selected.description}</p>
-    <p className="mb-3 text-base">確認即執行。本次規劃每項成長服務限一次、基本投資限選一種一份，第二人生挑戰限選一種投入方式。</p>
+    <p className="mb-3 text-base">確認即執行。本次規劃每項成長服務限一次、基本投資限選一種一份、出租置產最多一間，第二人生挑戰限選一種投入方式。</p>
     <button className="mb-2 min-h-12 w-full rounded-lg bg-emerald-700 p-3 disabled:opacity-40" disabled={selected.disabled}
       onClick={()=>{onConfirm(selected.id);setSelectedId(null);}}>確認執行</button>
     <button className="min-h-12 w-full rounded-lg border p-3" onClick={()=>setSelectedId(null)}>取消，返回選項</button>

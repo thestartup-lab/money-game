@@ -36,7 +36,7 @@ export default function FamilyActionsCard({ player, canUseActions, emit }: Props
         <p className="text-sm font-bold text-pink-200">👨‍👩‍👧 家庭</p>
         <span className="text-[11px] text-gray-400">家庭連結 {f.familyTies}／{f.familyTieCap}（助養、照顧長輩、指導後輩）</span>
       </div>
-      <p className="text-[11px] text-gray-400">家庭分數 = 婚姻 25 + 每個孩子 25（親生或領養）+ 家庭連結最多 50。不結婚、不生小孩也能拿到一半。</p>
+      <p className="text-base text-gray-300">家庭當下分數：婚姻 25＋每位孩子 25（親生、領養相同）＋家庭連結每點 2 分，上限 100。未婚、沒有孩子也能靠照顧重要關係達到滿分。終局會綜合歷程，不是每次領養都直接讓總分加 25。</p>
       {actions.filter((a) => a.show).map((a) => (
         <div key={a.key} className="rounded-lg border border-gray-700 bg-gray-900 p-2">
           {confirm === a.key ? (

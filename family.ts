@@ -69,6 +69,8 @@ export function adoptionBlock(gs: GameState, player: Player): string | null {
 }
 
 export function adoptChild(gs: GameState, player: Player): string {
+  const blocked=adoptionBlock(gs,player);
+  if(blocked)return blocked+'未領養、未扣款。';
   player.cash -= ADOPTION_COST;
   player.lastAdoptionRound = gs.turnNumber;
   player.numberOfChildren += 1;
