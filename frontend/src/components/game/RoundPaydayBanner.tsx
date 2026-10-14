@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import './RoundPaydayBanner.css';
 
 export interface RoundPaydayPayout {
   playerId: string; playerName: string; fromAge: number; toAge: number;
@@ -7,7 +8,7 @@ export interface RoundPaydayPayout {
   ledger: Record<string, number>;
 }
 const money = (n: number) => `${n < 0 ? '−' : ''}$${Math.round(Math.abs(n)).toLocaleString()}`;
-export default function RoundPaydayBanner({ payouts }: { payouts: RoundPaydayPayout[] }) {
+export default function RoundPaydayBanner({ payouts, scrollable = true }: { payouts: RoundPaydayPayout[]; scrollable?: boolean }) {
   const yearCount = Math.max(1, ...payouts.map(p => p.years.length));
   const [shown, setShown] = useState(0);
   useEffect(() => {
@@ -15,9 +16,9 @@ export default function RoundPaydayBanner({ payouts }: { payouts: RoundPaydayPay
     const timer = setTimeout(() => setShown(n => n + 1), 700);
     return () => clearTimeout(timer);
   }, [shown, yearCount]);
-  return <div className="max-h-[55vh] overflow-y-auto text-left">
-    <div className="grid gap-4 lg:grid-cols-2">
-      {payouts.map(p => <article key={p.playerId} className="rounded-xl border border-slate-500 bg-slate-900 p-4 text-lg">
+  return <div className={`round-payday text-left ${scrollable ? 'round-payday-scroll' : ''}`}>
+    <div className="round-payday-grid">
+      {payouts.map(p => <article key={p.playerId} className="round-payday-card rounded-xl border border-slate-500 bg-slate-900 p-4 text-lg">
         <h3 className="text-2xl font-black text-yellow-200">{p.playerName} · {p.fromAge}–{p.toAge} 歲</h3>
         <div className="my-3 flex flex-wrap gap-2" aria-label="逐年收支動畫">
           {p.years.map((y, i) => <span key={i} className={`rounded bg-slate-800 p-2 transition-opacity ${i < shown ? 'opacity-100' : 'opacity-0'}`}>{y.age} 歲：{money(y.cash)}</span>)}

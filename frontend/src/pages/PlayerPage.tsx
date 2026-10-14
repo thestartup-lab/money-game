@@ -1373,13 +1373,25 @@ export default function PlayerPage() {
               {myPlayer.monthlyCashflow >= 0 ? '+' : ''}${fmt(myPlayer.monthlyCashflow)}/月
             </button>
           </div>
-          <div className="senior-screen-cue">📺 棋盤與公開結果，請抬頭看大螢幕</div>
         </header>
 
         {/* ── 主要捲動區 ── */}
         <div className="flex-1 overflow-y-auto">
           {connectionBanner}
           {errorToast}
+
+          {/* 首要操作：骰子固定排在資訊與折疊清單之前。 */}
+          {!isGameOver && myPlayer.isAlive && !gameState.decisionPhase && !gameState.facilitatorScene && (
+            <div className="senior-dice-slot mx-4 mt-3 mb-3" aria-label="擲骰區">
+              <DiceRoller
+                isMyTurn={isMyTurn}
+                isBedridden={myPlayer.isBedridden}
+                onRoll={(count) => { setRollingLocked(true); emit('playerRoll', { diceCount: count }); }}
+                lastRoll={lastRoll}
+                disabled={rollingLocked || gameState.isPaused}
+              />
+            </div>
+          )}
 
           {!isGameOver && (
             <div className={`senior-turn-card rounded-2xl border text-center ${isMyTurn ? 'border-emerald-400 bg-emerald-950/70' : 'border-slate-500 bg-slate-800'}`}>
@@ -1399,11 +1411,6 @@ export default function PlayerPage() {
 
           {!isGameOver && gameState.facilitatorScene?.kind === 'community' && (
             <CommunityVotePanel scene={gameState.facilitatorScene} myVote={communityVotes[gameState.facilitatorScene.id]} canVote={Boolean(myPlayer)} emit={emit} />
-          )}
-          {!isGameOver && myPlayer?.retirementOutlook && <RetirementOutlookCard player={myPlayer} />}
-          {/* 後半場：外圈玩家的第二人生目標與指導後輩；離世玩家的家族顧問 */}
-          {!isGameOver && myPlayer && (!myPlayer.isAlive || myPlayer.isInFastTrack) && (
-            <LateLifePanel gameState={gameState} me={myPlayer} canUseActions={canUseActions} emit={emit} />
           )}
           {!isGameOver && gameState.facilitatorScene && gameState.facilitatorScene.kind !== 'community' && gameState.facilitatorScene.careerPlayerId !== myId && (
             <div className="mx-4 mb-3 rounded-2xl border-2 border-yellow-500 bg-gradient-to-br from-indigo-950 to-gray-900 px-5 py-6 text-center shadow-xl">
@@ -1427,19 +1434,6 @@ export default function PlayerPage() {
                 onDismiss={() => setActiveEvent(null)}
                 reminderEndsAt={gameState.decisionPhase?.reminderEndsAt}
                 playerCash={myPlayer.cash}
-              />
-            </div>
-          )}
-
-          {/* 擲骰區 */}
-          {!isGameOver && !gameState.decisionPhase && !gameState.facilitatorScene && (
-            <div className="mx-4 mb-3">
-              <DiceRoller
-                isMyTurn={isMyTurn}
-                isBedridden={myPlayer.isBedridden}
-                onRoll={(count) => { setRollingLocked(true); emit('playerRoll', { diceCount: count }); }}
-                lastRoll={lastRoll}
-                disabled={rollingLocked || gameState.isPaused}
               />
             </div>
           )}
@@ -1536,6 +1530,10 @@ export default function PlayerPage() {
           )}
 
           {/* ── 可展開面板 ── */}
+          {!isGameOver && myPlayer.retirementOutlook && <RetirementOutlookCard player={myPlayer} />}
+          {!isGameOver && (!myPlayer.isAlive || myPlayer.isInFastTrack) && (
+            <LateLifePanel gameState={gameState} me={myPlayer} canUseActions={canUseActions} emit={emit} />
+          )}
           <div className="mt-2">
             {!isGameOver && !myPlayer.isInFastTrack && myPlayer.secondLifeProgress && (
               <CollapsePanel title="🚪 第二人生資格規則" badge={myPlayer.secondLifeProgress.eligible ? '✓' : undefined}>

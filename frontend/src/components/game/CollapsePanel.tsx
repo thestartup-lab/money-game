@@ -2,23 +2,26 @@ import { useId, useState } from 'react';
 
 interface CollapsePanelProps {
   title: string;
+  summary?: string;
   badge?: string | number;
   defaultOpen?: boolean;
   children: React.ReactNode;
 }
 
-export default function CollapsePanel({ title, badge, defaultOpen = false, children }: CollapsePanelProps) {
+export default function CollapsePanel({ title, summary, badge, defaultOpen = false, children }: CollapsePanelProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const contentId = useId();
 
   return (
     <div className="senior-collapse-panel border-t border-gray-700">
       <button
+        type="button"
         className="senior-collapse-trigger w-full flex items-center justify-between px-4 py-3 bg-gray-800 hover:bg-gray-750 transition-colors"
         onClick={() => setIsOpen((v) => !v)}
         aria-expanded={isOpen}
         aria-controls={contentId}
       >
+        <div className="min-w-0 text-left">
         <div className="flex items-center gap-2">
           <span className="text-base font-bold text-white">{title}</span>
           {badge !== undefined && Number(badge) > 0 && (
@@ -27,7 +30,9 @@ export default function CollapsePanel({ title, badge, defaultOpen = false, child
             </span>
           )}
         </div>
-        <span className="text-gray-300 text-base" aria-hidden="true">{isOpen ? '收起 ▲' : '展開 ▼'}</span>
+        {summary && <span className="senior-collapse-summary block mt-1 text-sm text-gray-300">{summary}</span>}
+        </div>
+        <span className="ml-3 shrink-0 text-gray-300 text-base" aria-hidden="true">{isOpen ? '收起 ▲' : '展開 ▼'}</span>
       </button>
       {isOpen && (
         <div id={contentId} className="senior-collapse-content bg-gray-900 px-4 pb-4 pt-2">

@@ -112,9 +112,7 @@
 }
 
 .senior-mobile .senior-topbar {
-  position: sticky;
-  top: 0;
-  z-index: 30;
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px 14px;
@@ -191,7 +189,10 @@
 }
 
 .senior-mobile .senior-collapse-panel {
-  border-top: 3px solid #334155;
+  border: 2px solid #475569;
+  border-radius: 16px;
+  overflow: hidden;
+  margin-bottom: 12px;
 }
 
 .senior-mobile .senior-collapse-trigger {
@@ -210,8 +211,34 @@
   padding: 18px;
 }
 
-.senior-mobile .senior-dice .card {
+.senior-mobile .senior-dice.card {
   border-color: #3f7669;
+}
+
+.senior-mobile .senior-dice button {
+  padding-inline: 8px;
+}
+
+.senior-mobile .senior-collapse-summary {
+  overflow-wrap: anywhere;
+  font-weight: 400;
+}
+
+.senior-mobile .senior-career-filters {
+  gap: 6px;
+}
+
+.senior-mobile .senior-career {
+  overflow-wrap: anywhere;
+}
+
+.senior-mobile .senior-career [role="dialog"] .flex {
+  flex-wrap: wrap;
+}
+
+.senior-mobile .senior-career [role="dialog"] .shrink-0 {
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 .senior-mobile .senior-dice .grid,

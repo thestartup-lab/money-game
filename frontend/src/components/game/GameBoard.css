@@ -584,3 +584,16 @@
   text-align: center;
   margin-top: 3px;
 }
+.dice-range-marker {
+  position: absolute; transform: translate(-50%, 30%); z-index: 5;
+  padding: 1px 6px; border: 2px solid white; border-radius: 8px;
+  color: white; background: #172554; font-size: clamp(12px, 1.5vw, 24px);
+  font-weight: 900; pointer-events: none;
+}
+.dice-range-legend {
+  position: absolute; left: 28%; top: 40%; width: 44%; z-index: 5;
+  padding: 10px; border: 2px solid #94a3b8; border-radius: 12px;
+  color: white; background: #0f172aee; text-align: center;
+  font-size: clamp(12px, 1.4vw, 22px); pointer-events: none;
+}
+.dice-range-legend small { display: block; margin-top: 4px; font-size: .8em; }

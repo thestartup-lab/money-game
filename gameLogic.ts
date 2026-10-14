@@ -1,4 +1,5 @@
 import { Player, GameState, MarketEventType, Asset, Liability, SocialClass, LifeStage, GrowthStats, Profession } from './gameDataModels';
+import { LIFE_INSURANCE_DEATH_BENEFIT } from './gameConfig';
 import {
   RAT_RACE_TRACK_SIZE, PAYDAY_LOCATIONS, PROFESSIONS, PROFESSION_MAP,
   CREDIT_SCORE_MIN, CREDIT_SCORE_MAX,
@@ -237,6 +238,7 @@ export function triggerPayday(player: Player, gameState: GameState, maintenanceD
 
   capture?.(player);
   player.cash += player.monthlyCashflow;
+  player.insurancePremiumsPaid = (player.insurancePremiumsPaid ?? 0) + player.insurancePremiums;
   player.paydayCount += 1;
 
   if (player.monthlyCashflow < 0) {
@@ -707,6 +709,7 @@ export function buyInsurance(player: Player, type: InsuranceType): BuyInsuranceR
   }
 
   player.cash -= fee;
+  player.insuranceActivationPaid = (player.insuranceActivationPaid ?? 0) + fee;
   player.insurance[insuranceKey] = true;
   return { success: true, activationFee: fee };
 }
@@ -1110,6 +1113,7 @@ export function applyFastTrackPaydayBonus(player: Player, share = 1): number {
 // ============================================================
 
 export interface LifeScoreBreakdown {
+  insuranceEstate?: { benefit: number; debt: number; netEstate: number; premiumsPaid: number; activationPaid: number; claimsPaid: number };
   scoringVersion?: string;
   historyRounds?: number;
   // 7 維度原始分（0–100，供雷達圖使用）
@@ -1146,7 +1150,7 @@ export interface LifeScoreBreakdown {
  * - 壽命（死亡時年齡越高越好）
  * - 傳承分（死後遺產淨值；留下負債 = 0 分，$100,000 淨遺產 = 100 分）
  *   若無子女，傳承分固定為 50（中性，無後代責任）。
- *   若持有壽險，負債視為被清償後計算遺產。
+ *   壽險固定身故保障列入傳承試算，仍扣負債，不改生前現金。
  *
  * @param player   結算玩家
  * @param deathAge 玩家死亡或遊戲結束時的年齡
@@ -1175,13 +1179,9 @@ export function calculateLifeScore(player: Player, deathAge: number, monthsPerRo
   const effectivePassive = Math.max(0, player.totalPassiveIncome) * (FQ_MULTIPLIERS[player.stats.financialIQ] ?? 1);
   const passiveCoverage = effectivePassive / monthlyExpenses;
 
-  // 傳承分：死後淨遺產（壽險可抵消負債）
-  let netEstate: number;
-  if (player.insurance.hasLifeInsurance) {
-    netEstate = totalAssetValue + player.cash;
-  } else {
-    netEstate = totalAssetValue + player.cash - totalDebt;
-  }
+  // 身故保障有固定額度；不抵醫療費、不無限免除負債、不加入生前可用現金。
+  const benefit = player.insurance.hasLifeInsurance ? LIFE_INSURANCE_DEATH_BENEFIT : 0;
+  const netEstate = totalAssetValue + player.cash + benefit - totalDebt;
 
   // 遺產可以留給親友或社群，不以是否有子女決定財務傳承分。
   let legacyRaw = Math.min(100, Math.max(0, (netEstate / monthlyExpenses / runwayTarget) * 100));
@@ -1256,6 +1256,7 @@ export function calculateLifeScore(player: Player, deathAge: number, monthsPerRo
 
   return {
     scoringVersion: 'balanced-2026-10',
+    insuranceEstate: { benefit, debt: totalDebt, netEstate, premiumsPaid:player.insurancePremiumsPaid ?? 0, activationPaid:player.insuranceActivationPaid ?? 0, claimsPaid:player.insuranceClaimsPaid ?? 0 },
     historyRounds: history.length,
     netWorth:            Math.round(netWorth_raw),
     passiveIncome:       Math.round(passiveIncome_raw),

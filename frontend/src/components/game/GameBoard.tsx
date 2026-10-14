@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { INNER_NODES, OUTER_NODES } from '../../boardLayout';
+import { INNER_NODES, OUTER_NODES, reachableDiceCells } from '../../boardLayout';
 import { usePaydayCountdown, formatCountdown, type PaydayTimerInfo } from './paydayCountdown';
 import './GameBoard.css';
 
@@ -25,6 +25,7 @@ export interface BoardPlayer {
 }
 
 interface GameBoardProps {
+  dicePreview?: { position: number; outer: boolean; bonus: number; direction?: 'career' | 'life' };
   players: BoardPlayer[];
   currentTurnPlayerId?: string;
   /** 特殊流程（例如季度結算、剛晉級外圈）可暫時指定大螢幕跟隨的玩家。 */
@@ -76,6 +77,7 @@ export function GameBoard({
   isGlobalPayday = false,
   paydayTimer,
   clockFrozen = false,
+  dicePreview,
 }: GameBoardProps) {
   const [manualBoardView, setManualBoardView] = useState<{ anchor: string; view: 'inner' | 'outer' } | null>(null);
   const [calibrate, setCalibrate] = useState(false);
@@ -96,6 +98,9 @@ export function GameBoard({
     ? "url('/board-outer-user-v6.png')"
     : "url('/board-inner-user-v6.png')";
   const posTable = isOuter ? OUTER_CELL_POSITIONS : INNER_CELL_POSITIONS;
+  const preview = dicePreview && dicePreview.outer === isOuter ? dicePreview : undefined;
+  const one = preview ? reachableDiceCells(preview.position, isOuter, Math.min(3, 1 + preview.bonus), preview.direction) : [];
+  const two = preview ? reachableDiceCells(preview.position, isOuter, Math.min(3, 2 + preview.bonus), preview.direction) : [];
 
   const visiblePlayers = players.filter((p) =>
     boardView === 'inner' ? !p.isInFastTrack : p.isInFastTrack
@@ -147,6 +152,15 @@ export function GameBoard({
           />
         )}
 
+        {preview && !calibrate && <>
+          <div className="dice-range-legend">可能落點：① 一顆骰 / ② 兩顆骰 / ①② 兩者皆可
+            <small>{preview.bonus ? `已含慈善加骰（最多三顆）。` : ''}岔路未選時包含兩條路線；僅顯示範圍，不代表各格機率相同。</small>
+          </div>
+          {[...new Set([...one, ...two])].map(cell => <div key={`range-${cell}`} className="dice-range-marker"
+            style={getPos(cell,isOuter)} aria-label={`第 ${cell+1} 格：${one.includes(cell)?'一顆骰可達 ':''}${two.includes(cell)?'兩顆骰可達':''}`}>
+            {one.includes(cell)?'①':''}{two.includes(cell)?'②':''}
+          </div>)}
+        </>}
         {/* ══ 校準模式：顯示所有格子編號 + 座標 ══ */}
         {calibrate && posTable.map(([l, t], idx) => (
           <div

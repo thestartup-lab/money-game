@@ -74,6 +74,10 @@ export type CrisisInsuranceType =
   | 'none';
 
 export interface CrisisCard {
+  /** 未承保的工作收入暫停月數；不因醫療理賠消失。 */
+  incomePauseMonths?: number;
+  /** 出租房受災：以暫時支出表達未承保租金損失。 */
+  rentalLossMonths?: number;
   id: string;
   title: string;
   description: string;
@@ -1034,12 +1038,12 @@ export const CRISIS_EVENTS: CrisisCard[] = [
     turnsLostWithInsurance: 0,
     canCauseDeath: false,
   },
-  // --- 壽險 / 極端事故類（需壽險，可觸發死亡）---
+  // --- 極端醫療事故（醫療保障；壽險不代付醫療）---
   {
     id: 'cr-007',
     title: '嚴重交通意外',
-    description: '發生嚴重車禍，後續醫療與訴訟費用極高。無壽險且現金嚴重不足時將觸發死亡判定。',
-    requiredInsurance: 'hasLifeInsurance',
+    description: '嚴重交通意外需要急救與復健，醫療費用 $900,000；本卡只模擬醫療費，不含第三人責任。壽險不支付本次醫療費。',
+    requiredInsurance: 'hasMedicalInsurance',
     baseCost: 900_000,
     insuredCost: 0,
     turnsLostWithoutInsurance: 3,
@@ -1049,8 +1053,8 @@ export const CRISIS_EVENTS: CrisisCard[] = [
   {
     id: 'cr-008',
     title: '罕見疾病長期治療',
-    description: '確診罕見疾病，需長期高額治療費用 $675,000。有壽險保障家人。',
-    requiredInsurance: 'hasLifeInsurance',
+    description: '罕見疾病需要長期治療，醫療費用 $675,000，由醫療保障分攤；壽險僅用於身故後的家庭保障。',
+    requiredInsurance: 'hasMedicalInsurance',
     baseCost: 675_000,
     insuredCost: 0,
     turnsLostWithoutInsurance: 2,
@@ -1082,7 +1086,19 @@ export const CRISIS_EVENTS: CrisisCard[] = [
     canCauseDeath: false,
     familySupportHalvesCost: true,
     recurringExpense: { label: '父母長期照護', monthly: 12_000, months: 24 },
-  }
+  },
+  { id: 'cr-011', title: '意外骨折住院', description: '跌倒骨折，需要手術與復健。醫療費 $80,000；有醫療險仍自付 $10,000，休養一回合。',
+    requiredInsurance: 'hasMedicalInsurance', baseCost: 80_000, insuredCost: 10_000,
+    turnsLostWithoutInsurance: 1, turnsLostWithInsurance: 1, canCauseDeath: false },
+  { id: 'cr-012', title: '治療期間暫停工作', description: '治療費 $180,000；有醫療險仍自付 $20,000。在職者暫停工作收入兩個月，醫療險不補薪資或接案收入，資產被動收入不受此項停工影響。',
+    requiredInsurance: 'hasMedicalInsurance', baseCost: 180_000, insuredCost: 20_000, incomePauseMonths: 2,
+    turnsLostWithoutInsurance: 1, turnsLostWithInsurance: 1, canCauseDeath: false },
+  { id: 'cr-013', title: '自住房火災修繕', description: '自住房局部火災，修繕費 $240,000；財產險分攤後仍自付 $30,000。',
+    requiredInsurance: 'hasPropertyInsurance', baseCost: 240_000, insuredCost: 30_000,
+    turnsLostWithoutInsurance: 0, turnsLostWithInsurance: 0, canCauseDeath: false },
+  { id: 'cr-014', title: '出租屋受災與空置', description: '出租房修繕費 $180,000；財產險分攤後自付 $20,000。另有三個月租金中斷，以目前正租金現金流的等額臨時支出記錄，不由本遊戲財產險承保。',
+    requiredInsurance: 'hasPropertyInsurance', baseCost: 180_000, insuredCost: 20_000, rentalLossMonths: 3,
+    turnsLostWithoutInsurance: 0, turnsLostWithInsurance: 0, canCauseDeath: false },
 ];
 
 // ============================================================
@@ -1434,6 +1450,7 @@ export const CRISIS_POOL_BY_STAGE: Readonly<Record<LifeStage, string[]>> = {
   //   cr-007 嚴重交通意外 $900k（可死亡） cr-008 罕見疾病 $675k（可死亡）
   // 打拼期（20–34）：輕症 + 財產損失，不含死亡判定
   [LifeStage.Youth]: [
+    'cr-011', 'cr-012', 'cr-013', 'cr-014',
     'cr-003', // 緊急手術住院（醫療險）
     'cr-004', // 住宅大火（財產險）
     'cr-005', // 企業訴訟（財產險）
@@ -1441,6 +1458,7 @@ export const CRISIS_POOL_BY_STAGE: Readonly<Record<LifeStage, string[]>> = {
   ],
   // 成家期（35–49）：增加中等疾病，仍無致死事件
   [LifeStage.Family]: [
+    'cr-011', 'cr-012', 'cr-013', 'cr-014',
     'cr-002', // 重大疾病確診（醫療險）
     'cr-003',
     'cr-004',
@@ -1450,23 +1468,26 @@ export const CRISIS_POOL_BY_STAGE: Readonly<Record<LifeStage, string[]>> = {
   ],
   // 轉型期（50–64）：重症加入，首次出現死亡判定
   [LifeStage.Transition]: [
+    'cr-011', 'cr-012', 'cr-013', 'cr-014',
     'cr-001', // 心臟病突發（醫療險，可死亡）
     'cr-002',
     'cr-005',
     'cr-006',
-    'cr-007', // 嚴重交通意外（壽險，可死亡）
+    'cr-007', // 嚴重交通意外（醫療險，可死亡）
     'cr-009', // 父母重病住院
     'cr-010', // 父母需要長期照護
   ],
   // 退休期（65–79）：重症為主，輕症移除
   [LifeStage.Retirement]: [
+    'cr-011', 'cr-013', 'cr-014',
     'cr-001',
     'cr-002',
     'cr-007',
-    'cr-008', // 罕見疾病（壽險，可死亡）
+    'cr-008', // 罕見疾病（醫療險，可死亡）
   ],
   // 傳承期（80–100）：全為高危事件
   [LifeStage.Legacy]: [
+    'cr-011', 'cr-013', 'cr-014',
     'cr-001',
     'cr-007',
     'cr-008',

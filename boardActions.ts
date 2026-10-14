@@ -79,6 +79,10 @@ function familyOptions(gs: GameState, p: Player): { title: string; description: 
 export async function handleBoardAction(socket: Socket, gs: GameState, p: Player): Promise<boolean> {
   const node = (p.isInFastTrack ? OUTER_NODES : INNER_NODES)[p.isInFastTrack ? p.fastTrackPosition : p.currentPosition];
   const kind: string = node[1];
+  // Keep half of outer crisis landings as choice challenges; the rest demonstrate insurable risks.
+  if (p.isInFastTrack && kind === 'crisis' && Math.random() < 0.5) return false;
+  // The inner career branch's cooperation square is a real deal, not a generic relationship payment.
+  if (!p.isInFastTrack && kind === 'cooperate') return false;
   const outerChallenge = p.isInFastTrack && ['dream','travel','cooperate','legacy','crisis'].includes(kind);
   if (!outerChallenge && ['deal','market','expense','crisis','charity','second'].includes(kind)) return false;
   let title: string = node[0], description = '請本人選擇；送出後由主持人揭曉。';

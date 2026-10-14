@@ -44,6 +44,12 @@ export interface LuckyResult {
 }
 
 export interface CrisisResult {
+  uninsuredCost: number;
+  insurancePayout: number;
+  cashPaid: number;
+  unpaidCost: number;
+  incomePauseMonths: number;
+  rentalMonthlyLoss: number;
   card: CrisisCard;
   wasInsured: boolean;
   /** HP 修正後的實際費用 */
@@ -128,6 +134,7 @@ export function applyLuckyCard(player: Player, card: LuckyCard): LuckyResult {
  * 設定 downsizingTurnsLeft，triggerPayday 中薪資將計為 0 並遞減。
  */
 export function applyDownsizingCard(player: Player, card: DownsizingCard): void {
+  if (player.retirementStatus !== 'working' || player.profession.quadrant !== 'E') return;
   player.downsizingTurnsLeft = card.turnsWithoutSalary;
 }
 
@@ -322,32 +329,41 @@ function calcHPModifier(hp: number): { costMultiplier: number; flatBonus: number
  * 用於「自救階段」：死亡條件成立時先讓玩家賣資產或借款，主持人確認後再真正套用。
  */
 export function previewCrisisCost(player: Player, card: CrisisCard): {
-  wasInsured: boolean; effectiveCost: number; baseTurns: number; deathRisk: boolean; shortfall: number;
+  wasInsured: boolean; effectiveCost: number; baseTurns: number; deathRisk: boolean; shortfall: number; uninsuredCost: number; insurancePayout: number;
 } {
   // 家庭責任類事件（父母醫療等）沒有保險可抵，也不受本人 HP 影響；人脈 ≥ 5 親友分攤減半
   if (card.requiredInsurance === 'none') {
     const support = card.familySupportHalvesCost && player.stats.network >= PARENT_CARE_FAMILY_SUPPORT_NT;
     const effectiveCost = Math.round(card.baseCost * (support ? 0.5 : 1));
-    return { wasInsured: false, effectiveCost, baseTurns: card.turnsLostWithoutInsurance, deathRisk: false, shortfall: Math.max(0, effectiveCost - player.cash) };
+    return { wasInsured: false, effectiveCost, uninsuredCost: effectiveCost, insurancePayout: 0, baseTurns: card.turnsLostWithoutInsurance, deathRisk: false, shortfall: Math.max(0, effectiveCost - player.cash) };
   }
   const wasInsured = player.insurance[card.requiredInsurance];
-  const hpMod = calcHPModifier(player.stats.health);
+  const hpMod = card.requiredInsurance === 'hasMedicalInsurance' ? calcHPModifier(player.stats.health) : {costMultiplier:1,flatBonus:0,extraTurns:0};
+  const uninsuredCost = Math.round(card.baseCost * hpMod.costMultiplier) + hpMod.flatBonus;
   const effectiveCost = wasInsured
-    ? card.insuredCost
-    : Math.round(card.baseCost * hpMod.costMultiplier) + hpMod.flatBonus;
+    ? Math.min(uninsuredCost, card.insuredCost)
+    : uninsuredCost;
   const baseTurns = wasInsured
     ? card.turnsLostWithInsurance
     : card.turnsLostWithoutInsurance + hpMod.extraTurns;
   const deathRisk = card.canCauseDeath && !wasInsured && player.cash < effectiveCost;
-  return { wasInsured, effectiveCost, baseTurns, deathRisk, shortfall: Math.max(0, effectiveCost - player.cash) };
+  return { wasInsured, effectiveCost, uninsuredCost, insurancePayout: uninsuredCost - effectiveCost, baseTurns, deathRisk, shortfall: Math.max(0, effectiveCost - player.cash) };
 }
 
 export function applyCrisisCard(player: Player, card: CrisisCard): CrisisResult {
-  const { wasInsured, effectiveCost, baseTurns, deathRisk } = previewCrisisCost(player, card);
+  const { wasInsured, effectiveCost, uninsuredCost, insurancePayout, baseTurns, deathRisk } = previewCrisisCost(player, card);
   const deathTriggered = deathRisk;
+  const cashPaid = deathTriggered ? 0 : Math.min(effectiveCost, Math.max(0, player.cash));
+  const unpaidCost = effectiveCost - cashPaid;
+  const incomePauseMonths = !deathTriggered && player.retirementStatus === 'working' && player.salary > 0 ? card.incomePauseMonths ?? 0 : 0;
+  const rentalMonthlyLoss = !deathTriggered && card.rentalLossMonths ? Math.round(player.assets.filter(a => a.type === AssetType.RealEstate && !a.isResidence).reduce((sum,a)=>sum+Math.max(0,player.assetPassiveIncome(a)),0)) : 0;
+  player.insuranceClaimsPaid = (player.insuranceClaimsPaid ?? 0) + insurancePayout;
+  if (unpaidCost > 0) player.liabilities.push({id:`crisis-bill-${card.id}-${Date.now()}-${player.liabilities.length}`,name:`${card.title}未付費用`,totalDebt:unpaidCost,monthlyPayment:0});
 
   if (!deathTriggered) {
-    player.cash -= Math.min(effectiveCost, Math.max(0, player.cash));
+    player.cash -= cashPaid;
+    if (incomePauseMonths) player.downsizingTurnsLeft = Math.max(player.downsizingTurnsLeft, incomePauseMonths);
+    if (rentalMonthlyLoss) player.recurringExpenses.push({id:`rental-loss-${Date.now()}`,label:'受災租金中斷（等額支出）',monthly:rentalMonthlyLoss,monthsLeft:card.rentalLossMonths!});
     player.turnsToSkip += baseTurns;
     addLifeExperience(player, LIFE_EXP.CRISIS_SURVIVED);
     // 照顧父母（家庭責任類事件）算家庭連結：不結婚、不生小孩的人也能從照顧家人得到家庭分數
@@ -367,6 +383,7 @@ export function applyCrisisCard(player: Player, card: CrisisCard): CrisisResult 
   }
 
   return {
+    uninsuredCost, insurancePayout, cashPaid, unpaidCost, incomePauseMonths, rentalMonthlyLoss,
     card,
     wasInsured,
     effectiveCost,

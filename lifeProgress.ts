@@ -229,8 +229,16 @@ export function eliminatePlayer(
   );
 
   const finalScore = calculateLifeScore(player, deathAge, gs.monthsPerRound);
+  const estate = finalScore.insuranceEstate;
+  if (estate) {
+    const summary = `壽險身故保障 $${estate.benefit.toLocaleString()}；負債 $${estate.debt.toLocaleString()}；家庭／傳承淨額 $${Math.round(estate.netEstate).toLocaleString()}。給付只列傳承結算，不讓角色復活，也不補發生前收入。`;
+    emitToRoom(gs.gameId, 'insuranceEstateSettled', {playerId:player.id, playerName:player.name, description:summary, ...estate});
+  }
   const deathEvent = player.eventLog[player.eventLog.length - 1];
-  if (deathEvent?.type === 'death') deathEvent.meta = { ...deathEvent.meta, finalScore };
+  if (deathEvent?.type === 'death') {
+    deathEvent.meta = { ...deathEvent.meta, finalScore, insuranceEstate: estate };
+    if (estate) deathEvent.description += `；壽險保障 $${estate.benefit.toLocaleString()}，傳承淨額 $${Math.round(estate.netEstate).toLocaleString()}；累計保費 $${Math.round(estate.premiumsPaid).toLocaleString()}、啟動費 $${estate.activationPaid.toLocaleString()}、事件理賠 $${Math.round(estate.claimsPaid).toLocaleString()}。未出險不代表保障沒有價值。`;
+  }
   handlePlayerDeath(player, gs);
 
   emitToRoom(gs.gameId, 'playerFinalScore', {

@@ -414,6 +414,10 @@ export default function DisplayScreen() {
     s.on('playerFinalScore', (p: { playerName: string; deathAge: number; score: { total: number } }) => {
       addTicker(`⚰️ ${p.playerName} 在 ${p.deathAge} 歲結束人生，得 ${Math.round(p.score.total)} 分`);
     });
+    s.on('insuranceEstateSettled', (p: {playerName: string; description: string}) => {
+      addTicker(`${p.playerName}：${p.description}`);
+      showCenterEvent({playerName:p.playerName,cellName:'家庭與壽險結算',message:p.description});
+    });
     s.on('globalEventAnnouncement', (p: { event: { title: string; description: string } }) => {
       addTicker(`📢 全局事件：${p.event.title} — ${p.event.description}`);
     });
@@ -719,16 +723,16 @@ export default function DisplayScreen() {
           {!sidebarCollapsed && (
           <div className="w-52 xl:w-60 flex-shrink-0 flex flex-col gap-3 p-3 overflow-y-auto border-r border-gray-800">
 
-            {/* 開局顯示 QR；進行中改成全場回合焦點 */}
-            {isSetupPhase ? (
-              <div className="flex flex-col items-center gap-2 bg-gray-900 rounded-xl p-3">
-                <div className="bg-white rounded-lg p-2">
-                  <QRCodeSVG value={playerUrl} size={150} />
+            {/* 房間入口常駐於可收合側欄；開局後供原玩家續玩，不開放中途新增角色。 */}
+              <div className="flex flex-col items-center gap-2 bg-gray-900 rounded-xl p-3" aria-label="加入或返回房間 QR Code">
+                <div className="bg-white rounded-lg p-1">
+                  <QRCodeSVG value={playerUrl} size={150} marginSize={4} title={`掃碼加入或返回房間 ${gameState.roomId}`} />
                 </div>
-                <p className="text-xs text-gray-400">掃碼加入遊戲</p>
+                <p className="text-sm font-bold text-white">{isSetupPhase ? '掃碼加入遊戲' : '掃碼返回原房間'}</p>
                 <p className="font-mono text-2xl font-bold text-yellow-300 tracking-[0.3em]">{gameState.roomId}</p>
+                {!isSetupPhase && <p className="text-xs text-gray-300 text-center">用原本的 LINE 帳號續玩。遊戲開始後不開放新玩家加入。</p>}
               </div>
-            ) : (
+            {!isSetupPhase && (
               <div
                 className="rounded-2xl border-2 bg-gradient-to-br from-indigo-950 to-gray-900 p-4 shadow-xl"
                 style={{ borderColor: COLORS[currentTurnColorIndex % COLORS.length] }}
@@ -832,6 +836,10 @@ export default function DisplayScreen() {
                 <p className="mt-5 text-xl text-gray-300">遊戲模擬數值，不保證獲利；由玩家在手機選擇，主持人控制收束。</p>
               </section>
             ) : <GameBoard
+              dicePreview={gameState.boardJourneyEnabled && currentTurnPlayer?.isAlive && !currentTurnPlayer.isBedridden && !gameState.isPaused && !gameState.decisionPhase && !gameState.facilitatorScene && !diceAnim && !boardSettling && !activeTurnIntro && !centerEvent && gameState.gamePhase !== 'GameOver' ? {
+                position: currentTurnPlayer.isInFastTrack ? currentTurnPlayer.fastTrackPosition : currentTurnPlayer.currentPosition,
+                outer: currentTurnPlayer.isInFastTrack, bonus: currentTurnPlayer.bonusDice ?? 0, direction: currentTurnPlayer.boardDirection,
+              } : undefined}
               players={boardPlayers}
               currentTurnPlayerId={gameState.currentPlayerTurnId}
               focusPlayerId={boardFocusPlayerId}

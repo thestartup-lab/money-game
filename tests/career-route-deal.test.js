@@ -1,0 +1,23 @@
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const {fork}=require('node:child_process');
+const {io}=require('socket.io-client');
+const wait=(s,e,p=()=>true)=>new Promise((resolve,reject)=>{const timer=setTimeout(()=>{s.off(e,f);reject(Error(e));},10000);const f=d=>{if(p(d)){clearTimeout(timer);s.off(e,f);resolve(d);}};s.on(e,f);});
+const send=(s,e,data,event,p)=>{const result=wait(s,event,p);s.emit(e,data);return result;};
+test('career cooperation landing opens real deal instead of generic relationship or lucky reward',{timeout:20000},async t=>{
+  const child=fork(require.resolve('./helpers/board-v6-server.cjs'),[],{env:{...process.env,PORT:'3419',NODE_ENV:'test'},silent:true});
+  const sockets=[];t.after(()=>{sockets.forEach(s=>s.disconnect());child.kill();});
+  await wait(child,'message',m=>m.ready);
+  const connect=async()=>{const s=io('http://127.0.0.1:3419',{transports:['websocket']});sockets.push(s);await wait(s,'connect');return s;};
+  const host=await connect(),player=await connect();
+  await send(host,'createRoom',{roomId:'BOARD6'},'roomCreated');
+  const session=await send(player,'playerJoin',{roomCode:'BOARD6',playerName:'交易測試'},'playerSession');
+  await send(host,'startGame',{force:true},'gameStateUpdate',g=>g.gamePhase==='RatRace');
+  const positioned=wait(child,'message',m=>m.request==='positioned');
+  child.send({request:'positioned',action:'position',id:session.playerId,position:5});await positioned;
+  const reading=await send(player,'playerRoll',{diceCount:1},'gameStateUpdate',g=>g.decisionPhase?.kind==='reading');
+  assert.match(reading.decisionPhase.title,/合作邀約/);
+  const cards=wait(player,'dealCardsDrawn');
+  host.emit('continueDecisionPhase',{phaseId:reading.decisionPhase.id});
+  assert.ok((await cards).cards.length>0);
+});

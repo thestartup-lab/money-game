@@ -1,0 +1,27 @@
+/* Use the panel's available width, not the viewport (admin is a narrow column). */
+.round-payday { min-width: 0; }
+.round-payday-scroll { max-height: 55vh; overflow-y: auto; }
+.round-payday-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: 16px;
+}
+.round-payday-card { min-width: 0; overflow-wrap: anywhere; }
+.round-payday-card h3 { overflow-wrap: anywhere; }
+.round-payday-card dl > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding-block: 4px;
+}
+.round-payday-card dt { flex: 1 0 8em; max-width: 100%; }
+.round-payday-card dd {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  margin-left: auto;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}

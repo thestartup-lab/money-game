@@ -10,6 +10,7 @@ process.on('message', async m=>{
   try{
     const gs=server.rooms.get('BOARD6');let result=true;
     if(m.action==='position'){const p=gs.players.get(m.id);p.currentPosition=m.position;p.boardDirection=m.direction;}
+    if(m.action==='insurance'){const p=gs.players.get(m.id);p.insurance.hasMedicalInsurance=true;const cards=require('../../dist/gameCards');for(const pool of Object.values(cards.CRISIS_POOL_BY_STAGE))pool.splice(0,pool.length,'cr-011');}
     if(m.action==='passService'){const p=gs.players.get(m.id);p.currentPosition=19;result=await require('../../dist/boardJourney').moveBoardJourney({},gs,p,2);}
     if(m.action==='planning'){gs.turnNumber=3;gs.lastPaidRound=3;server.continueAfterTurnAdvance(gs);}
     if(m.action==='outer'){const p=gs.players.get(m.id);p.isInFastTrack=true;require('../../dist/bucketList').assignBucketList(p,gs);}

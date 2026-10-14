@@ -466,6 +466,9 @@ export class Player {
   assets: Asset[];
   liabilities: Liability[];
   insurance: InsuranceState;
+  insurancePremiumsPaid = 0;
+  insuranceActivationPaid = 0;
+  insuranceClaimsPaid = 0;
   numberOfChildren: number;
   /** 收到的祝賀次數；每 5 次 NT +1 */
   congratulationsReceived: number;

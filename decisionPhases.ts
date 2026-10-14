@@ -250,7 +250,24 @@ export async function applyCrisisWithRescue(
         ? `💀 ${player.name} 自救後現金 $${player.cash.toLocaleString()} 仍不足 $${after.effectiveCost.toLocaleString()}。`
         : `✅ ${player.name} 自救成功，現金 $${player.cash.toLocaleString()} 足以支付 $${after.effectiveCost.toLocaleString()}。`);
   }
-  return applyCrisisCard(player, card);
+  const result = applyCrisisCard(player, card);
+  const fmt = (n: number) => `$${Math.round(n).toLocaleString()}`;
+  const coverage = card.requiredInsurance === 'hasMedicalInsurance' ? '醫療險' : card.requiredInsurance === 'hasPropertyInsurance' ? '財產險' : '無對應保障';
+  const uncovered = [
+    result.turnsLost ? `仍需休養／處理 ${result.turnsLost} 回合` : '',
+    result.incomePauseMonths ? `工作收入暫停 ${result.incomePauseMonths} 個月（不含資產收入）` : '',
+    result.rentalMonthlyLoss ? `租金中斷 ${card.rentalLossMonths} 個月，每月 ${fmt(result.rentalMonthlyLoss)}，以等額支出列帳` : '',
+    card.recurringExpense ? `${card.recurringExpense.label}的持續費用另列` : '',
+  ].filter(Boolean).join('；') || '本卡無其他持續損失';
+  emitCellEvent(socket, gs.gameId, player.name, `${card.title}・保障結算`, [
+    `事件費用（依本次狀況）：${fmt(result.uninsuredCost)}`,
+    `${coverage}理賠：${fmt(result.insurancePayout)}${result.wasInsured ? '' : '（未持有本次對應保障）'}`,
+    `應自付：${fmt(result.effectiveCost)}；本次現金支付：${fmt(result.cashPaid)}`,
+    result.unpaidCost > 0 ? (result.deathTriggered ? `未支付 ${fmt(result.unpaidCost)}，進入身故結算` : `未付 ${fmt(result.unpaidCost)} 列為待清償費用，不會憑空消失`) : '',
+    `未承保影響：${uncovered}`,
+    '遊戲模擬保障，並非真實保單條款；理賠抵費用，不重複存入現金。',
+  ].filter(Boolean).join('\n'));
+  return result;
 }
 
 /** 外圈致死疾病卡：無保險時費用改為淨值的 30%，下限 $900,000。 */

@@ -115,7 +115,7 @@ export function buildActionInfo(p: Player, gs?: GameState): object {
     CRISIS_EVENTS.filter((c) => c.requiredInsurance === type).map((c) => ({ title: c.title, baseCost: c.baseCost, insuredCost: c.insuredCost, canCauseDeath: c.canCauseDeath }));
   const insurance = {
     medical: { label: '醫療險', activationFee: cfg.INSURANCE_ACTIVATION_FEE.medical, basePremium: MEDICAL_INSURANCE_PREMIUM, monthlyPremium: Math.round(MEDICAL_INSURANCE_PREMIUM * premiumMult), deduction: cfg.MEDICAL_INSURANCE_DEDUCTION, covers: coversFor('hasMedicalInsurance'), extra: '外圈疾病危機也適用' },
-    life: { label: '壽險', activationFee: cfg.INSURANCE_ACTIVATION_FEE.life, basePremium: LIFE_INSURANCE_PREMIUM, monthlyPremium: Math.round(LIFE_INSURANCE_PREMIUM * premiumMult), deduction: cfg.LIFE_INSURANCE_DEDUCTION, covers: coversFor('hasLifeInsurance'), extra: '身故時遺產不扣負債（傳承分）' },
+    life: { label: '壽險', activationFee: cfg.INSURANCE_ACTIVATION_FEE.life, basePremium: LIFE_INSURANCE_PREMIUM, monthlyPremium: Math.round(LIFE_INSURANCE_PREMIUM * premiumMult), deduction: cfg.LIFE_INSURANCE_DEDUCTION, covers: coversFor('hasLifeInsurance'), extra: `遊戲模擬：身故保障 $${cfg.LIFE_INSURANCE_DEATH_BENEFIT.toLocaleString()} 列入家庭／傳承結算，仍扣除負債。不抵醫療費、不保證免債或復活；存活結算僅為保障試算。` },
     property: { label: '財產險', activationFee: cfg.INSURANCE_ACTIVATION_FEE.property, basePremium: PROPERTY_INSURANCE_PREMIUM, monthlyPremium: Math.round(PROPERTY_INSURANCE_PREMIUM * premiumMult), deduction: cfg.PROPERTY_INSURANCE_DEDUCTION, covers: coversFor('hasPropertyInsurance'), extra: '' },
   };
   const rate = getLoanRate(p.creditScore);
@@ -170,7 +170,7 @@ export function buildSalaryItems(p: Player): { label: string; note?: string }[] 
   if (habit && habit.salaryMultiplier !== 1) items.push({ label: `× 健康習慣「${habit.label}」${habit.salaryMultiplier}`, note: habit.desc });
   if (p.salaryBonus) items.push({ label: `+ 永久加薪 $${p.salaryBonus.toLocaleString()}`, note: '決策回聲等事件' });
   if (p.salaryMultiplierMonths > 0) items.push({ label: `× 暫時倍率 ${p.salaryMultiplierPending}（剩 ${p.salaryMultiplierMonths} 個月）`, note: '升遷 ×1.2／職場霸凌 ×0.9' });
-  if (p.downsizingTurnsLeft > 0) items.push({ label: `裁員中：薪資 $0，剩 ${p.downsizingTurnsLeft} 個月`, note: '職涯轉折格；月數依年齡，SK ≥ 60 減半' });
+  if (p.downsizingTurnsLeft > 0) items.push({ label: `工作收入暫停：$0，剩 ${p.downsizingTurnsLeft} 個月`, note: '可能因裁員或事件暫停工作；不影響資產被動收入' });
   items.push({ label: `＝ 目前月薪 $${p.salary.toLocaleString()}`, note: `另扣勞健保 ${Math.round(cfg.SOCIAL_INSURANCE_RATE * 100)}% = $${p.socialInsurance.toLocaleString()}（列在支出）` });
   return items;
 }
@@ -207,7 +207,7 @@ export function serializePlayer(p: Player, gs: GameState): object {
   const incomeItems: { label: string; amount: number; note?: string }[] = [];
   const salaryLabel = p.retirementStatus === 'retired' ? '退休金' : p.retirementStatus === 'consultant' ? '顧問收入' : p.retirementStatus === 'founder' ? '薪資（已退休創業）' : `薪資（${p.profession.name}）`;
   incomeItems.push({ label: salaryLabel, amount: p.salary,
-    note: p.downsizingTurnsLeft > 0 ? `裁員中，剩 ${p.downsizingTurnsLeft} 個月`
+    note: p.downsizingTurnsLeft > 0 ? `工作收入暫停，剩 ${p.downsizingTurnsLeft} 個月`
       : p.salaryMultiplierMonths > 0 ? `薪資倍率 ×${p.salaryMultiplierPending}，剩 ${p.salaryMultiplierMonths} 個月` : undefined });
   const positiveAssets = p.assets.filter((a) => a.monthlyCashflow > 0);
   for (const a of positiveAssets) {
@@ -324,6 +324,9 @@ export function serializePlayer(p: Player, gs: GameState): object {
           ? factor * (entry.effect.multiplier ?? 1) : factor, 1)) : asset.monthlyCashflow })),
     liabilities: p.liabilities,
     insurance: p.insurance,
+    insurancePremiumsPaid: p.insurancePremiumsPaid ?? 0,
+    insuranceActivationPaid: p.insuranceActivationPaid ?? 0,
+    insuranceClaimsPaid: p.insuranceClaimsPaid ?? 0,
     numberOfChildren: p.numberOfChildren,
     congratulationsReceived: p.congratulationsReceived,
     paydayCount: p.paydayCount,
@@ -334,6 +337,7 @@ export function serializePlayer(p: Player, gs: GameState): object {
     turnsToSkip: p.turnsToSkip,
     downsizingTurnsLeft: p.downsizingTurnsLeft,
     bonusDice: p.bonusDice,
+    boardDirection: p.boardDirection,
     creditScore: p.creditScore,
     socialClass: p.socialClass,
     growthStats: p.growthStats,

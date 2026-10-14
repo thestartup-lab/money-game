@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { GameState, Player, CareerOption } from '../../types/game';
 import EffectPreview from './EffectPreview';
+import CollapsePanel from './CollapsePanel';
 
 const fmt = (n: number) => Math.round(n).toLocaleString();
 const QUADRANT_LABEL: Record<string, string> = { E: 'E 受薪族', S: 'S 自僱者', B: 'B 企業主', I: 'I 投資者' };
@@ -35,11 +36,13 @@ export default function CareerStagePanel({ gameState, player, emit }: {
 
   if (request) {
     const position = player.careerQueuePosition ?? 1;
-    return <section className="mx-4 mb-3 rounded-2xl border-2 border-yellow-400 bg-slate-900 p-5 text-lg text-white" aria-live="polite">
+    return <section className="senior-career mx-4 mb-3 text-white" aria-label="轉職申請進度" aria-live="polite">
+      <CollapsePanel key="queued" title="🎯 轉職申請進度" summary={`已申請 ${request.professionName} · 等待主持人${position > 1 ? `（第 ${position} 位）` : ''}`}>
       <p className="font-black">🎯 已申請轉職：{request.professionName}</p>
       <p className="my-2 text-base text-gray-200">{position > 1 ? `排在第 ${position} 位，` : ''}等主持人在大螢幕開啟「轉職舞台」，你再確認代價；目前沒有扣款，職業也還沒變。</p>
       <p className="mb-3 text-sm text-yellow-200">提醒主持人：後台「🎯 等待轉職」區按「開啟轉職舞台」（要等目前回合、決策與人生規劃結束）。</p>
       <button className={button} onClick={() => emit('cancelCareerRequest', { requestId: request.id })}>撤回申請</button>
+      </CollapsePanel>
     </section>;
   }
 
@@ -50,9 +53,8 @@ export default function CareerStagePanel({ gameState, player, emit }: {
   const previewBlocked = blocked || (preview?.skillGap ? `SK 還差 ${preview.skillGap}` : null)
     || (preview?.canAfford === false ? '現金不足' : null);
 
-  return <section className="mx-4 mb-3 rounded-2xl border-2 border-yellow-400 bg-slate-900 p-4 text-white" aria-label="申請轉職">
-    <h3 className="text-xl font-black text-yellow-200">🎯 隨時申請轉職</h3>
-    <p className="mt-2 text-lg">目前 SK {player.stats.careerSkill}，各職業門檻不同。</p>
+  return <section className="senior-career mx-4 mb-3 text-white" aria-label="申請轉職">
+    <CollapsePanel key="browse" title="🎯 申請轉職" summary={`目前 SK ${player.stats.careerSkill} · ${blocked || '展開查看職業與條件'}`}>
     {blocked ? (
       <p className="mt-2 rounded-lg bg-red-950 px-3 py-2 text-base text-red-200">目前不能申請：{blocked}</p>
     ) : (
@@ -78,12 +80,12 @@ export default function CareerStagePanel({ gameState, player, emit }: {
           onConfirm={() => { emit('requestCareerChange', { newProfessionId: preview.id }); setPreviewId(null); }} />
       </div>
     )}
-    <div className="mt-3 flex gap-1">
+    <div className="senior-career-filters mt-3 grid grid-cols-5 gap-1" aria-label="職業分類">
       {(['all', 'E', 'S', 'B', 'I'] as const).map((q) => (
-        <button key={q} type="button" onClick={() => setFilter(q)} className={`flex-1 rounded-lg py-1 text-sm font-bold ${filter === q ? 'bg-yellow-500 text-black' : 'bg-gray-800 text-gray-200'}`}>{q === 'all' ? '全部' : q}</button>
+        <button key={q} type="button" aria-pressed={filter === q} onClick={() => setFilter(q)} className={`rounded-lg py-2 text-sm font-bold ${filter === q ? 'bg-yellow-500 text-black' : 'bg-gray-800 text-gray-200'}`}>{({all: '全部', E: '受薪', S: '自僱', B: '企業', I: '投資'})[q]}</button>
       ))}
     </div>
-    <div className="mt-2 max-h-72 space-y-2 overflow-y-auto pr-1">
+    <div className="mt-2 space-y-2">
       {options.map((o) => (
         <button key={o.id} type="button" onClick={() => setPreviewId(o.id)}
           className={`w-full rounded-xl border p-3 text-left ${previewId === o.id ? 'border-yellow-400 bg-yellow-900/40' : o.canAfford === false ? 'border-gray-700 bg-gray-800/60' : 'border-gray-600 bg-gray-800'}`}>
@@ -96,5 +98,6 @@ export default function CareerStagePanel({ gameState, player, emit }: {
         </button>
       ))}
     </div>
+    </CollapsePanel>
   </section>;
 }

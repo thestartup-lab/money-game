@@ -1,6 +1,8 @@
 /** 玩家落在棋盤格子時的處理：內圈與外圈每一種格子 */
 import { Socket } from 'socket.io';
 import { handleBoardAction } from './boardActions';
+import { INNER_NODES } from './frontend/src/boardLayout';
+import { crisisFitsPlayer, relationshipForPlayer, canBeLaidOff } from './eventEligibility';
 import { GameState, Player, AssetType } from './gameDataModels';
 import { getLayoffMonths } from './gameLogic';
 import { getLoanLimit } from './gameConfig';
@@ -253,13 +255,15 @@ export async function handleLandingSquare(
       }
       case FastTrackSquareType.Crisis: {
         const { DISEASE_CRISIS_EVENTS } = require('./gameCards');
-        const pool = DISEASE_CRISIS_EVENTS ?? [];
+        const pool = gs.boardJourneyEnabled
+          ? CRISIS_EVENTS.filter(c => ['cr-011','cr-012','cr-013','cr-014'].includes(c.id) && crisisFitsPlayer(player,c))
+          : DISEASE_CRISIS_EVENTS ?? [];
         if (pool.length > 0) {
           const c = scaleFastTrackCrisis(player, pool[Math.floor(Math.random() * pool.length)]);
           const _ftcCB = player.cash; const _ftcFB = player.monthlyCashflow; const _ftcNWB = calcNetWorth(player);
           const crisisResult = await applyCrisisWithRescue(socket, gs, player, c, 'FT 危機事件');
           emitCellEvent(socket, roomId, player.name, 'FT 危機事件',
-            `⚠️ 外圈危機：${c.title}！${crisisResult.wasInsured ? '保險豁免' : `現金 -$${crisisResult.effectiveCost.toLocaleString()}`}，跳過 ${crisisResult.turnsLost} 回合`);
+            `⚠️ 外圈危機：${c.title}！應自付 $${crisisResult.effectiveCost.toLocaleString()}，跳過 ${crisisResult.turnsLost} 回合；保障差額請見結算摘要。`);
           logPlayerEvent(player, gs, 'crisis', `外圈危機：${c.title}`, _ftcCB, _ftcFB, _ftcNWB, { cardId: c.id, cardTitle: c.title, deathTriggered: crisisResult.deathTriggered });
           if (crisisResult.deathTriggered) {
             eliminatePlayer(player, gs, 'fastTrackCrisis', `外圈危機「${c.title}」導致死亡`);
@@ -372,7 +376,8 @@ export async function handleLandingSquare(
   }
 
   // ── 內圈落點處理 ─────────────────────────────────────────
-  const squareType = getSquareType(player.currentPosition);
+  const squareType = gs.boardJourneyEnabled && INNER_NODES[player.currentPosition]?.[1] === 'cooperate'
+    ? SquareType.SmallDeal : getSquareType(player.currentPosition);
 
   switch (squareType) {
     case SquareType.Payday:
@@ -427,6 +432,11 @@ export async function handleLandingSquare(
         break;
       }
       const layoffMonths = Math.max(1, getLayoffMonths(player));
+      if (!canBeLaidOff(player)) {
+        // Self-employed/business/investor careers do not have an employer who can lay them off.
+        emitCellEvent(socket, roomId, player.name, '職涯轉折', '你不是受僱者，本次公司裁員不適用；事業與投資風險由對應事件處理。');
+        break;
+      }
       applyDownsizingCard(player, {
         id: 'ds-default',
         title: '裁員',
@@ -488,7 +498,7 @@ export async function handleLandingSquare(
 
       // 機運卡分支：小交易格 30% 機率改抽機運卡（一次性現金入帳，無需玩家決策）
       // 用來補足早期玩家「只有薪水」的進現金管道
-      if (squareType === SquareType.SmallDeal && Math.random() < 0.3) {
+      if (!gs.boardJourneyEnabled && squareType === SquareType.SmallDeal && Math.random() < 0.3) {
         const lucky = LUCKY_CARDS[Math.floor(Math.random() * LUCKY_CARDS.length)];
         const _lkCB = player.cash;
         const _lkFB = player.monthlyCashflow;
@@ -779,8 +789,10 @@ export async function handleLandingSquare(
       }
 
       const stagePool = CRISIS_POOL_BY_STAGE[stage];
-      const stageCards = CRISIS_EVENTS.filter((c) => stagePool.includes(c.id));
-      const eligibleCards = stageCards.length > 0 ? stageCards : CRISIS_EVENTS;
+      const identityCards = CRISIS_EVENTS.filter(c => crisisFitsPlayer(player, c));
+      const stageCards = identityCards.filter((c) => stagePool.includes(c.id));
+      const eligibleCards = stageCards.length > 0 ? stageCards : identityCards;
+      if (!eligibleCards.length) break;
       const card = eligibleCards[Math.floor(Math.random() * eligibleCards.length)];
 
       emitCellEvent(socket, roomId, player.name, '危機事件', `⚠️ 危機來臨：${card.title}！`);
@@ -808,7 +820,7 @@ export async function handleLandingSquare(
       const _crCB = player.cash; const _crFB = player.monthlyCashflow; const _crNWB = calcNetWorth(player);
       const result = await applyCrisisWithRescue(socket, gs, player, card, '危機事件');
       emitToRoom(roomId, 'cardApplied', { playerId: player.id, squareType, effect: result });
-      logPlayerEvent(player, gs, 'crisis', `危機事件：${card.title}`, _crCB, _crFB, _crNWB, { cardId: card.id, cardTitle: card.title, deathTriggered: result.deathTriggered });
+      logPlayerEvent(player, gs, 'crisis', `危機事件：${card.title}；費用 $${result.uninsuredCost.toLocaleString()}、理賠 $${result.insurancePayout.toLocaleString()}、應自付 $${result.effectiveCost.toLocaleString()}`, _crCB, _crFB, _crNWB, { cardId: card.id, cardTitle: card.title, deathTriggered: result.deathTriggered, insuranceOutcome: result });
 
       if (result.deathTriggered) {
         const { deathAge, finalScore } = eliminatePlayer(
@@ -824,7 +836,7 @@ export async function handleLandingSquare(
     }
 
     case SquareType.Relationship: {
-      const relCard = RELATIONSHIP_EVENTS[Math.floor(Math.random() * RELATIONSHIP_EVENTS.length)];
+      const relCard = relationshipForPlayer(player, RELATIONSHIP_EVENTS[Math.floor(Math.random() * RELATIONSHIP_EVENTS.length)]);
 
       if (relCard.effect.triggerMarriageWindow && !player.isMarried) {
         emitCellEvent(socket, roomId, player.name, '人際關係', `🤝 ${relCard.title}：${relCard.description}`);

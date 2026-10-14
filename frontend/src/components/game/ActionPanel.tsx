@@ -344,6 +344,8 @@ export default function ActionPanel({
       {!isGameOver && (
         <div className="card">
           <p className="text-xs text-gray-400 mb-2">保險</p>
+          <p className="mb-3 text-sm text-gray-300">累計保費 ${fmt(player.insurancePremiumsPaid ?? 0)}、啟動費 ${fmt(player.insuranceActivationPaid ?? 0)}、事件理賠 ${fmt(player.insuranceClaimsPaid ?? 0)}。未出險不代表保障沒有價值。</p>
+          <p className="mb-3 text-sm text-gray-300">遊戲模擬：醫療險分攤醫療費，不補工作收入；財產險分攤承保修繕，不補租金中斷；壽險只用於身故後家庭／傳承結算。並非真實保單條款。</p>
 
           {/* 確認面板 */}
           {insuranceConfirm ? (
@@ -360,7 +362,7 @@ export default function ActionPanel({
                     <span className="text-red-300">-${fmt(ins.monthlyPremium)}{info.premiumMultiplier !== 1 ? ` （×${info.premiumMultiplier}）` : ''}</span>
                   </div>
                   <div className="text-sm">
-                    <span className="text-gray-400">抵免的危機</span>
+                    <span className="text-gray-400">費用範例：基準費用 → 有保障自付額（實際依事件狀況）</span>
                     <ul className="mt-0.5 space-y-0.5">
                       {ins.covers.map((c) => <li key={c.title} className="flex justify-between text-xs"><span className="text-gray-200">{c.title}{c.canCauseDeath ? '（可致死）' : ''}</span><span className="text-emerald-300">${fmt(c.baseCost)} → ${fmt(c.insuredCost)}</span></li>)}
                     </ul>

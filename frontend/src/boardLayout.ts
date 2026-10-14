@@ -31,3 +31,22 @@ export function nextInnerNode(position: number, direction: 'career' | 'life' = '
   if (position === 16 || position === 19) return 20;
   return (position + 1) % 24;
 }
+
+/** All reachable destinations, not probabilities or recommendations. Unchosen forks include both paths. */
+export function reachableDiceCells(position: number, outer: boolean, dice: number, direction?: 'career' | 'life'): number[] {
+  let frontier = new Set([position]);
+  const result = new Set<number>();
+  for (let step = 1; step <= dice * 6; step++) {
+    const next = new Set<number>();
+    for (const cell of frontier) {
+      if (outer) next.add((cell + 1) % OUTER_NODES.length);
+      else if (cell === 3 || cell === 13) {
+        const choices = step === 1 && direction ? [direction] : ['career', 'life'] as const;
+        for (const choice of choices) next.add(nextInnerNode(cell, choice));
+      } else next.add(nextInnerNode(cell));
+    }
+    frontier = next;
+    if (step >= dice) for (const cell of frontier) result.add(cell);
+  }
+  return [...result].sort((a,b) => a-b);
+}

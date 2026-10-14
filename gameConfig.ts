@@ -1018,6 +1018,9 @@ export const EDUCATION_LOAN_MONTHLY = 9_000;
 /** 選擇「繼續進修」後初始 FQ 加成（在成長點數映射基礎上額外加） */
 export const EDUCATION_FQ_BONUS = 1;
 
+/** 遊戲模擬：壽險身故給付只計入傳承，不作為生前可用現金。 */
+export const LIFE_INSURANCE_DEATH_BENEFIT = 1_000_000;
+
 // ============================================================
 // 婚禮禮金 / 添丁紅包（一次性現金入帳）
 // 補充早期玩家除了薪水之外的進現金管道。

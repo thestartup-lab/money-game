@@ -159,6 +159,9 @@ export interface Player {
   assets: Asset[];
   liabilities: Liability[];
   insurance: InsuranceState;
+  insurancePremiumsPaid?: number;
+  insuranceActivationPaid?: number;
+  insuranceClaimsPaid?: number;
   numberOfChildren: number;
   paydayCount: number;
   stats: PlayerStats;
@@ -166,6 +169,7 @@ export interface Player {
   turnsToSkip: number;
   downsizingTurnsLeft: number;
   bonusDice: number;
+  boardDirection?: 'career' | 'life';
   creditScore: number;
   socialClass: SocialClass;
   growthStats: { academic: number; health: number; social: number; resource: number };
