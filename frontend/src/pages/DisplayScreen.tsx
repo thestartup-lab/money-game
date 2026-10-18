@@ -19,6 +19,7 @@ import TurnIntroOverlay, { type TurnIntroData } from '../components/game/TurnInt
 import FacilitatorSceneOverlay from '../components/game/FacilitatorSceneOverlay';
 import BoardReadingPanel from '../components/game/BoardReadingPanel';
 import type { RoundPaydayPayout } from '../components/game/RoundPaydayBanner';
+import DisplayAudio from '../components/game/DisplayAudio';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 const fmt = (n: number) => n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
@@ -606,6 +607,12 @@ export default function DisplayScreen() {
 
       {/* ══ 頂部全場狀態橫幅 ══ */}
       <div className="flex items-center justify-between px-6 py-3 bg-gray-900 border-b border-gray-700 flex-shrink-0">
+        <DisplayAudio
+          active={connected && !manualPause}
+          mood={gameState.gamePhase === 'GameOver' ? 'review' : gameState.decisionPhase || gameState.facilitatorScene ? 'decision' : isSetupPhase ? 'lobby' : currentTurnPlayer?.isInFastTrack ? 'outer' : 'journey'}
+          cue={diceAnim ? 'dice' : activeTurnIntro ? 'turn' : centerEvent?.isMilestone || gameState.gamePhase === 'GameOver' ? 'milestone' : showPaydayOverlay || gameState.decisionPhase?.settlement ? 'settlement' : 'result'}
+          cueKey={diceAnim ? `dice:${diceAnim.key}` : activeTurnIntro ? `turn:${activeTurnIntro.key}` : centerEvent ? `event:${gameState.turnNumber}:${JSON.stringify(centerEvent)}` : showPaydayOverlay ? `payday:${gameState.globalPaydayNumber}` : gameState.decisionPhase?.kind === 'reading' ? `reading:${gameState.decisionPhase.id}` : gameState.gamePhase === 'GameOver' ? `end:${gameState.roomId}:${gameState.turnNumber}` : ''}
+        />
 
         {/* 左：標題 + 房間 + 階段 */}
         <div className="flex items-center gap-3 min-w-0">
