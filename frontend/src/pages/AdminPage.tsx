@@ -10,6 +10,7 @@ import ClassicReviewLibrary from '../components/analysis/ClassicReviewLibrary';
 import FacilitatorControlPanel from '../components/game/FacilitatorControlPanel';
 import BoardReadingPanel from '../components/game/BoardReadingPanel';
 import LoginPolicyPanel from '../components/game/LoginPolicyPanel';
+import HostAudioPanel from '../components/game/HostAudioPanel';
 import WorldEventControlPanel, { type AdaptiveDirectorStatus } from '../components/game/WorldEventControlPanel';
 import {
   readAdminCode,
@@ -565,6 +566,7 @@ export default function AdminPage() {
               </button>
             )}
             <LoginPolicyPanel gameState={gameState} emit={emit} />
+            <HostAudioPanel gameState={gameState} emit={emit} />
             {decisionPhase?.kind === 'reading' ? <BoardReadingPanel phase={decisionPhase} emit={emit} /> : null}
             {decisionPhase && decisionPhase.kind !== 'reading' && (
               <div className="admin-decision-panel rounded-2xl p-4 space-y-3">

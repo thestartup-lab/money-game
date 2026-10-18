@@ -6,6 +6,7 @@ import DecisionCountdown from '../components/game/DecisionCountdown';
 import FacilitatorControlPanel from '../components/game/FacilitatorControlPanel';
 import BoardReadingPanel from '../components/game/BoardReadingPanel';
 import LoginPolicyPanel from '../components/game/LoginPolicyPanel';
+import HostAudioPanel from '../components/game/HostAudioPanel';
 import WorldEventControlPanel, { type AdaptiveDirectorStatus } from '../components/game/WorldEventControlPanel';
 import {
   readAdminCode,
@@ -364,6 +365,7 @@ export default function HostControlPage() {
         </section>
 
         <LoginPolicyPanel gameState={gameState} emit={emit} />
+        <HostAudioPanel gameState={gameState} emit={emit} />
         {decisionPhase?.kind === 'reading' ? <BoardReadingPanel phase={decisionPhase} emit={emit} /> : null}
         {decisionPhase && decisionPhase.kind !== 'reading' ? (
           <section className="host-decision-card" aria-label="決策倒數控制">

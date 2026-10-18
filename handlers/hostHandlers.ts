@@ -14,6 +14,24 @@ import {
 } from '../socketServer';
 
 export function registerHostHandlers(socket: Socket, onSafe: OnSafe): void {
+  onSafe('setRoomAudio', (payload: unknown) => {
+    const gs = getRoomState(socket);
+    if (!gs || !isRoomAdmin(socket, gs)) {
+      emitClient(socket, 'error', { message: '只有本房主持人可以控制大螢幕聲音。' }); return;
+    }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      emitClient(socket, 'error', { message: '音訊設定格式不正確。' }); return;
+    }
+    const patch = payload as Record<string, unknown>;
+    const keys = Object.keys(patch);
+    if (!keys.length || keys.some(k => !['enabled', 'music', 'effects'].includes(k))
+      || ('enabled' in patch && typeof patch.enabled !== 'boolean')
+      || ['music', 'effects'].some(k => k in patch && (typeof patch[k] !== 'number' || !Number.isFinite(patch[k]) || Number(patch[k]) < 0 || Number(patch[k]) > 100))) {
+      emitClient(socket, 'error', { message: '音量必須介於 0 到 100，開關必須是布林值。' }); return;
+    }
+    gs.audioSettings = { ...gs.audioSettings, ...patch };
+    emitToRoom(gs.gameId, 'gameStateUpdate', serializeGameState(gs));
+  });
 
   // ----------------------------------------------------------
   // 落格說明自動放行秒數 (setReadingAutoContinue) — 0 表示每次都等主持人

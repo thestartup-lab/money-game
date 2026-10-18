@@ -10,7 +10,8 @@ export function normalizeAudioSettings(value: unknown): AudioSettings {
 
 // Original pentatonic score, generated locally; no recordings, tracking or remote assets.
 const CHORDS = [[48, 55, 60, 64], [45, 52, 57, 60], [41, 48, 53, 57], [43, 50, 55, 62]];
-const MELODY = [72, 0, 76, 79, 0, 76, 74, 0, 72, 0, 69, 72, 0, 76, 0, 74];
+const MELODY = [72, 76, 79, 0, 76, 74, 72, 0, 69, 72, 76, 79, 76, 0, 74, 72,
+  72, 77, 81, 0, 79, 77, 76, 72, 74, 79, 83, 0, 81, 79, 74, 0];
 const CUES: Record<SoundCue, number[]> = {
   turn: [67, 72], dice: [60, 65, 62, 69, 64, 72], result: [72, 76],
   milestone: [60, 64, 67, 72, 79], settlement: [67, 72, 76],
@@ -68,7 +69,8 @@ export class GameAudio {
       this.timer = undefined;
     } else if (!this.timer) {
       this.tick();
-      this.timer = setInterval(() => this.tick(), 650);
+      // 112 BPM, eighth-note pulse: light plucked melody with a bouncing bass.
+      this.timer = setInterval(() => this.tick(), 268);
     }
     // Stop queued notes when muted/hidden; returning never replays a backlog.
     if (!audible) {
@@ -95,9 +97,13 @@ export class GameAudio {
     const t = this.context.currentTime + 0.03;
     const chord = CHORDS[Math.floor(this.step / 8) % CHORDS.length];
     const shift = this.mood === 'outer' ? 5 : 0;
-    if (this.step % 8 === 0) chord.forEach(n => this.note(n + shift, t, 4.8, this.musicBus!, 0.12));
+    if (this.step % 8 === 0) chord.forEach(n => this.note(n + shift, t, 2.05, this.musicBus!, 0.08));
+    if (this.mood !== 'decision' && this.mood !== 'review' && this.step % 2 === 0) {
+      this.note(chord[this.step % 4 === 0 ? 0 : 1] - 12 + shift, t, 0.22, this.musicBus!, 0.22);
+      this.note(chord[2] + 12 + shift, t + 0.13, 0.13, this.musicBus!, 0.08, 'triangle');
+    }
     const melody = MELODY[this.step % MELODY.length];
-    if (melody && this.mood !== 'decision') this.note(melody + shift, t, 1.2, this.musicBus!, 0.15, 'triangle');
+    if (melody && this.mood !== 'decision' && (this.mood !== 'review' || this.step % 2 === 0)) this.note(melody + shift, t, 0.38, this.musicBus!, 0.15, 'triangle');
     this.step = (this.step + 1) % 32;
   }
   play(cue: SoundCue) {

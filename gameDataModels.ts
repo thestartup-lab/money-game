@@ -994,6 +994,7 @@ export class GameState {
   lastPaidRound = 0;
   /** 大螢幕復盤目前停在哪一步（主持人控制；大螢幕重新整理後可接續） */
   reviewView: ReviewViewState | null = null;
+  audioSettings: import('./frontend/src/audioSettings').RoomAudioSettings = { enabled: true, music: 25, effects: 45 };
   /** 已跑過「全體行動時間」的輪數（turnNumber）；每輪開始只跑一次 */
   /** 每輪開始是否開「全體行動時間」（主持人可關） */
   boardJourneyEnabled = true;

@@ -411,6 +411,7 @@ export function serializeGameState(gs: GameState): object {
     gameDurationMs: gs.gameDurationMs,
     remainingTimeMs: getRemainingActivityTimeMs(gs),
     isPaused: gs.pausedAt !== null,
+    audioSettings: gs.audioSettings,
     // 只有主持人手動暫停才為 true；決策階段與舞台事件的自動暫停不算
     isManuallyPaused: gs.pausedAt !== null && !gs.decisionPhase && !gs.facilitatorScene,
     readingAutoContinueMs: gs.boardJourneyEnabled ? 0 : gs.readingAutoContinueMs,

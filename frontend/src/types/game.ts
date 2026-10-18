@@ -275,6 +275,7 @@ export interface BucketGoalDetail {
 }
 
 export interface GameState {
+  audioSettings?: import('../audioSettings').RoomAudioSettings;
   boardJourneyEnabled?: boolean;
   lineLoginRequired?: boolean;
   lineBrand?: LineBrand;

@@ -608,6 +608,7 @@ export default function DisplayScreen() {
       {/* ══ 頂部全場狀態橫幅 ══ */}
       <div className="flex items-center justify-between px-6 py-3 bg-gray-900 border-b border-gray-700 flex-shrink-0">
         <DisplayAudio
+          remote={gameState.audioSettings}
           active={connected && !manualPause}
           mood={gameState.gamePhase === 'GameOver' ? 'review' : gameState.decisionPhase || gameState.facilitatorScene ? 'decision' : isSetupPhase ? 'lobby' : currentTurnPlayer?.isInFastTrack ? 'outer' : 'journey'}
           cue={diceAnim ? 'dice' : activeTurnIntro ? 'turn' : centerEvent?.isMilestone || gameState.gamePhase === 'GameOver' ? 'milestone' : showPaydayOverlay || gameState.decisionPhase?.settlement ? 'settlement' : 'result'}
